@@ -1,0 +1,67 @@
+iCRM - PostgreSQL version: what changed and how it was tested
+=============================================================
+
+This is the full project. It includes your latest code, the Mass Update
+feature and the speed changes, running 100% on PostgreSQL:
+  - no SQLite package (better-sqlite3 removed), no crm.db file
+  - no old-data import: it starts with a fresh, empty database and
+    creates all tables + the first login (admin / admin123) by itself
+  - unused Prisma packages removed too
+How to deploy: see DEPLOY-POSTGRESQL.md.
+
+HOW IT WORKS
+------------
+The app's ~200 route and service files were NOT rewritten. A small database
+layer (backend/pg/) gives them the same commands they already used
+(prepare / get / all / run / transaction), changes each query into
+PostgreSQL form and runs it on PostgreSQL. Dates, rounding, text sorting,
+blank values and error messages behave as before, so every screen keeps
+working the same way.
+
+NEW FILES
+  backend/pg/database.js           the database layer (same API as before)
+  backend/pg/worker.js             holds the PostgreSQL connection
+  backend/pg/translate.js          changes SQLite-style SQL into PostgreSQL SQL
+  backend/pg/compat.sql            SQLite date/number functions for PostgreSQL
+  backend/services/backupEngine.js backup download / restore (.json, .json.gz)
+  backend/.env.example             all settings explained
+  render.yaml                      Render blueprint (database + backend + disk)
+  deploy/hostinger/*               many customers on one VPS (PM2, nginx, backups)
+  DEPLOY-POSTGRESQL.md             step-by-step deploy guide
+
+CHANGED FILES
+  backend/db.js                    uses PostgreSQL (DATABASE_URL)
+  backend/dataDir.js               only handles the uploads folder now
+  backend/server.js                gzip compression (from before)
+  backend/routes/backup.js         backups are .json; restore takes .json/.gz
+  backend/services/relatedActivity.js, backend/db-phase39-documents.js
+                                   table checks use PostgreSQL's catalog
+  backend/services/workflowAutomation.js
+                                   a number field cleared to empty is now also
+                                   written to the change history (small bug fix)
+  backend/package.json + lock      adds "pg"; removes better-sqlite3 and
+                                   the unused prisma / @prisma/client
+  frontend/src/api.js              backup file name is .json
+  frontend/src/pages/Settings.jsx  backup/restore wording; restore takes .json/.gz
+  (plus the speed changes and Mass Update files from the previous zip)
+
+TESTS RUN (results compared against the old version of the CRM)
+  - Fresh start: same 117 tables, same columns, same default data.
+  - Demo data (80,000+ values): same, apart from timestamps/passwords.
+  - 771 API screens/lists: same data; 0 error differences. A few lists
+    show records with equal sort values in a different order.
+  - 238 create/edit/delete steps across modules: same results.
+  - 911 report-builder layouts: same totals, 0 errors.
+  - CSV import (incl. new custom fields), mass update, saved filters,
+    search, dashboard + all 43 drill-downs in a real browser: working, 0 errors.
+  - Background jobs (SLA, overdue invoices, scheduled campaigns): same.
+  - Backup download -> restore: all data comes back the same.
+  - Database restart: the CRM reconnects by itself.
+  - Hostinger setup rehearsed: 2 customers on one server, separate data,
+    served through nginx.
+  - Final check: clean "npm ci" install from this zip + empty database.
+
+NOTES
+  - Blank number fields are stored as empty (NULL).
+  - Records with exactly the same sort value may appear in any order.
+  - About 7 ms of database time per page request on average.

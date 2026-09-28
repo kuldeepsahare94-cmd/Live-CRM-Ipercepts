@@ -1,0 +1,49 @@
+# Render Blueprint — PostgreSQL version.
+# In the Render dashboard: New -> Blueprint -> connect this repo -> it reads this file.
+# (If you created your services by hand instead, follow DEPLOY-POSTGRESQL.md.)
+#
+# ---------------------------------------------------------------------------
+# WHERE DATA LIVES
+# ---------------------------------------------------------------------------
+#   * Records (leads, accounts, invoices ...)  -> the PostgreSQL database below.
+#     DATABASE_URL is filled in automatically from it.
+#   * Uploaded files (documents, attachments)  -> the persistent disk, as before.
+#
+# FIRST DEPLOY: the backend creates all tables in the empty database by
+# itself and adds the first login: admin / admin123 (change it right away).
+#
+# The disk needs a paid instance type (starter). The free PostgreSQL plan is
+# fine for testing but expires after 30 days - use a paid plan for real data.
+# ---------------------------------------------------------------------------
+databases:
+  - name: icrm-db
+    databaseName: icrm
+    plan: free             # testing only; choose a paid plan for real data
+
+services:
+  - type: web
+    name: eduplace-crm-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    plan: starter          # needed for the disk (uploaded files)
+    disk:
+      name: crm-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: icrm-db
+          property: connectionString   # internal URL, same region, no SSL needed
+      - key: DATA_DIR
+        value: /var/data
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ASSISTANT_MODEL
+        value: claude-sonnet-5
+      - key: FRONTEND_URL
+        sync: false          # your Vercel URL

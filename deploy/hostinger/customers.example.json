@@ -1,0 +1,4 @@
+[
+  { "name": "acme",   "domain": "acme.yourcrm.in",   "port": 4101 },
+  { "name": "sunrise", "domain": "sunrise.yourcrm.in", "port": 4102 }
+]
