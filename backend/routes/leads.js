@@ -5,6 +5,7 @@ const { requirePermission } = require('../middleware/auth');
 const { fireEvent } = require('../services/whatsapp/workflowEngine');
 const { fireWorkflows } = require('../services/workflowAutomation');
 const { computeLeadScore } = require('../services/leadScore');
+const followUps = require('../services/followUps');
 
 router.get('/', requirePermission('leads', 'view'), (req, res) => {
   const { status, source, counselor, q } = req.query;
@@ -25,7 +26,11 @@ router.get('/:id', requirePermission('leads', 'view'), (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Not found' });
   const activities = db.prepare('SELECT * FROM lead_activities WHERE lead_id=? ORDER BY created_at DESC').all(req.params.id);
   const { score, label } = computeLeadScore(lead, activities.length);
-  res.json({ ...lead, activities, lead_score: score, lead_score_label: label });
+  // The open follow-up with its exact time (the follow_up_date column keeps
+  // the date, which is what lists and reports read).
+  let nextFollowUp = null;
+  try { nextFollowUp = followUps.present(followUps.openFor('leads', lead.id)); } catch { nextFollowUp = null; }
+  res.json({ ...lead, activities, lead_score: score, lead_score_label: label, next_follow_up: nextFollowUp });
 });
 
 router.post('/', requirePermission('leads', 'create'), (req, res) => {
@@ -47,6 +52,11 @@ router.post('/', requirePermission('leads', 'create'), (req, res) => {
   fireEvent('lead_created', { entityType: 'lead', entityId: lead.id, mobile: lead.mobile, fields: leadFields });
   if (lead.assigned_counselor) fireEvent('lead_assigned', { entityType: 'lead', entityId: lead.id, mobile: lead.mobile, fields: leadFields });
   if (lead.follow_up_date) fireEvent('follow_up_scheduled', { entityType: 'lead', entityId: lead.id, mobile: lead.mobile, fields: leadFields });
+  // A follow-up date given on create becomes a scheduled follow-up (with a
+  // reminder) straight away.
+  if (lead.follow_up_date) {
+    try { followUps.syncFromRecord('leads', lead.id, lead.follow_up_date, req.user?.id); } catch (e) { console.warn('[follow-ups]', e.message); }
+  }
   res.status(201).json(lead);
 });
 
@@ -69,9 +79,14 @@ router.put('/:id', requirePermission('leads', 'edit'), (req, res) => {
     db.prepare('INSERT INTO lead_activities (lead_id, type, note) VALUES (?,?,?)')
       .run(req.params.id, 'status_change', `${existing.status} → ${req.body.status}`);
   }
-  if (req.body.follow_up_date && req.body.follow_up_date !== existing.follow_up_date) {
-    db.prepare('INSERT INTO lead_activities (lead_id, type, note) VALUES (?,?,?)')
-      .run(req.params.id, 'schedule', `Follow-up scheduled for ${req.body.follow_up_date}`);
+  // A follow-up date changed on the record (edit form, bulk update, API) moves
+  // the scheduled follow-up and its reminder with it — or cancels it when the
+  // date is cleared. The follow-up service writes the activity-log line.
+  const followUpChanged = Object.prototype.hasOwnProperty.call(req.body, 'follow_up_date')
+    && String(req.body.follow_up_date || '') !== String(existing.follow_up_date || '');
+  if (followUpChanged) {
+    try { followUps.syncFromRecord('leads', Number(req.params.id), req.body.follow_up_date, req.user?.id); }
+    catch (e) { console.warn('[follow-ups]', e.message); }
   }
   const updated = db.prepare('SELECT * FROM leads WHERE id=?').get(req.params.id);
   const leadFields = { student_name: updated.student_name, mobile: updated.mobile, source: updated.source, city: updated.city, assigned_counselor: updated.assigned_counselor, status: updated.status, follow_up_date: updated.follow_up_date };

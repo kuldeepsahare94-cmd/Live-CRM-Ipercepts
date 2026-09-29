@@ -202,7 +202,7 @@ CREATE TABLE IF NOT EXISTS payments (
   payment_mode TEXT,
   transaction_number TEXT,
   status TEXT DEFAULT 'Pending',   -- Pending / Paid / Partial / Failed
-  receipt_institute TEXT,          -- 'A' | 'B' — which template was used for the receipt, once generated
+  receipt_institute TEXT,          -- legacy (Institute A/B receipt templates, removed); no longer written
   remarks TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
@@ -212,17 +212,6 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE INDEX IF NOT EXISTS idx_payments_admission ON payments(admission_id);
 CREATE INDEX IF NOT EXISTS idx_payments_student ON payments(student_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
-
--- Configurable receipt templates (admin panel editable) — placeholders until Kuldeep supplies real details
-CREATE TABLE IF NOT EXISTS receipt_templates (
-  id TEXT PRIMARY KEY,             -- 'A' | 'B'
-  institute_name TEXT,
-  logo_url TEXT,
-  address TEXT,
-  footer_text TEXT,
-  gst_details TEXT,
-  updated_at TEXT DEFAULT (datetime('now'))
-);
 
 -- ===== 6. Companies =====
 CREATE TABLE IF NOT EXISTS companies (
@@ -439,14 +428,6 @@ const insertOption = db.prepare('INSERT INTO master_options (list_type, label, s
 for (const [listType, labels] of Object.entries(seedOptions)) {
   const count = db.prepare('SELECT COUNT(*) c FROM master_options WHERE list_type=?').get(listType).c;
   if (count === 0) labels.forEach((label, i) => insertOption.run(listType, label, i));
-}
-
-// Seed placeholder receipt templates (Institute A / B) — Kuldeep will fill in real details later
-const receiptCount = db.prepare('SELECT COUNT(*) c FROM receipt_templates').get().c;
-if (receiptCount === 0) {
-  const insertReceipt = db.prepare(`INSERT INTO receipt_templates (id, institute_name, logo_url, address, footer_text, gst_details) VALUES (?,?,?,?,?,?)`);
-  insertReceipt.run('A', '[Institute A Name — configure in Settings]', '', '[Institute A Address]', '[Institute A Footer / Terms]', '[Institute A GSTIN]');
-  insertReceipt.run('B', '[Institute B Name — configure in Settings]', '', '[Institute B Address]', '[Institute B Footer / Terms]', '[Institute B GSTIN]');
 }
 
 // ===== WhatsApp Workflow Automation (Phase 2) =====

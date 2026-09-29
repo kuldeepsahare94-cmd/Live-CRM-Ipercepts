@@ -17,6 +17,7 @@ const router = express.Router();
 const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const { fireWorkflows } = require('../services/workflowAutomation');
+const followUps = require('../services/followUps');
 
 const hhmmss = (totalSeconds) => {
   const s = Math.max(0, Math.round(totalSeconds || 0));
@@ -24,13 +25,49 @@ const hhmmss = (totalSeconds) => {
     .map((n) => String(n).padStart(2, '0')).join(':');
 };
 
-// POST /api/calls/dispose
+// POST /api/calls/dispose — the red "Dispose" button.
+// One action records what happened AND what happens next:
+//   response   connected: true/false, duration, notes
+//   outcome    disposition (from the call-outcome lists), lead status
+//   next step  next_action: 'schedule' -> follow_up_at (exact instant, ISO)
+//                                         [+ follow_up_notes, follow_up_assigned_user_id]
+//              next_action: 'close'    -> no further follow-up
+// Either way the follow-up that was open on the record is marked Completed,
+// because this is the interaction it was waiting for.
+//
+// Older clients that send only follow_up_date (a plain date) still work: that
+// schedules a date-only follow-up and leaves everything else as it was.
 router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
   const b = req.body || {};
   if (b.connected === undefined || b.connected === null) {
     return res.status(400).json({ error: 'connected (true/false) is required' });
   }
   if (!b.disposition) return res.status(400).json({ error: 'disposition is required' });
+  const nextAction = b.next_action || (b.follow_up_at || b.follow_up_date ? 'schedule' : null);
+  if (nextAction && !['schedule', 'close'].includes(nextAction)) {
+    return res.status(400).json({ error: "next_action must be 'schedule' or 'close'" });
+  }
+  if (nextAction === 'schedule' && !b.follow_up_at && !b.follow_up_date) {
+    return res.status(400).json({ error: 'Pick the follow-up date and time.' });
+  }
+
+  const module = b.related_module || 'leads';
+  const recordId = b.related_record_id ? Number(b.related_record_id) : null;
+
+  // Validate the follow-up BEFORE anything is written, so a bad time never
+  // leaves a half-logged call behind.
+  let due = null;
+  if (nextAction === 'schedule') {
+    if (b.follow_up_at) {
+      const d = new Date(b.follow_up_at);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'Pick a valid follow-up date and time.' });
+      if (d.getTime() < Date.now() - 5 * 60000) return res.status(400).json({ error: 'Pick a follow-up time in the future.' });
+      due = { dueAt: d.toISOString(), hasTime: b.follow_up_has_time !== false };
+    } else {
+      due = { date: String(b.follow_up_date).slice(0, 16), hasTime: false };
+    }
+    if (!recordId) return res.status(400).json({ error: 'A follow-up needs the record it belongs to.' });
+  }
 
   const durationSeconds = Math.max(0, Math.round(Number(b.duration_seconds) || 0));
   const formSeconds = Math.max(0, Math.round(Number(b.form_seconds) || 0));
@@ -40,42 +77,81 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
   const subject = b.call_subject
     || `${connected ? 'Connected' : 'Not connected'} — ${b.disposition}`;
 
-  const info = db.prepare(`
-    INSERT INTO calls (
-      call_subject, related_module, related_record_id, phone_number, call_type, direction,
-      start_time, duration_seconds, duration_minutes, connected, status, call_outcome,
-      notes, follow_up_date, next_action, assigned_user_id, created_by, disposed_at, form_seconds
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
-  `).run(
-    subject, b.related_module || 'leads', b.related_record_id || null, b.phone_number || null,
-    b.call_type || 'Sales Call', b.direction || 'Outbound',
-    b.start_time || new Date(Date.now() - durationSeconds * 1000).toISOString(),
-    durationSeconds,
-    Math.round(durationSeconds / 60),          // kept in sync for existing readers
-    connected,
-    connected ? 'Completed' : 'No Answer',
-    b.disposition,
-    b.notes || null, b.follow_up_date || null, b.next_action || null,
-    req.user.id, req.user.id, formSeconds
-  );
-
-  // Optionally move the lead's own status/follow-up in the same action, so
-  // the agent doesn't have to edit the lead separately after every call.
-  if (b.related_module === 'leads' && b.related_record_id) {
-    if (b.lead_status) {
-      db.prepare('UPDATE leads SET status=? WHERE id=?').run(b.lead_status, b.related_record_id);
-    }
-    if (b.follow_up_date) {
-      db.prepare('UPDATE leads SET follow_up_date=? WHERE id=?').run(b.follow_up_date, b.related_record_id);
-    }
-    db.prepare('INSERT INTO lead_activities (lead_id, type, note) VALUES (?,?,?)')
-      .run(b.related_record_id, 'call',
-        `${connected ? 'Connected' : 'Not connected'} · ${b.disposition} · ${hhmmss(durationSeconds)}${b.notes ? ` — ${b.notes}` : ''}`);
+  // The call row keeps the follow-up's local date and time, so the call
+  // record itself still says when the next step is.
+  let callFollowUp = null;
+  if (due && due.dueAt) {
+    const hm = new Intl.DateTimeFormat('en-GB', {
+      timeZone: followUps.TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date(due.dueAt));
+    callFollowUp = `${followUps.crmDate(due.dueAt)} ${hm}`;
+  } else if (due) {
+    callFollowUp = due.date;
   }
 
-  const created = db.prepare('SELECT * FROM calls WHERE id=?').get(info.lastInsertRowid);
+  let created;
+  let followUp = null;
+  try {
+    const tx = db.transaction(() => {
+      const info = db.prepare(`
+        INSERT INTO calls (
+          call_subject, related_module, related_record_id, phone_number, call_type, direction,
+          start_time, duration_seconds, duration_minutes, connected, status, call_outcome,
+          notes, follow_up_date, next_action, assigned_user_id, created_by, disposed_at, form_seconds
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
+      `).run(
+        subject, module, recordId, b.phone_number || null,
+        b.call_type || 'Sales Call', b.direction || 'Outbound',
+        b.start_time || new Date(Date.now() - durationSeconds * 1000).toISOString(),
+        durationSeconds,
+        Math.round(durationSeconds / 60),          // kept in sync for existing readers
+        connected,
+        connected ? 'Completed' : 'No Answer',
+        b.disposition,
+        b.notes || null, callFollowUp, b.next_action_text || (nextAction === 'close' ? 'No further follow-up' : null),
+        req.user.id, req.user.id, formSeconds
+      );
+      const callId = info.lastInsertRowid;
+
+      // Optionally move the lead's own status in the same action, so the
+      // agent doesn't have to edit the lead separately after every call.
+      if (module === 'leads' && recordId) {
+        if (b.lead_status) {
+          const before = db.prepare('SELECT status FROM leads WHERE id=?').get(recordId);
+          db.prepare('UPDATE leads SET status=? WHERE id=?').run(b.lead_status, recordId);
+          if (before && before.status !== b.lead_status) {
+            db.prepare('INSERT INTO lead_activities (lead_id, type, note) VALUES (?,?,?)')
+              .run(recordId, 'status_change', `${before.status} → ${b.lead_status}`);
+          }
+        }
+        db.prepare('INSERT INTO lead_activities (lead_id, type, note) VALUES (?,?,?)')
+          .run(recordId, 'call',
+            `${connected ? 'Connected' : 'Not connected'} · ${b.disposition} · ${hhmmss(durationSeconds)}${b.notes ? ` — ${b.notes}` : ''}`);
+      }
+
+      if (recordId && nextAction) {
+        followUps.completeOpenForRecord(module, recordId, {
+          userId: req.user.id, note: `Outcome: ${b.disposition}${b.notes ? ` — ${b.notes}` : ''}`, callId,
+        });
+      }
+      if (due) {
+        followUp = followUps.schedule({
+          module, recordId, ...due, timeZone: b.follow_up_time_zone,
+          subject: b.follow_up_subject || 'Follow-up call', notes: b.follow_up_notes || null,
+          assignedUserId: b.follow_up_assigned_user_id, userId: req.user.id, origin: 'outcome', callId,
+          allowPast: !due.dueAt,
+        });
+      }
+      return callId;
+    });
+    const callId = tx();
+    created = db.prepare('SELECT * FROM calls WHERE id=?').get(callId);
+  } catch (e) {
+    return res.status(e.status || 500).json({ error: e.message || 'Could not save the outcome' });
+  }
+
   fireWorkflows('calls', 'record_created', created, null, req.user.id);
-  res.status(201).json(created);
+  res.status(201).json({ ...created, follow_up: followUp });
 });
 
 // GET /api/calls/report?from=&to=&user_id=

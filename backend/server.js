@@ -37,6 +37,9 @@ require('./db-phase44-subscriptions-amc');
 require('./db-phase45-list-tools');
 require('./db-phase46-support-desk');
 require('./db-phase47-filter-layouts');
+require('./db-phase48-option-management');
+require('./db-phase49-follow-ups');
+require('./db-phase50-settings-cleanup');
 
 
 const app = express();
@@ -98,6 +101,13 @@ app.use('/api/payments', requireAuth, require('./routes/payments'));
 app.use('/api/dashboard', requireAuth, require('./routes/dashboard'));
 app.use('/api/reports', requireAuth, require('./routes/reports'));
 app.use('/api/notifications', requireAuth, require('./routes/notifications'));
+// Follow-ups with an exact date and time, and their reminders. The one public
+// route is the Snooze / Done button on a browser notification, which has no
+// session and is authorised by the signed token that reminder carried.
+const followUpRoutes = require('./routes/followUps');
+app.post('/api/follow-ups/notification-action', followUpRoutes.notificationAction);
+app.use('/api/follow-ups', requireAuth, followUpRoutes);
+app.use('/api/option-lists', requireAuth, require('./routes/optionLists'));
 app.use('/api/chat', requireAuth, require('./routes/chat'));
 
 // Calendar is mounted with one exception to the login requirement: the OAuth
@@ -231,6 +241,14 @@ app.listen(PORT, () => {
   };
   sweepOverdue();
   setInterval(sweepOverdue, 60 * 60 * 1000).unref();
+
+  // Follow-up reminders: bring older follow-up dates into the schedule, and
+  // send Web Push reminders to people who do not have the CRM open.
+  try {
+    require('./services/followUpPush').start();
+  } catch (e) {
+    console.warn('[follow-ups] reminder service not started:', e.message);
+  }
 
   // Support Desk: give pre-existing tickets an SLA policy once, then keep
   // SLA states, warnings, breaches and escalations current every minute.

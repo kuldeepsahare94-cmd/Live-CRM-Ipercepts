@@ -4,6 +4,15 @@ const db = require('../db');
 const { relatedActivity } = require('../services/relatedActivity');
 const { requirePermission } = require('../middleware/auth');
 const { fireWorkflows } = require('../services/workflowAutomation');
+const followUps = require('../services/followUps');
+
+// The contact's Next Follow-up date and the scheduled follow-up (with its
+// reminder) move together, whichever side is changed.
+function syncFollowUp(contact, before, userId) {
+  if (String(contact.next_followup || '') === String(before?.next_followup || '')) return;
+  try { followUps.syncFromRecord('contacts', contact.id, contact.next_followup, userId); }
+  catch (e) { console.warn('[follow-ups]', e.message); }
+}
 
 router.get('/', requirePermission('contacts', 'view'), (req, res) => {
   const { account_id, status, owner_id, q } = req.query;
@@ -48,6 +57,7 @@ router.post('/', requirePermission('contacts', 'create'), (req, res) => {
     ...b,
   });
   const created = db.prepare('SELECT * FROM contacts WHERE id=?').get(info.lastInsertRowid);
+  syncFollowUp(created, null, req.user.id);
   fireWorkflows('contacts', 'record_created', created, null, req.user.id);
   res.status(201).json(db.prepare('SELECT * FROM contacts WHERE id=?').get(created.id));
 });
@@ -67,6 +77,7 @@ router.put('/:id', requirePermission('contacts', 'edit'), (req, res) => {
     m.contact_type, m.contact_status, m.owner_id, m.team, m.lead_source, m.tags, m.notes, m.last_contacted, m.next_followup,
     req.params.id);
   const updated = db.prepare('SELECT * FROM contacts WHERE id=?').get(req.params.id);
+  syncFollowUp(updated, existing, req.user.id);
   fireWorkflows('contacts', 'record_updated', updated, existing, req.user.id);
   fireWorkflows('contacts', 'field_changed', updated, existing, req.user.id);
   res.json(db.prepare('SELECT * FROM contacts WHERE id=?').get(req.params.id));

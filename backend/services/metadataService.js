@@ -112,6 +112,18 @@ function createField(moduleId, input) {
 
   const nextPosition = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM module_fields WHERE module_id=?').get(moduleId).p;
 
+  // New choice fields start with options in the managed shape (stable value,
+  // label, active). Blank and duplicate entries typed into the wizard are
+  // dropped here rather than stored as unselectable options.
+  const optionSvc = require('./optionLists');
+  if (optionSvc.OPTION_TYPES.has(input.field_type) && input.options_json) {
+    const seen = new Set();
+    const clean = optionSvc.parseOptions(input.options_json)
+      .map((o) => ({ ...o, value: o.value.trim(), label: (o.label || o.value).trim(), system: false }))
+      .filter((o) => o.value && !seen.has(o.value.toLowerCase()) && seen.add(o.value.toLowerCase()));
+    input = { ...input, options_json: optionSvc.serialize(clean) };
+  }
+
   const info = db.prepare(`
     INSERT INTO module_fields (
       module_id, api_name, label, field_type, required, unique_field, default_value, placeholder, help_text,
@@ -133,12 +145,19 @@ function createField(moduleId, input) {
   return db.prepare('SELECT * FROM module_fields WHERE id=?').get(info.lastInsertRowid);
 }
 
-function updateField(fieldId, input) {
+function updateField(fieldId, input, userId) {
   const existing = db.prepare('SELECT * FROM module_fields WHERE id=?').get(fieldId);
   if (!existing) throw notFound('Field not found');
   if (existing.is_system && input.field_type && input.field_type !== existing.field_type) {
     throw badRequest('Cannot change the type of a system field (it describes a real database column)');
   }
+  // Options go through the same rules as the option manager (stable values,
+  // no deleting a value that records use, audit), whichever screen sent them.
+  // Required lazily: optionLists requires db, which this file also loads.
+  const guarded = require('./optionLists').guardFieldUpdate(existing, input, userId);
+  const optionChanges = guarded.__optionChanges || [];
+  delete guarded.__optionChanges;
+  input = guarded;
   const merged = { ...existing, ...input };
   db.prepare(`
     UPDATE module_fields SET label=?, required=?, unique_field=?, default_value=?, placeholder=?, help_text=?,
@@ -150,6 +169,9 @@ function updateField(fieldId, input) {
     merged.searchable ? 1 : 0, merged.filterable ? 1 : 0, merged.sortable ? 1 : 0, merged.show_in_list ? 1 : 0,
     merged.show_in_create ? 1 : 0, merged.show_in_edit ? 1 : 0, merged.show_in_detail ? 1 : 0, merged.section,
     merged.position, fieldId);
+  if (optionChanges.length) {
+    require('./optionLists').audit({ moduleId: existing.module_id, fieldApiName: existing.api_name, changes: optionChanges, userId });
+  }
   return db.prepare('SELECT * FROM module_fields WHERE id=?').get(fieldId);
 }
 

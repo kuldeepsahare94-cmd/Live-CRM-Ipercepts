@@ -25,18 +25,16 @@ const engine = require('./documentEngine');
 // Building the data a template can see
 // ---------------------------------------------------------------------------
 
+// The letterhead printed on every document — quotations, proforma invoices,
+// invoices and payment receipts all read Settings → Company Profile.
 function companyProfile() {
   const profile = db.prepare('SELECT * FROM company_profile WHERE id=1').get() || {};
-  // Fall back to the letterhead the receipts already use, so an install that
-  // has only ever configured that keeps printing correctly.
-  const legacy = db.prepare("SELECT * FROM receipt_templates WHERE id='A'").get() || {};
-  const real = (v) => (v && !/^\[.*\]$/.test(String(v).trim()) ? v : null);
   return {
     ...profile,
-    legal_name: profile.legal_name || real(legacy.institute_name) || 'Your Company',
-    address: profile.address || real(legacy.address) || '',
-    gstin: profile.gstin || real(legacy.gst_details) || '',
-    logo_url: profile.logo_url || legacy.logo_url || '',
+    legal_name: profile.legal_name || 'Your Company',
+    address: profile.address || '',
+    gstin: profile.gstin || '',
+    logo_url: profile.logo_url || '',
   };
 }
 
@@ -1203,5 +1201,5 @@ async function renderDocumentPdfBuffer(args) {
 
 module.exports = {
   buildDocumentPdf, renderDocumentPdfBuffer, buildContext, merge, passes,
-  numberToWords, moneyText, dateText, COLUMN_DEFS,
+  numberToWords, moneyText, dateText, COLUMN_DEFS, companyProfile,
 };

@@ -10,7 +10,7 @@ const svc = require('../services/metadataService');
 
 function handle(res, fn) {
   try { res.json(fn()); }
-  catch (e) { res.status(e.status || 500).json({ error: e.message || 'Server error' }); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message || 'Server error', ...(e.errors ? { errors: e.errors } : {}) }); }
 }
 
 // Resolves :moduleId whether it's a numeric id or an api_name (e.g. both
@@ -32,7 +32,7 @@ router.post('/:moduleId/fields', requirePermission('fields', 'create'), (req, re
 });
 
 router.put('/:moduleId/fields/:fieldId', requirePermission('fields', 'edit'), (req, res) => {
-  handle(res, () => svc.updateField(req.params.fieldId, req.body));
+  handle(res, () => svc.updateField(req.params.fieldId, req.body, req.user?.id));
 });
 
 // Used by the delete confirmation so the user is told what the deletion

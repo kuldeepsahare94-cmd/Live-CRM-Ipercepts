@@ -243,10 +243,9 @@ CREATE INDEX IF NOT EXISTS idx_renders_record ON document_renders(doc_type, reco
 // ---------------------------------------------------------------------------
 // 5. Company profile — the letterhead, bank details and signature
 // ---------------------------------------------------------------------------
-// receipt_templates already holds a name, address and GSTIN, and payment
-// receipts depend on it. This extends rather than replaces: the engine reads
-// this table and falls back to receipt_templates, so an existing setup keeps
-// printing exactly as it does today until someone fills these in.
+// The one letterhead for every document: quotations, proforma invoices,
+// invoices and payment receipts. (The older Institute A/B receipt templates
+// were folded into this — see db-phase50-settings-cleanup.js.)
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS company_profile (
@@ -272,9 +271,13 @@ CREATE TABLE IF NOT EXISTS company_profile (
 `);
 
 if (!db.prepare('SELECT COUNT(*) c FROM company_profile').get().c) {
-  // Seeded from whatever the receipt letterhead already says, so the first
-  // invoice out of the box is not addressed from nobody.
-  const legacy = db.prepare("SELECT * FROM receipt_templates WHERE id='A'").get() || {};
+  // Seeded from whatever an older install's receipt letterhead already says,
+  // so the first invoice out of the box is not addressed from nobody. A new
+  // install has no such table.
+  const hasLegacy = !!db.prepare(
+    "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'receipt_templates'",
+  ).get();
+  const legacy = (hasLegacy && db.prepare("SELECT * FROM receipt_templates WHERE id='A'").get()) || {};
   const looksLikePlaceholder = (v) => !v || /^\[.*\]$/.test(String(v).trim());
   db.prepare(`
     INSERT INTO company_profile (id, legal_name, address, gstin, logo_url, default_terms)

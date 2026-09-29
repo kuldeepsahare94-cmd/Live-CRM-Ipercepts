@@ -358,15 +358,14 @@ register({
 register({
   name: 'generate_receipt_link',
   module: 'payments', isWrite: false,
-  description: 'Get a download link for a paid payment\'s receipt (Institute A or B template). Payment must already be Paid.',
-  input_schema: { type: 'object', required: ['payment_id'], properties: { payment_id: { type: 'integer' }, institute: { type: 'string', description: "'A' or 'B'", default: 'A' } } },
+  description: 'Get a download link for a paid payment\'s receipt (printed on the Company Profile letterhead). Payment must already be Paid.',
+  input_schema: { type: 'object', required: ['payment_id'], properties: { payment_id: { type: 'integer' } } },
   handler: (user, i) => {
     requirePerm(user, 'payments', 'view');
     const payment = db.prepare('SELECT * FROM payments WHERE id=?').get(i.payment_id);
     if (!payment) throw new Error('Payment not found');
     if (payment.status !== 'Paid') throw new Error('Receipt is only available once the payment is marked Paid');
-    const inst = (i.institute || 'A').toUpperCase();
-    return { download_url: `/api/payments/${i.payment_id}/receipt?institute=${inst}`, note: 'Relative to the CRM base URL; open while logged in.' };
+    return { download_url: `/api/payments/${i.payment_id}/receipt`, note: 'Relative to the CRM base URL; open while logged in.' };
   },
 });
 

@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const { generateReceiptPdf } = require('../services/receiptPdf');
+const { companyProfile } = require('../services/documentPdf');
 const { fireEvent } = require('../services/whatsapp/workflowEngine');
 const { fireWorkflows } = require('../services/workflowAutomation');
 
@@ -126,17 +127,19 @@ router.delete('/:id', requirePermission('payments', 'delete'), (req, res) => {
   res.status(204).end();
 });
 
-// ===== Receipt download: two selectable institute templates =====
-// GET /api/payments/:id/receipt?institute=A  (or B)
+// ===== Receipt download =====
+// GET /api/payments/:id/receipt
+// Printed on the Company Profile letterhead — the same one every quotation,
+// proforma invoice and invoice uses — so there is one place to set the
+// company's name, address, GSTIN and logo. (The older Institute A / B receipt
+// templates were removed; an old link with ?institute=A|B still works and
+// simply gets this receipt.)
 router.get('/:id/receipt', requirePermission('payments', 'view'), (req, res) => {
-  const institute = (req.query.institute || 'A').toUpperCase();
-  if (!['A', 'B'].includes(institute)) return res.status(400).json({ error: "institute must be 'A' or 'B'" });
-
   const payment = db.prepare(SELECT_WITH_LINKS + ' WHERE p.id=?').get(req.params.id);
   if (!payment) return res.status(404).json({ error: 'Payment not found' });
   if (payment.status !== 'Paid') return res.status(400).json({ error: 'Receipt is only available once the payment is marked Paid' });
 
-  const template = db.prepare('SELECT * FROM receipt_templates WHERE id=?').get(institute);
+  const company = companyProfile();
 
   // Build a generic payer block — works whether this is a legacy student
   // payment or a generic Account/Opportunity/Quotation-linked one.
@@ -153,8 +156,7 @@ router.get('/:id/receipt', requirePermission('payments', 'view'), (req, res) => 
   }
   const lineDescription = payment.description || payment.course_name || 'Payment';
 
-  db.prepare('UPDATE payments SET receipt_institute=? WHERE id=?').run(institute, payment.id);
-  generateReceiptPdf({ payment, payer, lineDescription, template }, res);
+  generateReceiptPdf({ payment, payer, lineDescription, company }, res);
 });
 
 module.exports = router;

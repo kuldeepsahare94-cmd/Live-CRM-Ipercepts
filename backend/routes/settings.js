@@ -2,57 +2,76 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
+const optionLists = require('../services/optionLists');
 
-// ===== Receipt templates (configurable Institute A / B — see spec: "Receipt templates
-// should be configurable from the admin panel"). Seeded with placeholder text until
-// real institute names/logos/GST details are supplied. =====
-router.get('/receipt-templates', requirePermission('settings', 'view'), (req, res) => {
-  res.json(db.prepare('SELECT * FROM receipt_templates').all());
-});
+// Receipt Templates (Institute A / Institute B) were removed: payment receipts
+// now print the Company Profile letterhead, the same one quotations, proforma
+// invoices and invoices use. See db-phase50-settings-cleanup.js.
 
-router.put('/receipt-templates/:id', requirePermission('settings', 'edit'), (req, res) => {
-  const id = req.params.id.toUpperCase();
-  if (!['A', 'B'].includes(id)) return res.status(400).json({ error: "id must be 'A' or 'B'" });
-  const existing = db.prepare('SELECT * FROM receipt_templates WHERE id=?').get(id);
-  if (!existing) return res.status(404).json({ error: 'Not found' });
-  const m = { ...existing, ...req.body };
-  db.prepare(`
-    UPDATE receipt_templates SET institute_name=?, logo_url=?, address=?, footer_text=?, gst_details=?, updated_at=datetime('now')
-    WHERE id=?
-  `).run(m.institute_name, m.logo_url, m.address, m.footer_text, m.gst_details, id);
-  res.json(db.prepare('SELECT * FROM receipt_templates WHERE id=?').get(id));
-});
+// ===== Shared option lists (Lead Source, Qualification, Payment Mode, call outcomes) =====
+// Managed in Settings → Dropdown Options (routes/optionLists.js). These older
+// endpoints stay for API compatibility and go through the same rules: stable
+// values, no deleting a value in use, audit trail.
 
-// ===== Master option lists (Lead Source, Qualification, Payment Mode) =====
-router.get('/master-options', requirePermission('settings', 'view'), (req, res) => {
+// Reading a list is needed to USE the CRM (the call-outcome chips, the lead
+// source dropdown), so any signed-in user may read. It used to need Settings
+// view, which meant a sales rep's Log Call screen showed no outcomes at all.
+router.get('/master-options', (req, res) => {
   const { list_type } = req.query;
   let sql = 'SELECT * FROM master_options WHERE 1=1';
   const params = [];
   if (list_type) { sql += ' AND list_type = ?'; params.push(list_type); }
-  sql += ' ORDER BY list_type, sort_order';
-  res.json(db.prepare(sql).all(...params));
+  sql += ' ORDER BY list_type, sort_order, id';
+  res.json(db.prepare(sql).all(...params).map((r) => ({ ...r, value: r.value || r.label })));
 });
 
+function current(listType) {
+  return optionLists.sharedOptions(listType).map((o) => ({ ...o, original_value: o.value }));
+}
+
+function fail(res, e) {
+  res.status(e.status || 500).json({ error: e.message || 'Server error', ...(e.errors ? { errors: e.errors } : {}) });
+}
+
 router.post('/master-options', requirePermission('settings', 'create'), (req, res) => {
-  const { list_type, label, color, sort_order } = req.body;
+  const { list_type, label, value, color } = req.body || {};
   if (!list_type || !label) return res.status(400).json({ error: 'list_type and label are required' });
-  const info = db.prepare('INSERT INTO master_options (list_type, label, color, sort_order) VALUES (?,?,?,?)')
-    .run(list_type, label, color || null, sort_order || 0);
-  res.status(201).json(db.prepare('SELECT * FROM master_options WHERE id=?').get(info.lastInsertRowid));
+  try {
+    const list = current(list_type);
+    list.push({ value: value || label, label, color, active: true });
+    optionLists.saveShared(list_type, list, req.user.id);
+    const row = db.prepare('SELECT * FROM master_options WHERE list_type=? AND value=?').get(list_type, String(value || label).trim());
+    res.status(201).json(row);
+  } catch (e) { fail(res, e); }
 });
 
 router.put('/master-options/:id', requirePermission('settings', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM master_options WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  const m = { ...existing, ...req.body };
-  db.prepare('UPDATE master_options SET label=?, color=?, sort_order=?, active=? WHERE id=?')
-    .run(m.label, m.color, m.sort_order, m.active, req.params.id);
-  res.json(db.prepare('SELECT * FROM master_options WHERE id=?').get(req.params.id));
+  try {
+    let list = current(existing.list_type).map((o) => (o.id === existing.id ? {
+      ...o,
+      label: req.body.label !== undefined ? req.body.label : o.label,
+      color: req.body.color !== undefined ? req.body.color : o.color,
+      active: req.body.active !== undefined ? !!req.body.active : o.active,
+    } : o));
+    if (req.body.sort_order !== undefined) {
+      const moved = list.find((o) => o.id === existing.id);
+      list = list.filter((o) => o.id !== existing.id);
+      list.splice(Math.max(0, Math.min(list.length, Number(req.body.sort_order) || 0)), 0, moved);
+    }
+    optionLists.saveShared(existing.list_type, list, req.user.id);
+    res.json(db.prepare('SELECT * FROM master_options WHERE id=?').get(req.params.id));
+  } catch (e) { fail(res, e); }
 });
 
 router.delete('/master-options/:id', requirePermission('settings', 'delete'), (req, res) => {
-  db.prepare('DELETE FROM master_options WHERE id=?').run(req.params.id);
-  res.status(204).end();
+  const existing = db.prepare('SELECT * FROM master_options WHERE id=?').get(req.params.id);
+  if (!existing) return res.status(204).end();
+  try {
+    optionLists.saveShared(existing.list_type, current(existing.list_type).filter((o) => o.id !== existing.id), req.user.id);
+    res.status(204).end();
+  } catch (e) { fail(res, e); }
 });
 
 module.exports = router;

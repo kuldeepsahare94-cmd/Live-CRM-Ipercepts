@@ -263,14 +263,8 @@ router.get('/:id/lineage', requirePermission('quotations', 'view'), (req, res) =
 });
 
 // ===== PDF + send =====
-// The quotation PDF now goes through the same template engine as proforma
-// invoices and invoices. The old renderer drew a fixed layout and read its
-// letterhead from the receipt_templates row for "institute A", hardcoded —
-// one company, one design, no way to differ per customer.
-//
-// Nothing configured is lost: the engine still falls back to that same
-// receipt_templates row when the company profile is empty, so an install that
-// has only ever set that up keeps printing with the details it already has.
+// The quotation PDF goes through the same template engine as proforma
+// invoices and invoices, with the letterhead from Settings → Company Profile.
 function loadForPdf(id) {
   const quotation = db.prepare(`
     SELECT q.*, a.account_name,
@@ -310,7 +304,7 @@ router.get('/:id/preview', requirePermission('quotations', 'view'), (req, res) =
   return buildDocumentPdf({ docType: 'quotation', record, templateId: req.query.template_id, userId: req.user.id, preview: true }, res);
 });
 
-// POST /api/quotations/:id/send  { to?, subject?, message?, institute? }
+// POST /api/quotations/:id/send  { to?, subject?, message? }
 // Emails the quotation as a PDF attachment and flips its status to Sent
 // (which is the same transition the PUT handler uses, so the existing
 // quotation_sent WhatsApp workflow event fires from here too).

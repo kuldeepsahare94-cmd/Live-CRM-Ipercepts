@@ -17,11 +17,23 @@ function buildNotifications(userId) {
     items.push({ key, type: 'new_lead_assigned', title: 'New Lead Assigned', message: `${l.student_name} → ${l.assigned_counselor}`, link: `/leads/${l.id}`, date: l.created_at, read: isRead(key) });
   }
 
-  // Upcoming Follow-up
-  const followups = db.prepare(`SELECT id, student_name, follow_up_date FROM leads WHERE follow_up_date IS NOT NULL AND date(follow_up_date) <= date(?) AND status NOT IN ('Converted','Dropped')`).all(today);
-  for (const l of followups) {
-    const key = `followup-${l.id}`;
-    items.push({ key, type: 'upcoming_followup', title: 'Upcoming Follow-up', message: l.student_name, link: `/leads/${l.id}`, date: l.follow_up_date, read: isRead(key) });
+  // Follow-ups: only the signed-in user's own (the person each follow-up is
+  // for), due today or already overdue — not every lead's follow-up for
+  // everyone. Times are shown; the key changes when a follow-up is moved or
+  // snoozed, so a rescheduled follow-up reads as new rather than already seen.
+  const fu = require('../services/followUps');
+  const crmToday = fu.crmDate(new Date().toISOString());
+  for (const f of fu.mine(userId, { limit: 100 })) {
+    if (f.due_date > crmToday && f.display_status !== 'Due') continue;
+    const key = `followup-${f.id}-${f.due_at}-${f.snoozed_until || ''}`;
+    const title = f.display_status === 'Overdue' ? 'Overdue Follow-up'
+      : f.display_status === 'Snoozed' ? 'Follow-up (snoozed)'
+        : f.display_status === 'Due' ? 'Follow-up Due' : 'Follow-up Today';
+    items.push({
+      key, type: 'upcoming_followup', title,
+      message: `${f.record_label || 'Record'} · ${fu.formatWhen({ ...f, has_time: f.has_time ? 1 : 0 })}${f.has_time ? '' : ' (no time set)'}`,
+      link: f.link, date: f.snoozed_until || f.due_at, read: isRead(key),
+    });
   }
 
   // Admission Created (today)

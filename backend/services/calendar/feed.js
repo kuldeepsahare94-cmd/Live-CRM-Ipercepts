@@ -192,6 +192,10 @@ function calls({ from, to, userIds }) {
   `).all(toSqlite(widen(from, -OFFSET_SAFETY_HOURS)), toSqlite(widen(to, OFFSET_SAFETY_HOURS)),
     String(from).slice(0, 10), String(to).slice(0, 10), ...userIds);
 
+  // Calls whose follow-up is on the follow-up schedule are drawn from there
+  // (at their exact time, see followUpItems) rather than as an all-day item.
+  const scheduled = new Set(db.prepare('SELECT DISTINCT call_id FROM follow_ups WHERE call_id IS NOT NULL').all().map((r) => Number(r.call_id)));
+
   const out = [];
   for (const c of rows) {
     const label = relatedLabel(c.related_module, c.related_record_id);
@@ -218,7 +222,7 @@ function calls({ from, to, userIds }) {
       }));
     }
 
-    if (c.follow_up_date && String(c.follow_up_date).slice(0, 10) >= String(from).slice(0, 10)
+    if (c.follow_up_date && !scheduled.has(Number(c.id)) && String(c.follow_up_date).slice(0, 10) >= String(from).slice(0, 10)
         && String(c.follow_up_date).slice(0, 10) <= String(to).slice(0, 10)) {
       out.push(shape.neutral({
         source: 'call',
@@ -238,6 +242,54 @@ function calls({ from, to, userIds }) {
         extra: { kind: 'follow_up', next_action: c.next_action },
       }));
     }
+  }
+  return out;
+}
+
+// Open follow-ups (services/followUps.js), at their exact time — or as an
+// all-day item when only a date was set. Shown to the person each one is for.
+// Free time, not busy: a reminder to call is not a meeting.
+function followUpItems({ from, to, userIds }) {
+  const fu = require('../followUps');
+  let rows = [];
+  try {
+    rows = db.prepare(`
+      SELECT * FROM follow_ups
+       WHERE status = 'Scheduled'
+         AND COALESCE(snoozed_until, due_at) >= ? AND COALESCE(snoozed_until, due_at) <= ?
+    `).all(widen(from, -OFFSET_SAFETY_HOURS), widen(to, OFFSET_SAFETY_HOURS));
+  } catch { return []; }
+  const wanted = new Set(userIds.map(Number));
+  const infos = fu.infoForRows(rows);
+  const out = [];
+  for (const f of rows) {
+    const info = infos.get(`${f.related_module}:${Number(f.related_record_id)}`);
+    if (!info) continue;
+    const owner = fu.assigneeOf(f, info);
+    if (wanted.size && !wanted.has(Number(owner))) continue;
+    const startIso = f.snoozed_until || f.due_at;
+    if (!Number.isFinite(Date.parse(startIso))) continue;   // a malformed row must not break the calendar
+    const allDay = !f.has_time && !f.snoozed_until;
+    if (!allDay && !shape.overlaps(from, to, startIso, new Date(Date.parse(startIso) + 15 * 60000).toISOString())) continue;
+    if (allDay && (f.due_date < String(from).slice(0, 10) || f.due_date > String(to).slice(0, 10))) continue;
+    const ownerRow = owner ? db.prepare('SELECT full_name, username FROM users WHERE id = ?').get(owner) : null;
+    out.push(shape.neutral({
+      source: 'call',
+      source_id: `follow-up-${f.id}`,
+      title: `Follow up: ${info.label}`,
+      description: f.notes || f.subject || null,
+      all_day: allDay,
+      start_at: allDay ? f.due_date : startIso,
+      end_at: allDay ? f.due_date : new Date(Date.parse(startIso) + 15 * 60000).toISOString(),
+      show_as: 'free',
+      owner_user_id: owner,
+      owner_name: ownerRow ? (ownerRow.full_name || ownerRow.username) : null,
+      related_module: f.related_module,
+      related_record_id: f.related_record_id,
+      related_label: info.label,
+      editable: false,
+      extra: { kind: 'follow_up', follow_up_id: f.id, follow_up_status: fu.displayStatus(f), has_time: !!f.has_time },
+    }));
   }
   return out;
 }
@@ -318,7 +370,7 @@ function build({ from, to, userId, scope = 'mine', sources = ALL_SOURCES, teamUs
   let events = [];
   if (wanted.has('meeting')) events = events.concat(meetings({ from, to, userIds }));
   if (wanted.has('task')) events = events.concat(tasks({ from, to, userIds }));
-  if (wanted.has('call')) events = events.concat(calls({ from, to, userIds }));
+  if (wanted.has('call')) events = events.concat(calls({ from, to, userIds }), followUpItems({ from, to, userIds }));
   if (wanted.has('external')) {
     events = events.concat(external({ from, to, userId, includeTeam: scope === 'team' }));
   }
