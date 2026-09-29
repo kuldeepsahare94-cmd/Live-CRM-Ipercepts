@@ -34,13 +34,19 @@ export function formatFieldValue(value, field) {
   if (field.field_type === 'percent') return `${value}%`;
   if (field.field_type === 'date') return String(value).slice(0, 10);
   if (field.field_type === 'datetime') return String(value).replace('T', ' ').slice(0, 16);
-  if (field.field_type === 'multiselect') return Array.isArray(value) ? value.join(', ') : value;
-  // A dropdown whose stored value differs from what it says (e.g. Billing
-  // Frequency stores 3 and reads "3 months") shows its label.
-  if (field.field_type === 'dropdown') {
-    const opt = parseOptions(field).find((o) => o && typeof o === 'object' && String(o.value) === String(value));
-    if (opt && opt.label) return String(opt.label);
+  // A choice whose stored value differs from what it says (e.g. Billing
+  // Frequency stores 3 and reads "3 months", or an option an admin renamed)
+  // shows its label. The stored value never changes when a label does.
+  const labelOf = (v) => {
+    const opt = parseOptions(field).find((o) => o && typeof o === 'object' && String(o.value) === String(v));
+    return opt && opt.label ? String(opt.label) : String(v);
+  };
+  if (field.field_type === 'multiselect') {
+    let arr = value;
+    if (typeof value === 'string' && value.startsWith('[')) { try { arr = JSON.parse(value); } catch { arr = value; } }
+    return Array.isArray(arr) ? arr.map(labelOf).join(', ') : labelOf(arr);
   }
+  if (field.field_type === 'dropdown' || field.field_type === 'radio') return labelOf(value);
   return String(value);
 }
 
@@ -215,22 +221,31 @@ export function FieldInput({ field, value, onChange }) {
     // the configured list (a meeting marked "Held" before "Held" was dropped
     // from the options, say). Without it the box reads "Select…" as if the
     // field were empty, which is simply wrong about the record.
+    // Deactivated options (Settings → Dropdown Options) are not offered for
+    // new choices, but a record that already holds one keeps showing it.
     const current = value === null || value === undefined ? '' : String(value);
-    const known = opts.some((o) => String(o.value) === current);
+    const currentOpt = opts.find((o) => String(o.value) === current);
+    const offered = opts.filter((o) => o.active !== false);
+    const showCurrent = current && (!currentOpt || currentOpt.active === false);
     return (
       <select className={inputClass} value={current} onChange={(e) => onChange(e.target.value)}>
         <option value="">Select…</option>
-        {current && !known && <option value={current}>{current}</option>}
-        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {showCurrent && (
+          <option value={current}>{currentOpt ? `${currentOpt.label} (inactive)` : current}</option>
+        )}
+        {offered.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     );
   }
   if (field.field_type === 'multiselect') {
-    const arr = Array.isArray(value) ? value : [];
+    const arr = Array.isArray(value) ? value.map(String) : [];
+    const offered = opts.filter((o) => o.active !== false || arr.includes(String(o.value)));
     return (
       <select multiple className={inputClass} value={arr}
         onChange={(e) => onChange(Array.from(e.target.selectedOptions).map((o) => o.value))}>
-        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {offered.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}{o.active === false ? ' (inactive)' : ''}</option>
+        ))}
       </select>
     );
   }

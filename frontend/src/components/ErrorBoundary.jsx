@@ -26,6 +26,9 @@ export default class ErrorBoundary extends Component {
 
   render() {
     if (!this.state.error) return this.props.children;
+    // A background helper (e.g. the reminder popups) passes fallback={null}:
+    // if it fails, it disappears quietly instead of covering the page.
+    if (this.props.fallback !== undefined) return this.props.fallback;
 
     return (
       <div style={{

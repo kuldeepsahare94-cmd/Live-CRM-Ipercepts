@@ -38,12 +38,14 @@ const STYLES = {
   failed: 'bg-red-50 text-warn',
 };
 
-export default function StatusBadge({ status }) {
+// `status` is the stored value (it picks the colour); `label` is what to show
+// when the option has been renamed in Settings → Dropdown Options.
+export default function StatusBadge({ status, label }) {
   if (!status) return <span className="text-slate-300 text-xs">—</span>;
   const cls = STYLES[status] || 'bg-slate-100 text-slate-600';
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
-      {status}
+      {label || status}
     </span>
   );
 }

@@ -3,6 +3,13 @@
 const API_ROOT = import.meta.env.VITE_API_BASE_URL || '';
 const BASE = `${API_ROOT}/api`;
 
+// The API's full address, for code that runs outside this page (the
+// notification service worker calls it from a browser notification's buttons).
+export function absoluteApiBase() {
+  if (/^https?:\/\//i.test(API_ROOT)) return `${API_ROOT.replace(/\/+$/, '')}/api`;
+  return `${window.location.origin}${API_ROOT}/api`;
+}
+
 // ---------------------------------------------------------------------------
 // Authenticated file download.
 //
@@ -108,6 +115,9 @@ async function req(method, path, body) {
     err.status = res.status;
     err.requestId = data?.request_id;
     err.rawError = data?.raw_error;
+    // Per-item validation messages (the dropdown option editor shows them
+    // next to the option they belong to).
+    err.errors = data?.errors;
     throw err;
   }
   return data;
@@ -149,7 +159,8 @@ export const api = {
   createPayment: (body) => req('POST', '/payments', body),
   updatePayment: (id, body) => req('PUT', `/payments/${id}`, body),
   deletePayment: (id) => req('DELETE', `/payments/${id}`),
-  downloadReceipt: (id, institute) => downloadFile(`/payments/${id}/receipt?institute=${institute}`, `receipt-${id}.pdf`),
+  // Printed on the Company Profile letterhead (the same one invoices use).
+  downloadReceipt: (id) => downloadFile(`/payments/${id}/receipt`, `receipt-${id}.pdf`),
 
   // dashboard
   dashboard: () => req('GET', '/dashboard'),
@@ -291,9 +302,7 @@ export const api = {
   updateUser: (id, body) => req('PUT', `/users/${id}`, body),
   deleteUser: (id) => req('DELETE', `/users/${id}`),
 
-  // settings
-  listReceiptTemplates: () => req('GET', '/settings/receipt-templates'),
-  updateReceiptTemplate: (id, body) => req('PUT', `/settings/receipt-templates/${id}`, body),
+  // settings — shared option lists (Settings → Dropdown Options)
   listMasterOptions: (listType) => req('GET', `/settings/master-options${listType ? `?list_type=${listType}` : ''}`),
   createMasterOption: (body) => req('POST', '/settings/master-options', body),
   updateMasterOption: (id, body) => req('PUT', `/settings/master-options/${id}`, body),
@@ -568,8 +577,33 @@ export const api = {
     req('POST', '/notes', { body, related_module: relatedModule, related_record_id: relatedRecordId }),
   aiCustomerSummary: (accountId, question) => req('POST', `/c360/accounts/${accountId}/ai-summary`, { question }),
 
-  // Call disposition + call analytics
+  // Dispose (call response + disposition + next action) and call analytics
   disposeCall: (body) => req('POST', '/calls/dispose', body),
+
+  // Follow-ups: exact date + time, lifecycle, reminders
+  followUpsFor: (module, recordId) => req('GET', `/follow-ups${qs({ module, record_id: recordId })}`),
+  myFollowUps: (limit) => req('GET', `/follow-ups/mine${qs({ limit })}`),
+  scheduleFollowUp: (body) => req('POST', '/follow-ups', body),
+  rescheduleFollowUp: (id, body) => req('PATCH', `/follow-ups/${id}`, body),
+  completeFollowUp: (id, note) => req('POST', `/follow-ups/${id}/complete`, { note }),
+  cancelFollowUp: (id, reason) => req('POST', `/follow-ups/${id}/cancel`, { reason }),
+  snoozeFollowUp: (id, body) => req('POST', `/follow-ups/${id}/snooze`, body),
+  pullReminders: () => req('POST', '/follow-ups/reminders/pull'),
+  notificationPrefs: () => req('GET', '/follow-ups/preferences'),
+  saveNotificationPrefs: (body) => req('PUT', '/follow-ups/preferences', body),
+  pushPublicKey: () => req('GET', '/follow-ups/push/public-key'),
+  pushSubscribe: (subscription) => req('POST', '/follow-ups/push/subscribe', { subscription, api_base: absoluteApiBase() }),
+  pushUnsubscribe: (endpoint) => req('POST', '/follow-ups/push/unsubscribe', { endpoint }),
+  pushTest: () => req('POST', '/follow-ups/push/test'),
+
+  // Dropdown option management
+  optionCatalog: () => req('GET', '/option-lists'),
+  fieldOptionDetail: (fieldId) => req('GET', `/option-lists/field/${fieldId}`),
+  saveFieldOptions: (fieldId, options) => req('PUT', `/option-lists/field/${fieldId}`, { options }),
+  sharedListDetail: (key) => req('GET', `/option-lists/shared/${key}`),
+  saveSharedList: (key, options) => req('PUT', `/option-lists/shared/${key}`, { options }),
+  moduleOptions: (module) => req('GET', `/option-lists/module/${module}`),
+  sharedListOptions: (key) => req('GET', `/option-lists/shared/${key}/options`),
   callReport: (params) => req('GET', '/calls/report' + qs(params)),
 
   // Universal CRM — Taxes & Currencies

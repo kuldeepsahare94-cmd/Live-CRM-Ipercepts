@@ -42,6 +42,8 @@ const SettingsTemplateLibrary = lazy(() => import('./pages/SettingsTemplateLibra
 const CallReports = lazy(() => import('./pages/CallReports'));
 const Customer360 = lazy(() => import('./pages/Customer360'));
 const SettingsEmail = lazy(() => import('./pages/SettingsEmail'));
+const SettingsOptions = lazy(() => import('./pages/SettingsOptions'));
+const SettingsNotifications = lazy(() => import('./pages/SettingsNotifications'));
 const Inbox = lazy(() => import('./pages/Inbox'));
 const EmailCampaigns = lazy(() => import('./pages/EmailCampaigns'));
 const Appearance = lazy(() => import('./pages/Appearance'));
@@ -134,6 +136,8 @@ export default function App() {
               <Route path="/settings/templates" element={<SettingsTemplates />} />
               <Route path="/settings/template-library" element={<SettingsTemplateLibrary />} />
               <Route path="/settings/email" element={<SettingsEmail />} />
+              <Route path="/settings/options" element={<SettingsOptions />} />
+              <Route path="/settings/notifications" element={<SettingsNotifications />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/email-campaigns" element={<EmailCampaigns />} />
               <Route path="/appearance" element={<Appearance />} />

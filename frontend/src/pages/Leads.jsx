@@ -8,6 +8,8 @@ import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
 import { downloadCSV } from '../utils/csv';
 import LeadEditModal from '../components/LeadEditModal';
+import { useModuleOptions, allOptions, selectableOptions, labelFor, toOptionsJson } from '../components/fieldOptions';
+import { localToIso, browserTimeZone } from '../components/followup/time';
 import DrillBanner, { useDrill, applyDrill } from '../components/DrillBanner';
 import AssignPicker from '../components/AssignPicker';
 import {
@@ -19,14 +21,16 @@ import {
   friendlyError,
 } from '../components/ui';
 
-// The application's real lead statuses — unchanged, so nothing
-// incompatible is written to the database.
-const STATUSES = ['New', 'Contacted', 'Interested', 'Follow-up', 'Converted', 'Dropped', 'Not Interested'];
+// Lead statuses, sources, qualifications, ratings and genders come from
+// Settings → Dropdown Options (Leads module). These are only the fallback if
+// that cannot be read — the application's original values, so nothing
+// incompatible is ever written to the database.
+const FALLBACK_STATUSES = ['New', 'Contacted', 'Interested', 'Follow-up', 'Converted', 'Dropped', 'Not Interested'];
 
 // Lead columns described as fields, so the shared filter, bulk update and
 // assignment tools work on Leads exactly as on every other module.
-const optsOf = (list) => JSON.stringify(list.map((v) => ({ value: v, label: v })));
-function leadFields(statuses, sources, qualifications = []) {
+const optsOf = (list) => toOptionsJson(list);
+function leadFields(statuses, sources, qualifications = [], extra = {}) {
   const f = (api_name, label, field_type, extra = {}) => ({ api_name, label, field_type, is_system: 1, show_in_edit: 1, ...extra });
   return [
     f('student_name', 'Lead name', 'text', { required: 1, show_in_edit: 0 }),
@@ -34,7 +38,7 @@ function leadFields(statuses, sources, qualifications = []) {
     f('status', 'Status', 'dropdown', { options_json: optsOf(statuses) }),
     f('source', 'Source', 'dropdown', { options_json: optsOf(sources) }),
     f('assigned_counselor', 'Owner', 'user_name'),
-    f('lead_rating', 'Rating', 'dropdown', { options_json: optsOf(['Hot', 'Warm', 'Cold']) }),
+    f('lead_rating', 'Rating', 'dropdown', { options_json: optsOf(extra.ratings || ['Hot', 'Warm', 'Cold']) }),
     f('follow_up_date', 'Next follow-up', 'date'),
     f('created_at', 'Created', 'date', { show_in_edit: 0 }),
     f('city', 'City', 'text'),
@@ -45,7 +49,7 @@ function leadFields(statuses, sources, qualifications = []) {
     f('service_interest', 'Service interest', 'text'),
     f('lead_score', 'Lead score', 'number', { show_in_edit: 0 }),
     f('qualification', 'Qualification', qualifications.length ? 'dropdown' : 'text', qualifications.length ? { options_json: optsOf(qualifications) } : {}),
-    f('gender', 'Gender', 'dropdown', { options_json: optsOf(['Male', 'Female', 'Other']) }),
+    f('gender', 'Gender', 'dropdown', { options_json: optsOf(extra.genders || ['Male', 'Female', 'Other']) }),
     f('date_of_birth', 'Date of birth', 'date'),
     f('address', 'Address', 'text'),
     f('alternate_mobile', 'Alternate mobile', 'phone'),
@@ -124,7 +128,7 @@ function LeadKpi({ label, value, icon: Icon, from, to, active, onClick }) {
   );
 }
 
-function LeadCard({ lead, onMoved, canEdit, onDragStart, onDragEnd, dragging }) {
+function LeadCard({ lead, statuses, sourceLabel, onMoved, canEdit, onDragStart, onDragEnd, dragging }) {
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState('');
 
@@ -141,12 +145,12 @@ function LeadCard({ lead, onMoved, canEdit, onDragStart, onDragEnd, dragging }) 
     } finally { setMoving(false); }
   };
   return (
-    <LeadCardBody lead={lead} canEdit={canEdit} moving={moving} moveError={moveError} onMove={move}
+    <LeadCardBody lead={lead} statuses={statuses} sourceLabel={sourceLabel} canEdit={canEdit} moving={moving} moveError={moveError} onMove={move}
       onDragStart={onDragStart} onDragEnd={onDragEnd} dragging={dragging} />
   );
 }
 
-function LeadCardBody({ lead, canEdit, moving, moveError, onMove, onDragStart, onDragEnd, dragging }) {
+function LeadCardBody({ lead, statuses, sourceLabel, canEdit, moving, moveError, onMove, onDragStart, onDragEnd, dragging }) {
   const followUp = lead.follow_up_date ? String(lead.follow_up_date).slice(0, 10) : null;
   const isToday = followUp === new Date().toISOString().slice(0, 10);
   return (
@@ -189,13 +193,15 @@ function LeadCardBody({ lead, canEdit, moving, moveError, onMove, onDragStart, o
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
             aria-label={`Move ${lead.student_name} to another status`}
             className="w-full text-[11px] border border-line rounded-md px-1.5 py-1 bg-white text-[var(--color-muted)] disabled:opacity-50">
-            {STATUSES.map((st) => <option key={st} value={st}>{moving ? 'Moving…' : `Move to ${st}`}</option>)}
+            {selectableOptions(statuses, lead.status).map((st) => (
+              <option key={st.value} value={st.value}>{moving ? 'Moving…' : `Move to ${st.label}`}</option>
+            ))}
           </select>
           {moveError && <p className="text-[10px] mt-1" style={{ color: 'var(--color-danger)' }}>{moveError}</p>}
         </div>
       )}
       <div className="mt-2 pt-2 border-t border-line flex items-center justify-between gap-2">
-        <span className="t-meta truncate">{lead.source || '—'}</span>
+        <span className="t-meta truncate">{(sourceLabel ? sourceLabel(lead.source) : lead.source) || '—'}</span>
         {followUp ? (
           <span className="text-[11px] font-medium shrink-0"
             style={{ color: isToday ? 'var(--color-attention)' : 'var(--color-muted)' }}>
@@ -209,7 +215,7 @@ function LeadCardBody({ lead, canEdit, moving, moveError, onMove, onDragStart, o
   );
 }
 
-function KanbanBoard({ leads, onAdd, canCreate, canEdit, onMoved }) {
+function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, onMoved }) {
   // Drag-and-drop, implemented with the native HTML5 drag events rather
   // than pulling in a drag library for one board.
   //
@@ -224,15 +230,27 @@ function KanbanBoard({ leads, onAdd, canCreate, canEdit, onMoved }) {
   const [optimistic, setOptimistic] = useState({});
   const [dropError, setDropError] = useState('');
 
+  // One column per ACTIVE status, in the configured order — plus a column for
+  // any deactivated status that leads still hold, so no lead disappears.
+  const columns = useMemo(() => {
+    const cols = statuses.filter((s) => s.active);
+    const held = new Set(leads.map((l) => optimistic[l.id] || l.status).filter(Boolean));
+    statuses.filter((s) => !s.active && held.has(s.value)).forEach((s) => cols.push(s));
+    // A status the data holds but the list does not (older data, an import).
+    held.forEach((v) => { if (!cols.some((c) => c.value === v)) cols.push({ value: v, label: v, active: true, unlisted: true }); });
+    return cols;
+  }, [statuses, leads, optimistic]);
+
   const byStatus = useMemo(() => {
-    const map = Object.fromEntries(STATUSES.map((s) => [s, []]));
+    const map = Object.fromEntries(columns.map((s) => [s.value, []]));
+    const first = columns[0]?.value;
     leads.forEach((l) => {
       const effective = optimistic[l.id] || l.status;
-      const key = STATUSES.includes(effective) ? effective : 'New';
-      map[key].push(l);
+      const key = map[effective] ? effective : first;
+      if (key) map[key].push(l);
     });
     return map;
-  }, [leads, optimistic]);
+  }, [leads, optimistic, columns]);
 
   const handleDrop = async (status) => {
     setDragOver(null);
@@ -268,9 +286,9 @@ function KanbanBoard({ leads, onAdd, canCreate, canEdit, onMoved }) {
         <p className="t-meta mb-2">Drag a card to another column to change its status.</p>
       )}
     <div className="flex gap-4 overflow-x-auto thin-scroll pb-4 -mx-1 px-1">
-      {STATUSES.map((status) => {
+      {columns.map(({ value: status, label: statusName, active, unlisted }) => {
         const [soft, solid] = toneVars(status);
-        const items = byStatus[status];
+        const items = byStatus[status] || [];
         const isTarget = dragOver === status && dragLead && dragLead.status !== status;
         return (
           <section key={status} className="w-[280px] shrink-0 rounded-xl flex flex-col transition-all"
@@ -288,12 +306,12 @@ function KanbanBoard({ leads, onAdd, canCreate, canEdit, onMoved }) {
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: solid }} />
-                  <h3 className="text-sm font-semibold truncate" style={{ color: solid }}>{status}</h3>
+                  <h3 className="text-sm font-semibold truncate" style={{ color: solid }}>{statusName}{active ? '' : ' (inactive)'}</h3>
                   <span className="text-xs font-medium px-1.5 rounded-full shrink-0"
                     style={{ background: 'rgba(255,255,255,.7)', color: solid }}>{items.length}</span>
                 </div>
                 <button className="p-0.5 rounded opacity-50 hover:opacity-100 shrink-0"
-                  style={{ color: solid }} aria-label={`${status} column options`}>
+                  style={{ color: solid }} aria-label={`${statusName} column options`}>
                   <MoreVertical className="w-4 h-4" />
                 </button>
               </div>
@@ -302,7 +320,7 @@ function KanbanBoard({ leads, onAdd, canCreate, canEdit, onMoved }) {
 
             <div className="px-2 pb-2 space-y-2 overflow-y-auto thin-scroll flex-1">
               {items.map((l) => (
-                <LeadCard key={l.id} lead={l} canEdit={canEdit} onMoved={onMoved}
+                <LeadCard key={l.id} lead={l} statuses={statuses} sourceLabel={sourceLabel} canEdit={canEdit} onMoved={onMoved}
                   onDragStart={setDragLead} onDragEnd={() => { setDragLead(null); setDragOver(null); }}
                   dragging={dragLead?.id === l.id} />
               ))}
@@ -311,7 +329,7 @@ function KanbanBoard({ leads, onAdd, canCreate, canEdit, onMoved }) {
               )}
             </div>
 
-            {canCreate && (
+            {canCreate && active && !unlisted && (
               <button onClick={() => onAdd(status)}
                 className="m-2 mt-0 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1 shrink-0
                            bg-white/60 hover:bg-white transition-colors"
@@ -327,17 +345,30 @@ function KanbanBoard({ leads, onAdd, canCreate, canEdit, onMoved }) {
   );
 }
 
-function AddLeadModal({ initialStatus, sources, onClose, onSaved }) {
+function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSaved }) {
   const [form, setForm] = useState({ ...empty, status: initialStatus || 'New' });
+  // The first follow-up: a date AND a time, so its reminder fires at an
+  // exact moment. Both or neither.
+  const [followUp, setFollowUp] = useState({ date: '', time: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   const submit = async (e) => {
     e.preventDefault();
     if (!form.student_name.trim()) return setError('Name is required.');
+    let dueAt = null;
+    if (followUp.date || followUp.time) {
+      if (!followUp.date || !followUp.time) return setError('Pick both the follow-up date and time, or leave both empty.');
+      dueAt = localToIso(followUp.date, followUp.time);
+      if (!dueAt || Date.parse(dueAt) < Date.now() - 60000) return setError('Pick a follow-up time in the future.');
+    }
     setSaving(true); setError('');
     try {
-      await api.createLead(form);
+      const { follow_up_date: _unused, ...body } = form;
+      const created = await api.createLead(body);
+      if (dueAt && created?.id) {
+        await api.scheduleFollowUp({ module: 'leads', record_id: created.id, due_at: dueAt, has_time: true, time_zone: browserTimeZone() });
+      }
       onSaved();
     } catch (err) { setError(err.message); } finally { setSaving(false); }
   };
@@ -393,21 +424,21 @@ function AddLeadModal({ initialStatus, sources, onClose, onSaved }) {
               <div>
                 <label className="t-meta font-medium block mb-1">Status</label>
                 <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                  {STATUSES.map((s) => <option key={s}>{s}</option>)}
+                  {selectableOptions(statuses, form.status).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </div>
               <div>
                 <label className="t-meta font-medium block mb-1">Source</label>
                 <select className="input" value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })}>
                   <option value="">Select…</option>
-                  {sources.map((s) => <option key={s.id || s.label} value={s.label}>{s.label}</option>)}
+                  {selectableOptions(sources, form.source).map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </div>
               <div>
                 <label className="t-meta font-medium block mb-1">Rating</label>
                 <select className="input" value={form.lead_rating} onChange={(e) => setForm({ ...form, lead_rating: e.target.value })}>
                   <option value="">Select…</option>
-                  {['Hot', 'Warm', 'Cold'].map((r) => <option key={r}>{r}</option>)}
+                  {selectableOptions(ratings, form.lead_rating, ['Hot', 'Warm', 'Cold']).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
               {field('Product interest', 'product_interest')}
@@ -422,7 +453,15 @@ function AddLeadModal({ initialStatus, sources, onClose, onSaved }) {
                 <AssignPicker asInput mode="name" label="Assigned to" placeholder="Select a user…"
                   value={form.assigned_counselor || null} onChange={(v) => setForm({ ...form, assigned_counselor: v || '' })} />
               </div>
-              {field('Next follow-up', 'follow_up_date', { type: 'date' })}
+              <div>
+                <label className="t-meta font-medium block mb-1">First follow-up (date &amp; time)</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="date" className="input" value={followUp.date} aria-label="Follow-up date"
+                    onChange={(e) => setFollowUp((f) => ({ ...f, date: e.target.value }))} />
+                  <input type="time" className="input" value={followUp.time} aria-label="Follow-up time"
+                    onChange={(e) => setFollowUp((f) => ({ ...f, time: e.target.value }))} />
+                </div>
+              </div>
             </div>
           </section>
 
@@ -447,8 +486,11 @@ function AddLeadModal({ initialStatus, sources, onClose, onSaved }) {
 export default function Leads() {
   const can = usePermissions();
   const [list, setList] = useState([]);
-  const [sources, setSources] = useState([]);
-  const [qualifications, setQualifications] = useState([]);
+  const leadOpts = useModuleOptions('leads');
+  const statuses = useMemo(() => allOptions(leadOpts?.status, FALLBACK_STATUSES), [leadOpts]);
+  const sources = useMemo(() => allOptions(leadOpts?.source), [leadOpts]);
+  const qualifications = useMemo(() => allOptions(leadOpts?.qualification), [leadOpts]);
+  const sourceLabel = (v) => labelFor(leadOpts?.source, v);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [view, setView] = useState(() => localStorage.getItem('leads_view') || 'list');
@@ -480,11 +522,6 @@ export default function Leads() {
 
   useEffect(() => {
     load();
-    // Lead sources come from the master-options list this CRM already has.
-    // Failing to load them must never take the page down, so it degrades
-    // to an empty dropdown rather than throwing.
-    api.listMasterOptions?.('lead_source').then(setSources).catch(() => setSources([]));
-    api.listMasterOptions?.('qualification').then(setQualifications).catch(() => setQualifications([]));
   }, [statusFilter]);
 
   // Search box debounce. It is skipped on the first render: the effect above
@@ -503,11 +540,19 @@ export default function Leads() {
   );
 
   // Source/owner filter client-side; status and search go to the API.
+  // Every configured option (inactive ones too — existing leads can hold
+  // them) plus any value the data holds that is not configured at all.
+  const withData = (opts, key) => {
+    const known = new Set(opts.map((o) => o.value));
+    const extra = [...new Set(list.map((l) => l[key]).filter((v) => v && !known.has(String(v))))];
+    return [...opts, ...extra.map((v) => ({ value: String(v), label: String(v), active: false }))];
+  };
   const fields = useMemo(() => leadFields(
-    [...new Set([...STATUSES, ...list.map((l) => l.status).filter(Boolean)])],
-    [...new Set([...sources.map((s) => s.label), ...list.map((l) => l.source).filter(Boolean)])],
-    [...new Set([...qualifications.map((s) => s.label), ...list.map((l) => l.qualification).filter(Boolean)])],
-  ), [list, sources, qualifications]);
+    withData(statuses, 'status'),
+    withData(sources, 'source'),
+    withData(qualifications, 'qualification'),
+    { ratings: leadOpts?.lead_rating, genders: leadOpts?.gender },
+  ), [list, statuses, sources, qualifications, leadOpts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => applyFilters(applyDrill(list, drill).filter((l) => (
     (!sourceFilter || l.source === sourceFilter) &&
@@ -609,12 +654,12 @@ export default function Leads() {
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
           className="input w-auto min-w-[130px]" aria-label="Filter by status">
           <option value="">All Statuses</option>
-          {STATUSES.map((s) => <option key={s}>{s}</option>)}
+          {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
         <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
           className="input w-auto min-w-[130px]" aria-label="Filter by source">
           <option value="">All Sources</option>
-          {sources.map((s) => <option key={s.id || s.label} value={s.label}>{s.label}</option>)}
+          {sources.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
         {owners.length > 0 && (
           <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}
@@ -677,7 +722,7 @@ export default function Leads() {
       )}
 
       {!loading && !error && !(drill.active && drill.loading) && filtered.length > 0 && view === 'kanban' && (
-        <KanbanBoard leads={filtered} onAdd={setAddFor} canCreate={can('leads', 'create')}
+        <KanbanBoard leads={filtered} statuses={statuses} sourceLabel={sourceLabel} onAdd={setAddFor} canCreate={can('leads', 'create')}
           canEdit={can('leads', 'edit')} onMoved={load} />
       )}
 
@@ -719,8 +764,8 @@ export default function Leads() {
                         {!l.email && !l.mobile && '—'}
                       </div>
                     </td>
-                    <td className="py-3 px-4 text-[var(--color-muted)] whitespace-nowrap">{l.source || '—'}</td>
-                    <td className="py-3 px-4"><Badge status={l.status}>{l.status}</Badge></td>
+                    <td className="py-3 px-4 text-[var(--color-muted)] whitespace-nowrap">{sourceLabel(l.source) || '—'}</td>
+                    <td className="py-3 px-4"><Badge status={l.status}>{labelFor(statuses, l.status)}</Badge></td>
                     <td className="py-3 px-4">{l.lead_rating ? <Badge status={l.lead_rating}>{l.lead_rating}</Badge> : <span className="text-[var(--color-faint)]">—</span>}</td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       <AssignPicker mode="name" label="Owner" value={l.assigned_counselor || null}
@@ -772,7 +817,7 @@ export default function Leads() {
       )}
 
       {addFor && (
-        <AddLeadModal initialStatus={addFor} sources={sources}
+        <AddLeadModal initialStatus={addFor} statuses={statuses} sources={sources} ratings={leadOpts?.lead_rating}
           onClose={() => setAddFor(null)}
           onSaved={() => { setAddFor(null); setLoading(true); load(); }} />
       )}

@@ -21,9 +21,14 @@ import ErrorBoundary from './components/ErrorBoundary.jsx'
 // installed the old worker keep running it until it is explicitly removed.
 // Deleting the file alone would not rescue existing users.
 // ---------------------------------------------------------------------------
+// The one worker that stays is the follow-up reminder worker
+// (/notify-sw.js, scope /notify-sw/): it has no fetch handler and never
+// controls a page, so it cannot cause the problem described above.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations()
-    .then((registrations) => registrations.forEach((r) => r.unregister()))
+    .then((registrations) => registrations
+      .filter((r) => !/\/notify-sw\/$/.test(r.scope))
+      .forEach((r) => r.unregister()))
     .catch(() => {});
   if (window.caches?.keys) {
     caches.keys()

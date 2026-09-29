@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { api } from '../api';
+import { forgetThisBrowser } from '../components/followup/notify';
 
 const AuthContext = createContext(null);
 
@@ -18,6 +19,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Stop this browser receiving the signed-out person's follow-up reminders.
+    forgetThisBrowser(localStorage.getItem('cd_token'));
     localStorage.removeItem('cd_token');
     localStorage.removeItem('cd_user');
     setToken(null);

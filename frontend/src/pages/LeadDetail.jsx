@@ -8,7 +8,9 @@ import {
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
 import StatusBadge from '../components/StatusBadge';
-import DisposeLeadModal from '../components/DisposeLeadModal';
+import OutcomeModal from '../components/followup/OutcomeModal';
+import FollowUpCard from '../components/followup/FollowUpCard';
+import { useModuleOptions, selectableOptions, labelFor } from '../components/fieldOptions';
 import WhatsAppTemplateModal from '../components/WhatsAppTemplateModal';
 import AddRelatedModal from './universal/AddRelatedModal';
 import ScheduleMeetingModal from '../components/ScheduleMeetingModal';
@@ -19,8 +21,10 @@ import { accentFor } from '../theme/moduleAccents';
 import { avatarGradientFor } from '../theme/avatarColors';
 import { CallsTab, MeetingsTab, TasksTab, DocumentsTab, DealsTab, NotesTab } from '../components/LeadRelatedTabs';
 
+// The funnel tracker's stages (stored values). Their labels, and every other
+// status, come from Settings → Dropdown Options (Leads › Status).
 const FUNNEL_STAGES = ['New', 'Contacted', 'Interested', 'Follow-up', 'Converted'];
-const ALL_STATUSES = ['New', 'Contacted', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Dropped'];
+const FALLBACK_STATUSES = ['New', 'Contacted', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Dropped'];
 const ACTIVITY_TABS = [
   { key: 'note', label: 'Note' },
   { key: 'call', label: 'Call Log' },
@@ -309,7 +313,12 @@ export default function LeadDetail() {
   const navigate = useNavigate();
   const can = usePermissions();
   const [lead, setLead] = useState(null);
-  const [disposing, setDisposing] = useState(false);
+  // One flow for "what happened + what's next" (was: separate Dispose and
+  // Schedule Call buttons that each set a follow-up their own way).
+  const [loggingOutcome, setLoggingOutcome] = useState(false);
+  const [schedulingFollowUp, setSchedulingFollowUp] = useState(false);
+  const [followUpVersion, setFollowUpVersion] = useState(0);
+  const leadOptions = useModuleOptions('leads');
   const [waOpen, setWaOpen] = useState(false);
   const [addingRelation, setAddingRelation] = useState(null); // 'calls' | 'tasks' | 'notes' | null
   // Meetings deliberately do NOT go through addingRelation. The generic
@@ -322,8 +331,6 @@ export default function LeadDetail() {
   const [pageTab, setPageTab] = useState('overview');
   const [tab, setTab] = useState('note');
   const [note, setNote] = useState('');
-  const [scheduling, setScheduling] = useState(false);
-  const [scheduleDate, setScheduleDate] = useState('');
   // One popup for every field on the lead. `editing` is false, or the name of
   // the section to open it at (a card's own Edit link scrolls to that card).
   const [editing, setEditing] = useState(false);
@@ -361,15 +368,7 @@ export default function LeadDetail() {
     load();
   };
 
-  const saveSchedule = async () => {
-    if (!scheduleDate) return;
-    await api.updateLead(id, { follow_up_date: scheduleDate });
-    setScheduling(false);
-    setScheduleDate('');
-    load();
-  };
-
-  const markFollowUpDone = async () => { await api.updateLead(id, { follow_up_date: null }); load(); };
+  const afterFollowUpChange = () => { setFollowUpVersion((v) => v + 1); load(); };
 
   // Conversion needs the COMPANY name, which is a different thing from the
   // lead's own name — so it asks, rather than silently defaulting. It used to
@@ -387,7 +386,7 @@ export default function LeadDetail() {
   );
 
   const runQuickAction = (key) => {
-    if (key === 'call') return setDisposing(true);
+    if (key === 'call') return setLoggingOutcome(true);
     if (key === 'whatsapp') return setWaOpen(true);
     if (key === 'email') return lead.email && window.open(`mailto:${lead.email}`, '_self');
     // "Schedule Meeting" now schedules one, rather than moving you to the tab
@@ -399,9 +398,12 @@ export default function LeadDetail() {
   };
 
   const stageIndex = FUNNEL_STAGES.indexOf(lead.status);
-  const isTerminalOther = lead.status === 'Not Interested' || lead.status === 'Dropped';
-  const tags = [lead.source, lead.city, lead.product_interest].filter(Boolean);
-  const followUpActive = lead.follow_up_date && !['Converted', 'Dropped', 'Not Interested'].includes(lead.status);
+  // Any status outside the five funnel stages (Not Interested, Dropped, or one
+  // an admin added) is shown as "outside the main funnel".
+  const isTerminalOther = !!lead.status && stageIndex === -1;
+  const statusLabel = (v) => labelFor(leadOptions?.status, v);
+  const statusChoices = selectableOptions(leadOptions?.status, lead.status, FALLBACK_STATUSES);
+  const tags = [labelFor(leadOptions?.source, lead.source), lead.city, lead.product_interest].filter(Boolean);
   const filteredActivities = tab === 'all' ? lead.activities : lead.activities.filter((a) => a.type === tab);
 
   return (
@@ -453,7 +455,7 @@ export default function LeadDetail() {
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl font-bold text-ink">{lead.student_name}</h1>
-                <StatusBadge status={lead.status} />
+                <StatusBadge status={lead.status} label={statusLabel(lead.status)} />
               </div>
               <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1.5 text-sm text-slate-500">
                 {lead.mobile && (
@@ -518,13 +520,9 @@ export default function LeadDetail() {
                   <UserCheck className="w-4 h-4" /> Convert Lead
                 </button>
               )}
-              {can('leads', 'edit') && (
-                <button onClick={() => setScheduling((s) => !s)} className="flex items-center gap-1.5 text-white text-sm font-semibold px-4 py-2.5 rounded-xl h-fit" style={{ background: '#059669' }}>
-                  <CalendarClock className="w-4 h-4" /> Schedule Call
-                </button>
-              )}
               {can('calls', 'create') && !lead.converted_contact_id && (
-                <button onClick={() => setDisposing(true)} className="flex items-center gap-1.5 text-white text-sm font-semibold px-4 py-2.5 rounded-xl h-fit" style={{ background: '#DC2626' }}>
+                <button onClick={() => setLoggingOutcome(true)} title="Starts the call timer. Record connected / not connected, the disposition, then schedule the next follow-up or close"
+                  className="flex items-center gap-1.5 text-white text-sm font-semibold px-4 py-2.5 rounded-xl h-fit" style={{ background: '#DC2626' }}>
                   <PhoneCall className="w-4 h-4" /> Dispose
                 </button>
               )}
@@ -551,14 +549,6 @@ export default function LeadDetail() {
           </div>
         </div>
 
-        {scheduling && (
-          <div className="flex items-center gap-2 mt-3">
-            <input type="date" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)}
-              className="input w-auto" />
-            <button onClick={saveSchedule} className="btn btn-primary">Set follow-up date</button>
-          </div>
-        )}
-
         {/* Stage tracker — brand colour on a white page, matching the
             reference: filled circles for completed/current, grey outline
             for upcoming, a solid brand-colour line marking progress. */}
@@ -573,7 +563,7 @@ export default function LeadDetail() {
                     style={i <= stageIndex ? { background: 'var(--color-brand)' } : undefined}>
                     {i < stageIndex ? <Check className="w-4 h-4" /> : i + 1}
                   </div>
-                  <span className={`text-[11px] whitespace-nowrap ${i === stageIndex ? 'text-ink font-semibold' : 'text-slate-400'}`}>{stage}</span>
+                  <span className={`text-[11px] whitespace-nowrap ${i === stageIndex ? 'text-ink font-semibold' : 'text-slate-400'}`}>{statusLabel(stage)}</span>
                 </button>
                 {i < FUNNEL_STAGES.length - 1 && (
                   <div className={`flex-1 h-[3px] mx-1 rounded-full ${i < stageIndex ? '' : 'bg-[var(--color-line)]'}`}
@@ -583,25 +573,19 @@ export default function LeadDetail() {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-slate-500 mt-5">This lead is marked <StatusBadge status={lead.status} /> — outside the main funnel.</p>
+          <p className="text-xs text-slate-500 mt-5">This lead is marked <StatusBadge status={lead.status} label={statusLabel(lead.status)} /> — outside the main funnel.</p>
         )}
       </div>
 
-      {/* Follow-up banner */}
-      {followUpActive && (
-        <div className="bg-amber-soft rounded-xl p-4 mt-4 flex items-center justify-between flex-wrap gap-3">
-          <p className="text-sm text-ink">
-            <CalendarClock className="w-4 h-4 inline mr-1.5 -mt-0.5" />
-            <strong>Follow-up scheduled</strong> — {lead.follow_up_date?.slice(0, 10)} · {lead.assigned_counselor || 'Unassigned'}
-          </p>
-          {can('leads', 'edit') && (
-            <div className="flex gap-2">
-              <button onClick={() => setScheduling(true)} className="text-xs font-medium bg-white border border-line px-3 py-1.5 rounded-lg hover:bg-canvas">Reschedule</button>
-              <button onClick={markFollowUpDone} className="text-xs font-medium bg-amber text-white px-3 py-1.5 rounded-lg hover:opacity-90">Mark Done</button>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Next follow-up — exact date and time, state, and its actions. */}
+      <div className="mt-4">
+        <FollowUpCard module="leads" recordId={Number(id)} recordName={lead.student_name} phone={lead.mobile}
+          status={lead.status} ownerName={lead.assigned_counselor}
+          canEdit={can('leads', 'edit')}
+          canLogOutcome={can('calls', 'create') && !lead.converted_contact_id}
+          onLogOutcome={() => setLoggingOutcome(true)}
+          refreshKey={followUpVersion} onChanged={load} />
+      </div>
 
 
       {/* Page-level tabs */}
@@ -657,7 +641,7 @@ export default function LeadDetail() {
                   <Row label="Email" value={lead.email} />
                   <Row label="City" value={lead.city} />
                   <Row label="Address" value={lead.address} />
-                  <Row label="Source" value={lead.source} />
+                  <Row label="Source" value={labelFor(leadOptions?.source, lead.source)} />
                   <Row label="Owner" value={lead.assigned_counselor} />
                   <Row label="Created On" value={lead.created_at?.slice(0, 10)} />
                   <Row label="Last Activity" value={lead.activities?.[0]
@@ -674,7 +658,7 @@ export default function LeadDetail() {
                     <Row label="Product Interest" value={lead.product_interest} />
                     <Row label="Service Interest" value={lead.service_interest} />
                     <Row label="Campaign" value={lead.campaign} />
-                    <Row label="Lead Rating" value={lead.lead_rating} />
+                    <Row label="Lead Rating" value={labelFor(leadOptions?.lead_rating, lead.lead_rating)} />
                   </dl>
                 </div>
 
@@ -682,9 +666,9 @@ export default function LeadDetail() {
                   <CardHeader icon={UserCheck} title="Personal Information" tint="#0D9488"
                     action={editLink('Personal Information')} />
                   <dl className="text-sm space-y-1.5">
-                    <Row label="Gender" value={lead.gender} />
+                    <Row label="Gender" value={labelFor(leadOptions?.gender, lead.gender)} />
                     <Row label="Date of Birth" value={lead.date_of_birth ? String(lead.date_of_birth).slice(0, 10) : null} />
-                    <Row label="Qualification" value={lead.qualification} />
+                    <Row label="Qualification" value={labelFor(leadOptions?.qualification, lead.qualification)} />
                   </dl>
                 </div>
 
@@ -707,13 +691,13 @@ export default function LeadDetail() {
               <div className="card p-4">
                 <CardHeader icon={CheckSquare} title="Change Status" tint="#0284C7" />
                 <div className="flex flex-wrap gap-1.5">
-                  {ALL_STATUSES.map((st) => (
-                    <button key={st} onClick={() => changeStatus(st)}
+                  {statusChoices.map((st) => (
+                    <button key={st.value} onClick={() => changeStatus(st.value)}
                       className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${
-                        lead.status === st ? 'text-white border-transparent' : 'border-line text-slate-500 hover:border-ink/40'
+                        lead.status === st.value ? 'text-white border-transparent' : 'border-line text-slate-500 hover:border-ink/40'
                       }`}
-                      style={lead.status === st ? { background: ACCENT.solid } : undefined}>
-                      {st}
+                      style={lead.status === st.value ? { background: ACCENT.solid } : undefined}>
+                      {st.label}
                     </button>
                   ))}
                 </div>
@@ -764,7 +748,7 @@ export default function LeadDetail() {
 
             <SuggestedNextSteps scoring={scoring} onAction={(key) => {
               if (key === 'edit') return setEditing(true);
-              if (key === 'schedule') return setScheduling(true);
+              if (key === 'schedule') return setSchedulingFollowUp(true);
               return runQuickAction(key);
             }} />
 
@@ -907,9 +891,20 @@ export default function LeadDetail() {
         />
       )}
 
-      {disposing && (
-        <DisposeLeadModal lead={lead} onClose={() => setDisposing(false)}
-          onDisposed={() => { setDisposing(false); load(); }} />
+      {loggingOutcome && (
+        <OutcomeModal
+          subject={{ id: lead.id, module: 'leads', name: lead.student_name, phone: lead.mobile, status: lead.status }}
+          followUp={lead.next_follow_up || null} ownerName={lead.assigned_counselor}
+          onClose={() => setLoggingOutcome(false)}
+          onSaved={() => { setLoggingOutcome(false); afterFollowUpChange(); }} />
+      )}
+
+      {schedulingFollowUp && (
+        <OutcomeModal mode="schedule"
+          subject={{ id: lead.id, module: 'leads', name: lead.student_name, phone: lead.mobile, status: lead.status }}
+          followUp={lead.next_follow_up || null} ownerName={lead.assigned_counselor}
+          onClose={() => setSchedulingFollowUp(false)}
+          onSaved={() => { setSchedulingFollowUp(false); afterFollowUpChange(); }} />
       )}
 
       {waOpen && (

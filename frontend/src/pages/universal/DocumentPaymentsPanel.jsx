@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2, Wallet, CheckCircle2, Clock } from 'lucide-react';
 import { api } from '../../api';
 import { friendlyError } from '../../components/ui';
+import { useSharedOptions, selectableOptions } from '../../components/fieldOptions';
 
 /* ---------------------------------------------------------------------------
    Payments against an invoice.
@@ -16,6 +17,7 @@ import { friendlyError } from '../../components/ui';
    and the one who refreshed last would be wrong.
    --------------------------------------------------------------------------- */
 
+// Fallback only; the modes come from Settings → Dropdown Options (Payment Mode).
 const MODES = ['Cash', 'Bank Transfer', 'UPI', 'Cheque', 'Card', 'Other'];
 
 const money = (n, currency = 'INR') =>
@@ -30,6 +32,7 @@ export default function DocumentPaymentsPanel({ invoiceId, record, canEdit, onUp
     status: record.payment_status,
   });
   const [showForm, setShowForm] = useState(false);
+  const modes = useSharedOptions('payment_mode');
   const [form, setForm] = useState({ amount: '', payment_mode: 'Bank Transfer', payment_date: today(), transaction_number: '', remarks: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -140,7 +143,7 @@ export default function DocumentPaymentsPanel({ invoiceId, record, canEdit, onUp
             <span className="text-[11px] text-[var(--color-muted)] font-medium">How</span>
             <select value={form.payment_mode} onChange={(e) => setForm({ ...form, payment_mode: e.target.value })}
               className="border border-line rounded-lg px-3 py-1.5 text-sm w-full mt-0.5">
-              {MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+              {selectableOptions(modes, form.payment_mode, MODES).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </label>
           <label className="block">

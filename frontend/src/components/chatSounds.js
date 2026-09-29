@@ -122,6 +122,15 @@ const RECIPES = {
 };
 
 /**
+ * Browsers only let a page play sound after the person has interacted with
+ * it. Calling this from a click or key press unlocks audio for the rest of
+ * the session, so a reminder that arrives later can actually be heard.
+ */
+export function primeAudio() {
+  try { audio(); } catch { /* no Web Audio — reminders stay silent */ }
+}
+
+/**
  * Play a tone by id. Safe to call anywhere: a browser with no Web Audio, a
  * blocked autoplay policy or an unknown tone id all end as silence rather
  * than an exception, because a notification sound must never be able to

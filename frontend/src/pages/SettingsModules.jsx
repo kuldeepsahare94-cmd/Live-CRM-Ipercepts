@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, GripVertical, Eye, EyeOff, Pencil, Columns, LayoutGrid, Boxes } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Eye, EyeOff, Pencil, Columns, LayoutGrid, Boxes, ListChecks } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
 import { ModuleIcon, ICON_OPTIONS } from '../components/moduleIcons';
 import { PageHeader } from '../components/ui';
+import OptionManagerModal from '../components/OptionManagerModal';
 
 function IconPicker({ value, onChange }) {
   return (
@@ -318,6 +319,7 @@ function FieldBuilder({ module, can }) {
   const [form, setForm] = useState({ api_name: '', label: '', field_type: 'text', required: false, options: '', section: 'Details' });
   const [dragId, setDragId] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [managing, setManaging] = useState(null);   // field whose options are open
 
   const load = () => api.listModuleFields(module.id).then(setFields);
   useEffect(() => { load(); }, [module.id]);
@@ -425,7 +427,15 @@ function FieldBuilder({ module, can }) {
                     <input type="checkbox" checked={!!f[flag]} disabled={!can('fields', 'edit')} onChange={() => toggleFlag(f, flag)} />
                   </td>
                 ))}
-                <td className="py-2 pl-2 text-right">
+                <td className="py-2 pl-2 text-right whitespace-nowrap">
+                  {/* Every choice field — built-in or custom — can have its
+                      options changed after it exists. */}
+                  {OPTION_TYPES.has(f.field_type) && (
+                    <button onClick={() => setManaging(f)} title="Manage options"
+                      className="text-slate-400 hover:text-ink inline-flex items-center gap-1 mr-2 text-[11px] font-medium">
+                      <ListChecks className="w-3.5 h-3.5" /> Options
+                    </button>
+                  )}
                   {can('fields', 'delete') && !f.is_system && (
                     <button onClick={() => removeField(f)} className="text-slate-400 hover:text-warn"><Trash2 className="w-3.5 h-3.5" /></button>
                   )}
@@ -436,6 +446,11 @@ function FieldBuilder({ module, can }) {
           </tbody>
         </table>
       </div>
+
+      {managing && (
+        <OptionManagerModal fieldId={managing.id} canEdit={can('fields', 'edit') || can('settings', 'edit')}
+          onClose={() => setManaging(null)} onSaved={() => { setManaging(null); load(); }} />
+      )}
     </div>
   );
 }

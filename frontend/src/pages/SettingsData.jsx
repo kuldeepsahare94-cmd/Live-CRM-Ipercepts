@@ -178,7 +178,17 @@ function AuditSection({ modules }) {
   };
   useEffect(() => { load(); }, [moduleFilter]);
 
+  // Dropdown option changes (Settings → Dropdown Options) are configuration,
+  // not a record: they are logged against the field, with record 0.
+  const OPTION_VERBS = {
+    option_added: 'added an option to', option_renamed: 'renamed an option of', option_deactivated: 'deactivated an option of',
+    option_activated: 'reactivated an option of', option_deleted: 'deleted an option of', options_reordered: 'reordered the options of',
+  };
+  const fieldName = (r) => (String(r.field_api_name || '').startsWith('list:')
+    ? `the ${String(r.field_api_name).slice(5).replace(/_/g, ' ')} list`
+    : `${r.singular_label} › ${String(r.field_api_name || '').replace(/_/g, ' ')}`);
   const describe = (r) => {
+    if (OPTION_VERBS[r.action]) return `${OPTION_VERBS[r.action]} ${fieldName(r)}`;
     if (r.action === 'created') return `created ${r.singular_label} #${r.record_id}`;
     if (r.action === 'deleted') return `deleted ${r.singular_label} #${r.record_id}`;
     if (r.action === 'field_changed') {
@@ -221,9 +231,11 @@ function AuditSection({ modules }) {
                   <td className="py-2 pr-3 text-slate-600">{r.full_name || r.username || '—'}</td>
                   <td className="py-2 pr-3 text-ink">{describe(r)}</td>
                   <td className="py-2 text-slate-500">
-                    {r.action === 'field_changed'
+                    {r.action === 'field_changed' || r.action === 'option_renamed' || r.action === 'options_reordered'
                       ? <span><span className="line-through opacity-60">{r.old_value || '(empty)'}</span> → {r.new_value || '(empty)'}</span>
-                      : '—'}
+                      : OPTION_VERBS[r.action]
+                        ? <span>{r.new_value || r.old_value || '—'}</span>
+                        : '—'}
                   </td>
                 </tr>
               ))}

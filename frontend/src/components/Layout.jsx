@@ -17,6 +17,7 @@ import { ModuleIcon } from './moduleIcons';
 import { accentFor } from '../theme/moduleAccents';
 import { Avatar } from './ui';
 import ErrorBoundary from './ErrorBoundary';
+import ReminderCenter from './followup/ReminderCenter';
 
 // Hand-written links for the modules that have bespoke pages. Everything
 // else is generated from the module registry below, so a module created
@@ -334,6 +335,10 @@ export default function Layout() {
       </div>
 
       <AssistantWidget />
+      {/* Follow-up reminders: in-app popup, sound and browser notification. */}
+      <ErrorBoundary fallback={null}>
+        <ReminderCenter />
+      </ErrorBoundary>
     </div>
   );
 }

@@ -220,7 +220,11 @@ function choiceOptions(field, dir, rows, getValue) {
     });
     return [...seen.values()].sort((a, b) => a.localeCompare(b)).map((v) => ({ value: v, label: v }));
   }
-  return parseOptions(field).map((o) => (typeof o === 'string' ? { value: o, label: o } : { value: String(o.value ?? o.label), label: String(o.label ?? o.value) }));
+  // Filters list every option, deactivated ones included (existing records can
+  // still hold them); `active` lets the mass update offer only current ones.
+  return parseOptions(field).map((o) => (typeof o === 'string'
+    ? { value: o, label: o, active: true }
+    : { value: String(o.value ?? o.label), label: String(o.label ?? o.value), active: o.active !== false }));
 }
 
 // A dropdown that selects several values, with search.
@@ -886,7 +890,8 @@ function MassValueInput({ field, value, onChange, rows, getValue }) {
   const t = field.field_type;
   const k = kindOf(field);
   const cleared = value === null;
-  const opts = choiceOptions(field, dir, rows, getValue);
+  // Mass update sets a NEW value, so deactivated options are not offered.
+  const opts = choiceOptions(field, dir, rows, getValue).filter((o) => o.active !== false);
   const sel = (children, v, set) => (
     <select className="input w-full" value={v} onChange={(e) => set(e.target.value)} aria-label={field.label}>{children}</select>
   );

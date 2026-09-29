@@ -25,6 +25,18 @@ const COLORS = {
   placement_result_updated: 'text-good bg-emerald-50',
 };
 
+// Follow-up items carry an exact instant (UTC); show it in the viewer's time.
+// Older items keep the plain text they always had.
+function whenText(date) {
+  if (typeof date === 'string' && /T\d{2}:\d{2}/.test(date) && /Z$|[+-]\d{2}:\d{2}$/.test(date)) {
+    const d = new Date(date);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+    }
+  }
+  return date;
+}
+
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
@@ -42,7 +54,9 @@ export default function NotificationBell() {
   useEffect(() => {
     load();
     const interval = setInterval(load, 60000);
-    return () => clearInterval(interval);
+    // A follow-up snoozed or completed from a reminder popup updates the bell at once.
+    window.addEventListener('icrm-followups-changed', load);
+    return () => { clearInterval(interval); window.removeEventListener('icrm-followups-changed', load); };
   }, []);
 
   useEffect(() => {
@@ -102,7 +116,7 @@ export default function NotificationBell() {
                       {!item.read && <span className="w-1.5 h-1.5 rounded-full bg-amber shrink-0" />}
                     </div>
                     <div className="text-xs text-slate-500 truncate">{item.message}</div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">{item.date}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">{whenText(item.date)}</div>
                   </div>
                 </button>
               );

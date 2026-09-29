@@ -16,7 +16,11 @@ import { api } from '../api';
 import { EditRecordModal } from './RecordEditModal';
 import { accentFor } from '../theme/moduleAccents';
 import { friendlyError } from './ui';
+import { useModuleOptions, allOptions, toOptionsJson } from './fieldOptions';
 
+// Status, Source, Qualification, Rating and Gender options come from
+// Settings → Dropdown Options (Leads). These are only the fallback if those
+// cannot be read, and are the application's original values.
 export const LEAD_STATUSES = ['New', 'Contacted', 'Interested', 'Follow-up', 'Converted', 'Not Interested', 'Dropped'];
 const RATINGS = ['Hot', 'Warm', 'Cold'];
 const GENDERS = ['Male', 'Female', 'Other'];
@@ -36,7 +40,7 @@ const CORE = [
     { api_name: 'alternate_mobile', label: 'Alternate Mobile', field_type: 'phone' },
     { api_name: 'email', label: 'Email', field_type: 'email' },
     { api_name: 'city', label: 'City', field_type: 'text' },
-    { api_name: 'source', label: 'Source', field_type: 'dropdown', dynamic: 'sources' },
+    { api_name: 'source', label: 'Source', field_type: 'dropdown', managed: 'source' },
     { api_name: 'assigned_counselor', label: 'Owner', field_type: 'dropdown', dynamic: 'owners' },
     { api_name: 'address', label: 'Address', field_type: 'textarea' },
   ] },
@@ -44,30 +48,32 @@ const CORE = [
     { api_name: 'product_interest', label: 'Product Interest', field_type: 'text' },
     { api_name: 'service_interest', label: 'Service Interest', field_type: 'text' },
     { api_name: 'campaign', label: 'Campaign', field_type: 'text' },
-    { api_name: 'lead_rating', label: 'Lead Rating', field_type: 'dropdown', options: RATINGS },
+    { api_name: 'lead_rating', label: 'Lead Rating', field_type: 'dropdown', options: RATINGS, managed: 'lead_rating' },
   ] },
   { section: 'Personal Information', fields: [
-    { api_name: 'gender', label: 'Gender', field_type: 'dropdown', options: GENDERS },
+    { api_name: 'gender', label: 'Gender', field_type: 'dropdown', options: GENDERS, managed: 'gender' },
     { api_name: 'date_of_birth', label: 'Date of Birth', field_type: 'date' },
-    { api_name: 'qualification', label: 'Qualification', field_type: 'text' },
+    { api_name: 'qualification', label: 'Qualification', field_type: 'dropdown', managed: 'qualification' },
   ] },
-  { section: 'Status & Follow-up', fields: [
-    { api_name: 'status', label: 'Status', field_type: 'dropdown', options: LEAD_STATUSES, required: true },
-    { api_name: 'follow_up_date', label: 'Next Follow-up', field_type: 'date' },
+  // The follow-up is not edited here: it has an exact date AND time and a
+  // reminder, and is set from the lead page (Dispose, or the follow-up
+  // card's Schedule / Reschedule) — one way to schedule, not two.
+  { section: 'Status', fields: [
+    { api_name: 'status', label: 'Status', field_type: 'dropdown', options: LEAD_STATUSES, required: true, managed: 'status' },
     { api_name: 'remarks', label: 'Remarks', field_type: 'textarea' },
   ] },
 ];
 const CORE_NAMES = new Set(CORE.flatMap((s) => s.fields.map((f) => f.api_name)));
 // Registered in the metadata but not something a person should type into:
 // the conversion links are set by converting, and the score is computed.
-const NEVER_EDIT = new Set(['lead_score', 'converted_at', 'converted_contact_id', 'converted_account_id', 'converted_opportunity_id']);
+const NEVER_EDIT = new Set(['lead_score', 'converted_at', 'converted_contact_id', 'converted_account_id', 'converted_opportunity_id', 'follow_up_date']);
 
 export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onClose, onSaved }) {
   const [lead, setLead] = useState(leadIn || null);
   const [meta, setMeta] = useState(null);         // { module, fields }
   const [custom, setCustom] = useState({});
-  const [sources, setSources] = useState([]);
   const [owners, setOwners] = useState([]);
+  const managedOptions = useModuleOptions('leads');
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState('');
 
@@ -79,9 +85,8 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
         const mod = await api.getModuleMeta('leads').catch(() => null);
         const fields = mod ? await api.listModuleFields(mod.id).catch(() => []) : [];
         const hasCustom = fields.some((f) => !f.is_system && f.show_in_edit);
-        const [cv, src, users] = await Promise.all([
+        const [cv, users] = await Promise.all([
           hasCustom ? api.getCustomFieldValues('leads', leadId).catch(() => ({})) : {},
-          api.listMasterOptions?.('lead_source').catch(() => []) ?? [],
           // The user list needs users:view, which a sales rep may not have;
           // the chat directory is open to everyone who can chat. Whichever
           // answers — and if neither does, Owner is still a working dropdown
@@ -92,7 +97,6 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
         setLead(l);
         setMeta({ module: mod, fields });
         setCustom(cv || {});
-        setSources((src || []).map((s) => s.label || s.name || s.value).filter(Boolean));
         setOwners([...new Set((users || [])
           .filter((u) => u.active !== 0)
           .map((u) => u.full_name || u.name || u.username)
@@ -111,9 +115,14 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
       key: s.section,
       title: s.section,
       fields: s.fields.map((f) => {
+        // Managed options keep their stable values and labels; the form
+        // (FieldInput) offers active ones plus whatever the lead already holds.
+        if (f.managed && managedOptions?.[f.managed]?.length) {
+          return { ...f, options_json: toOptionsJson(allOptions(managedOptions[f.managed])) };
+        }
         let list = f.options;
-        if (f.dynamic === 'sources') list = sources;
         if (f.dynamic === 'owners') list = owners;
+        if (f.managed === 'qualification' && !list) return { ...f, field_type: 'text' };
         if (!list) return f;
         return { ...f, options_json: opts(withCurrent(list, lead[f.api_name])) };
       }),
@@ -132,7 +141,7 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
       sec.fields.push(f);
     });
     return out;
-  }, [ready, lead, meta, sources, owners]);
+  }, [ready, lead, meta, managedOptions, owners]);
 
   const initial = useMemo(() => {
     if (!ready || !lead) return null;
@@ -142,7 +151,7 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
     }));
     // Stored dates can carry a time ("2026-09-20 00:00:00"); the form works
     // in plain days.
-    ['date_of_birth', 'follow_up_date'].forEach((k) => { if (v[k]) v[k] = String(v[k]).slice(0, 10); });
+    ['date_of_birth'].forEach((k) => { if (v[k]) v[k] = String(v[k]).slice(0, 10); });
     return v;
   }, [ready, lead, sections, custom]);
 

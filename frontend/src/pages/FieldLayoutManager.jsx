@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft, Eye, Plus, X, GripVertical, ChevronUp, ChevronDown,
-  Asterisk, Check, LayoutList, Pencil, FileText, Search, AlertTriangle, Trash2, Settings2,
+  Asterisk, Check, LayoutList, Pencil, FileText, Search, AlertTriangle, Trash2, Settings2, ListChecks,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { FieldInput, formatFieldValue } from './universal/fieldUtils';
 import { accentFor } from '../theme/moduleAccents';
 import { friendlyError } from '../components/ui';
+import OptionManagerModal from '../components/OptionManagerModal';
+import { usePermissions } from '../context/usePermissions';
+
+const CHOICE_TYPES = new Set(['dropdown', 'radio', 'multiselect']);
 
 /* ---------------------------------------------------------------------------
    Field & Layout Manager
@@ -348,6 +352,8 @@ export default function FieldLayoutManager() {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const [managing, setManaging] = useState(null);   // field whose options are open
+  const can = usePermissions();
   // One level of undo. Non-technical users experiment far more freely when
   // the last action is reversible — and a single step covers the realistic
   // case ("I didn't mean to click that") without the complexity of a full
@@ -581,6 +587,13 @@ export default function FieldLayoutManager() {
                       </button>
                     </div>
 
+                    {CHOICE_TYPES.has(f.field_type) && (
+                      <button onClick={() => setManaging(f)} title="Manage options" aria-label={`Manage options for ${f.label}`}
+                        className="h-8 px-2 rounded-lg border border-line flex items-center gap-1 shrink-0 text-xs font-medium text-slate-500 hover:text-ink">
+                        <ListChecks className="w-3.5 h-3.5" /> <span className="hidden md:inline">Options</span>
+                      </button>
+                    )}
+
                     <button onClick={() => patchField(f, { [viewDef.flag]: 0 })}
                       aria-label={`Remove ${f.label} from ${viewDef.label}`}
                       className="w-8 h-8 rounded-lg border border-line flex items-center justify-center shrink-0 text-slate-400 hover:text-[var(--color-danger)]">
@@ -624,6 +637,15 @@ export default function FieldLayoutManager() {
                       <div className="text-sm font-medium text-ink truncate">{f.label}</div>
                       <div className="t-meta truncate">{String(f.field_type).replace(/_/g, ' ')}</div>
                     </div>
+                    {CHOICE_TYPES.has(f.field_type) && (
+                      <span role="button" tabIndex={0} title="Manage options"
+                        onClick={(e) => { e.stopPropagation(); setManaging(f); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setManaging(f); } }}
+                        aria-label={`Manage options for ${f.label}`}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 text-slate-300 hover:text-ink">
+                        <ListChecks className="w-3.5 h-3.5" />
+                      </span>
+                    )}
                     {!f.is_system && (
                       <span role="button" tabIndex={0}
                         onClick={(e) => { e.stopPropagation(); setDeleting(f); }}
@@ -650,6 +672,12 @@ export default function FieldLayoutManager() {
         <DeleteFieldModal moduleId={moduleId} field={deleting} accent={accent}
           onClose={() => setDeleting(null)}
           onDeleted={() => { setDeleting(null); loadFields(moduleId); }} />
+      )}
+
+      {managing && (
+        <OptionManagerModal fieldId={managing.id} canEdit={can('fields', 'edit') || can('settings', 'edit')}
+          onClose={() => setManaging(null)}
+          onSaved={() => { setManaging(null); loadFields(moduleId); }} />
       )}
 
       {creating && (

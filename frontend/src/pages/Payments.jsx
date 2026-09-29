@@ -9,12 +9,16 @@ import { downloadCSV } from '../utils/csv';
 import { PageHeader } from '../components/ui';
 import { UniversalRecordEditModal } from '../components/RecordEditModal';
 import DrillBanner, { useDrill, applyDrill } from '../components/DrillBanner';
+import { useSharedOptions, selectableOptions } from '../components/fieldOptions';
 
 const STATUSES = ['Pending', 'Partial', 'Paid', 'Failed'];
+// Payment modes come from Settings → Dropdown Options (Payment Mode list);
+// this is only the fallback if that list cannot be read.
 const MODES = ['Cash', 'UPI', 'Bank Transfer', 'Card', 'Cheque', 'Other'];
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 
 function MarkPaidModal({ payment, onClose, onSaved }) {
+  const modes = useSharedOptions('payment_mode');
   const [form, setForm] = useState({ status: 'Paid', payment_mode: 'UPI', transaction_number: '', amount: payment.amount, remarks: '' });
   const submit = async (e) => {
     e.preventDefault();
@@ -35,7 +39,7 @@ function MarkPaidModal({ payment, onClose, onSaved }) {
         </select>
         <label className="text-xs font-medium text-slate-500 block mb-1">Payment mode</label>
         <select className="border border-line rounded-lg px-3 py-2 text-sm w-full mb-3" value={form.payment_mode} onChange={(e) => setForm({ ...form, payment_mode: e.target.value })}>
-          {MODES.map((m) => <option key={m}>{m}</option>)}
+          {selectableOptions(modes, form.payment_mode, MODES).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
         </select>
         <label className="text-xs font-medium text-slate-500 block mb-1">Transaction number</label>
         <input className="border border-line rounded-lg px-3 py-2 text-sm w-full mb-3"
@@ -254,17 +258,13 @@ export default function Payments() {
                   {can('payments', 'edit') && p.status !== 'Paid' && (
                     <button onClick={() => setEditing(p)} className="text-xs text-amber hover:underline mr-3">Mark paid</button>
                   )}
+                  {/* One receipt, on the Company Profile letterhead — the same
+                      one quotations and invoices print. */}
                   {p.status === 'Paid' && (
-                    <>
-                      <button onClick={() => grab(() => api.downloadReceipt(p.id, 'A'))}
-                        className="text-xs text-slate-500 hover:text-ink inline-flex items-center gap-1 mr-2">
-                        <Download className="w-3 h-3" /> Receipt A
-                      </button>
-                      <button onClick={() => grab(() => api.downloadReceipt(p.id, 'B'))}
-                        className="text-xs text-slate-500 hover:text-ink inline-flex items-center gap-1">
-                        <Download className="w-3 h-3" /> Receipt B
-                      </button>
-                    </>
+                    <button onClick={() => grab(() => api.downloadReceipt(p.id))}
+                      className="text-xs text-slate-500 hover:text-ink inline-flex items-center gap-1">
+                      <Download className="w-3 h-3" /> Receipt
+                    </button>
                   )}
                 </td>
               </tr>

@@ -1,100 +1,24 @@
-import { useEffect, useState } from 'react';
+/*
+ * Settings — organised around what iCRM actually has.
+ *
+ * Every card links to a working configuration screen. Two leftovers from the
+ * base application were removed:
+ *   - Receipt Templates (Institute A / Institute B, placeholder text): payment
+ *     receipts now print the Company Profile letterhead, like quotations,
+ *     proforma invoices and invoices. No separate receipt template exists.
+ *   - Master Option Lists (Lead Source / Qualification / Payment Mode cards):
+ *     replaced by Dropdown Options, which manages those same shared lists AND
+ *     every field's dropdown, and shows which fields each list feeds.
+ */
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarDays, Settings as SettingsIcon, Plus, Trash2, Sparkles, Database, ShieldCheck, Boxes, Zap, GitBranch, Users2, History, Percent, Mail, LayoutList, Check, AlertTriangle, Building2, LayoutTemplate } from 'lucide-react';
+import {
+  CalendarDays, Settings as SettingsIcon, Sparkles, Database, ShieldCheck, Boxes, Zap, GitBranch, Users2, History,
+  Percent, Mail, LayoutList, Check, AlertTriangle, Building2, LayoutTemplate, ListChecks, Bell, Search, Palette,
+  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench,
+} from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
-
-const LIST_TYPES = [
-  { key: 'lead_source', label: 'Lead Source' },
-  { key: 'qualification', label: 'Qualification' },
-  { key: 'payment_mode', label: 'Payment Mode' },
-];
-
-function ReceiptTemplateCard({ template, onSaved }) {
-  const [form, setForm] = useState(template);
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    setSaving(true);
-    await api.updateReceiptTemplate(template.id, form);
-    setSaving(false);
-    onSaved();
-  };
-
-  return (
-    <div className="card p-5">
-      <h3 className="text-sm font-semibold text-ink mb-3">Institute {template.id} Receipt Template</h3>
-      <div className="space-y-3">
-        <div>
-          <label className="text-xs font-medium text-slate-500 block mb-1">Institute Name</label>
-          <input className="input" value={form.institute_name || ''}
-            onChange={(e) => setForm({ ...form, institute_name: e.target.value })} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-slate-500 block mb-1">Logo URL</label>
-          <input className="input" value={form.logo_url || ''}
-            placeholder="https://…" onChange={(e) => setForm({ ...form, logo_url: e.target.value })} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-slate-500 block mb-1">Address</label>
-          <textarea className="input" value={form.address || ''}
-            onChange={(e) => setForm({ ...form, address: e.target.value })} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-slate-500 block mb-1">GST Details</label>
-          <input className="input" value={form.gst_details || ''}
-            onChange={(e) => setForm({ ...form, gst_details: e.target.value })} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-slate-500 block mb-1">Footer Text</label>
-          <textarea className="input" value={form.footer_text || ''}
-            onChange={(e) => setForm({ ...form, footer_text: e.target.value })} />
-        </div>
-        <button onClick={save} disabled={saving} className="bg-amber text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-60">
-          {saving ? 'Saving…' : 'Save template'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function OptionList({ listType, label }) {
-  const [options, setOptions] = useState([]);
-  const [newLabel, setNewLabel] = useState('');
-
-  const load = () => api.listMasterOptions(listType).then(setOptions);
-  useEffect(() => { load(); }, []);
-
-  const add = async (e) => {
-    e.preventDefault();
-    if (!newLabel.trim()) return;
-    await api.createMasterOption({ list_type: listType, label: newLabel.trim(), sort_order: options.length });
-    setNewLabel('');
-    load();
-  };
-
-  const remove = async (o) => { await api.deleteMasterOption(o.id); load(); };
-
-  return (
-    <div className="card p-5">
-      <h3 className="text-sm font-semibold text-ink mb-3">{label}</h3>
-      <ul className="space-y-1.5 mb-3">
-        {options.map((o) => (
-          <li key={o.id} className="flex items-center justify-between text-sm bg-canvas rounded-lg px-3 py-1.5">
-            {o.label}
-            <button onClick={() => remove(o)} className="text-slate-400 hover:text-warn"><Trash2 className="w-3.5 h-3.5" /></button>
-          </li>
-        ))}
-        {options.length === 0 && <li className="text-sm text-slate-400">No options yet.</li>}
-      </ul>
-      <form onSubmit={add} className="flex gap-2">
-        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Add option…"
-          className="border border-line rounded-lg px-3 py-1.5 text-sm flex-1" />
-        <button type="submit" className="border border-line rounded-lg px-3 py-1.5 text-sm hover:bg-canvas"><Plus className="w-4 h-4" /></button>
-      </form>
-    </div>
-  );
-}
 
 function AiAuditLog() {
   const [rows, setRows] = useState(null);
@@ -133,19 +57,130 @@ function AiAuditLog() {
   );
 }
 
+// The settings map. `show` decides visibility from the user's permissions —
+// the screens themselves enforce the same permissions on the server.
+function sections(can) {
+  return [
+    {
+      title: 'General',
+      items: [
+        { to: '/settings/company', icon: Building2, tint: '#D97706', title: 'Company Profile', show: can('settings', 'edit'),
+          desc: 'Letterhead, GSTIN, bank details and signature — printed on quotations, proforma invoices, invoices and payment receipts.' },
+        { to: '/appearance', icon: Palette, tint: '#DB2777', title: 'Appearance', show: true,
+          desc: 'Theme and colours for your CRM.' },
+      ],
+    },
+    {
+      title: 'CRM Configuration',
+      items: [
+        { to: '/settings/modules', icon: Boxes, tint: '#7C3AED', title: 'Modules & Fields', show: can('settings', 'edit'),
+          desc: 'Create custom modules, add fields to any module, and manage each dropdown’s options.' },
+        { to: '/settings/layout', icon: LayoutList, tint: '#4F46E5', title: 'Field & Layout Manager', show: can('settings', 'edit'),
+          desc: 'Choose which fields appear in list, form and detail views, their order, and which are mandatory.' },
+        { to: '/settings/options', icon: ListChecks, tint: '#0D9488', title: 'Dropdown Options', show: can('fields', 'view') || can('settings', 'view'),
+          desc: 'Add, rename, reorder and deactivate the choices in every dropdown — Status, Stage, Source, Priority, custom fields and shared lists.',
+          keywords: 'options master lists lead source qualification payment mode status priority' },
+        { to: '/settings/pipelines', icon: GitBranch, tint: '#2563EB', title: 'Pipelines', show: can('settings', 'edit'),
+          desc: 'The stages deals move through — names, colours and win probability.' },
+      ],
+    },
+    {
+      title: 'Sales & Documents',
+      items: [
+        { to: '/settings/template-library', icon: LayoutTemplate, tint: 'var(--color-brand)', title: 'Template Library', show: can('document_templates', 'view'),
+          desc: 'Ready-made quotation, proforma and invoice designs. Pick one, add your logo and colours.' },
+        { to: '/settings/templates', icon: LayoutTemplate, tint: '#0284C7', title: 'Template Builder', show: can('document_templates', 'view'),
+          desc: 'My Templates, and the block-by-block builder for a completely custom document design.' },
+        { to: '/settings/finance', icon: Percent, tint: '#059669', title: 'Taxes & Currencies', show: can('settings', 'edit'),
+          desc: 'Tax rates for quotes and products, and the currencies you trade in.' },
+      ],
+    },
+    {
+      title: 'Support',
+      items: [
+        { to: '/support/settings', icon: LifeBuoy, tint: '#E11D48', title: 'Support Desk Settings', show: can('support', 'view'),
+          desc: 'SLA policies, queues, categories, escalation rules and business hours for tickets.' },
+      ],
+    },
+    {
+      title: 'Notifications',
+      items: [
+        { to: '/settings/notifications', icon: Bell, tint: '#F59E0B', title: 'Follow-up Reminders', show: true,
+          desc: 'Your reminders: browser notifications, sound, timing and overdue reminders.',
+          keywords: 'notification reminder browser sound follow up' },
+        { to: '/settings/email', icon: Mail, tint: '#7C3AED', title: 'Email', show: true,
+          desc: 'The mailbox this CRM sends from — organisation-wide or your own address.' },
+      ],
+    },
+    {
+      title: 'Users & Security',
+      items: [
+        { to: '/users', icon: UserCog, tint: '#475569', title: 'Users', show: can('users', 'view'),
+          desc: 'Add people, set their role, deactivate leavers.' },
+        { to: '/roles', icon: KeyRound, tint: '#475569', title: 'Roles & Permissions', show: can('users', 'view'),
+          desc: 'What each role can view, create, edit, delete and export — module by module.' },
+        { to: '/settings/teams', icon: Users2, tint: '#7C3AED', title: 'Teams', show: can('settings', 'edit'),
+          desc: 'Group users into teams so records can be assigned to a team, not just a person.' },
+        { to: '/settings/security', icon: ShieldCheck, tint: '#E11D48', title: 'Security', show: can('security', 'view'),
+          desc: 'Restrict sign-in by IP address, date range or time of day.' },
+      ],
+    },
+    {
+      title: 'Automation',
+      items: [
+        { to: '/settings/workflows', icon: Zap, tint: '#7C3AED', title: 'Workflows', show: can('settings', 'edit'),
+          desc: 'Automate what happens when a record is created, updated, or a field changes.' },
+      ],
+    },
+    {
+      title: 'Integrations',
+      items: [
+        { to: '/settings/calendar', icon: CalendarDays, tint: '#0284C7', title: 'My Calendar', show: true,
+          desc: 'Connect your own Google or Outlook calendar and choose what syncs each way.' },
+        { to: '/whatsapp', icon: MessageCircle, tint: '#16A34A', title: 'WhatsApp', show: can('whatsapp', 'view'),
+          desc: 'WhatsApp Business providers, templates, workflows and campaigns.' },
+        { to: '/lead-sources', icon: Radio, tint: '#C026D3', title: 'Lead Sources', show: can('lead_sources', 'view'),
+          desc: 'Website forms and Facebook / Instagram lead ads that create leads automatically.' },
+      ],
+    },
+    {
+      title: 'System',
+      items: [
+        { to: '/settings/data', icon: History, tint: '#475569', title: 'Data & Audit Log', show: can('settings', 'view'),
+          desc: 'Import and export any module as CSV, and see who changed what — including dropdown option changes.' },
+      ],
+    },
+  ];
+}
+
+function LinkCard({ item }) {
+  const Icon = item.icon;
+  return (
+    <Link to={item.to}
+      className="card p-4 flex items-start gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all h-full">
+      <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+        style={{ background: `color-mix(in srgb, ${item.tint} 12%, transparent)`, color: item.tint }}>
+        <Icon className="w-5 h-5" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-ink">{item.title}</span>
+        <span className="block text-xs text-slate-500 mt-0.5">{item.desc}</span>
+      </span>
+    </Link>
+  );
+}
+
 export default function Settings() {
   const can = usePermissions();
-  const [templates, setTemplates] = useState([]);
+  const [q, setQ] = useState('');
   const [seeding, setSeeding] = useState(false);
   const [seedResult, setSeedResult] = useState(null);
-  const load = () => api.listReceiptTemplates().then(setTemplates);
-  useEffect(() => { load(); }, []);
 
   // What is loaded right now, so the panel can say so instead of leaving the
   // admin to press the button and find out.
   const [demoStatus, setDemoStatus] = useState(null);
   const loadDemoStatus = () => api.demoDataStatus().then(setDemoStatus).catch(() => {});
-  useEffect(() => { loadDemoStatus(); }, []);
+  useEffect(() => { if (can('settings', 'edit')) loadDemoStatus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seedDemoData = async () => {
     const already = demoStatus?.loaded;
@@ -212,7 +247,7 @@ export default function Settings() {
 
   // Tells the admin whether data actually survives a redeploy, rather than
   // leaving them to find out the hard way after one.
-  useEffect(() => { api.backupStatus().then(setStorage).catch(() => {}); }, []);
+  useEffect(() => { if (can('settings', 'edit')) api.backupStatus().then(setStorage).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const restoreBackup = async (e) => {
     const file = e.target.files?.[0];
@@ -261,427 +296,217 @@ export default function Settings() {
     }
   };
 
+  const groups = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return sections(can)
+      .map((g) => ({
+        ...g,
+        items: g.items.filter((i) => i.show && (!term || `${g.title} ${i.title} ${i.desc} ${i.keywords || ''}`.toLowerCase().includes(term))),
+      }))
+      .filter((g) => g.items.length);
+  }, [can, q]);
+
+  const term = q.trim().toLowerCase();
+  const matches = (text) => !term || text.toLowerCase().includes(term);
+  const showRepair = can('settings', 'edit') && matches('repair administrator access permissions company profile document templates fix system');
+  const showDemo = can('settings', 'edit') && matches('demo data sample system');
+  const showBackup = can('settings', 'edit') && matches('database backup restore download email system');
+  const showAiLog = can('users', 'view') && matches('ai assistant activity log audit system');
+  const anySystemPanel = showRepair || showDemo || showBackup || showAiLog;
+
   return (
-    <div className="max-w-[1600px] mx-auto">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-amber-soft text-amber flex items-center justify-center">
-          <SettingsIcon className="w-5 h-5" />
+    <div className="max-w-[1400px] mx-auto">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-soft text-amber flex items-center justify-center">
+            <SettingsIcon className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="t-page-title">Settings</h1>
+            <p className="text-sm text-slate-500 mt-1">Configure your CRM — company, fields and dropdowns, documents, notifications, users and more.</p>
+          </div>
         </div>
-        <div>
-          <h1 className="t-page-title">Settings</h1>
-          <p className="text-sm text-slate-500 mt-1">Receipt templates and master option lists.</p>
+        <div className="relative w-full sm:w-72">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-faint)]" />
+          <input className="input w-full pl-9" style={{ paddingLeft: 36 }} placeholder="Search settings…" value={q} onChange={(e) => setQ(e.target.value)}
+            aria-label="Search settings" />
         </div>
       </div>
 
-      {can('settings', 'edit') && (
-        <Link to="/settings/layout"
-          className="card p-5 mt-8 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
-              <LayoutList className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Field &amp; Layout Manager</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Choose which fields appear in the list, form and detail views, set their order,
-                mark fields mandatory, and preview each screen before you save.
-              </p>
-            </div>
+      {groups.map((g) => (
+        <section key={g.title} className="mt-7">
+          <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2.5">{g.title}</h2>
+          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {g.items.map((i) => <LinkCard key={i.to} item={i} />)}
           </div>
-          <span className="text-sm font-medium text-amber">Open →</span>
-        </Link>
-      )}
+        </section>
+      ))}
 
-      {can('settings', 'edit') && (
-        <Link to="/settings/modules"
-          className="card p-5 mt-8 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-              <Boxes className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Modules &amp; Fields</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Create custom modules (Vendors, Properties, ...), add fields to any module, and control what shows where.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
+      {anySystemPanel && (
+        <section className="mt-7">
+          {!groups.some((g) => g.title === 'System') && (
+            <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2.5">System</h2>
+          )}
+          <div className="space-y-3">
+            {showBackup && (
+              <div className="card p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-good flex items-center justify-center shrink-0">
+                    <Database className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink">Database Backup &amp; Restore</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Download or email yourself a copy before any risky change, and restore from one if something goes wrong.
+                    </p>
+                  </div>
+                </div>
 
-      {can('settings', 'edit') && (
-        <Link to="/settings/workflows"
-          className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-              <Zap className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Workflows</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Automate what happens when a record is created, updated, or a field changes.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
-
-      {can('settings', 'edit') && (
-        <Link to="/settings/pipelines"
-          className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-              <GitBranch className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Pipelines</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Define the stages deals move through — names, colours, and win probability.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
-
-      {can('settings', 'edit') && (
-        <Link to="/settings/teams"
-          className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-              <Users2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Teams</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Group users into teams so records can be assigned to a team, not just an individual.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
-
-      {can('settings', 'view') && (
-        <Link to="/settings/data"
-          className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-              <History className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Data &amp; Audit</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Bulk import/export any module as CSV, and see who changed what.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
-
-      {can('settings', 'edit') && (
-        <Link to="/settings/finance"
-          className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-              <Percent className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Taxes &amp; Currencies</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Tax rates for quotes and products, and the currencies you trade in.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
-
-
-      {can('settings', 'edit') && (
-        <div className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3" style={{ background: 'var(--color-warning-soft)', borderColor: '#FDE68A' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Don't see Company Profile or Document Templates below?</h2>
-              <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-                Those two screens ship behind their own permission, added after roles were first set
-                up — on some installs that permission never got granted to any role. This checks
-                Super Admin and Admin and switches full access on for both, in one click. Safe to
-                run any time, including if everything already looks fine.
-              </p>
-              {repairResult && (
-                <p className="text-xs text-good mt-2">{repairResult.message}</p>
-              )}
-            </div>
-          </div>
-          <button onClick={repairPermissions} disabled={repairing}
-            className="text-sm font-medium px-4 py-2 rounded-lg border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 disabled:opacity-60 shrink-0">
-            {repairing ? 'Checking…' : 'Fix access now'}
-          </button>
-        </div>
-      )}
-
-      {can('settings', 'edit') && (
-        <Link to="/settings/company"
-          className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-              <Building2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Company Profile</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Letterhead, GSTIN, bank details and signature — printed on every quotation and invoice.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
-
-      {/* The library comes FIRST, and the builder is reached from inside it.
-          A customer's first contact with document design should be 75
-          finished layouts, not an empty block editor. */}
-      {can('document_templates', 'view') && (
-        <Link to="/settings/template-library"
-          className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-              style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand)' }}>
-              <LayoutTemplate className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Template Library</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                75 ready-made quotation, proforma and invoice designs across 18 industries.
-                Pick one, add your logo and colours, done.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Browse →</span>
-        </Link>
-      )}
-
-      {can('document_templates', 'view') && (
-        <Link to="/settings/templates"
-          className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-              <LayoutTemplate className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Template Builder</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                My Templates, and the block-by-block builder for a completely custom design.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
-
-      {/* Ungated like Email: connecting a calendar is a personal setting, not
-          an administrative one — every user manages their own. */}
-      <Link to="/settings/calendar"
-        className="bg-white border border-line rounded-xl p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-            <CalendarDays className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-ink">My Integrations</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Connect your own Google or Outlook calendar, and choose what syncs each way.
-            </p>
-          </div>
-        </div>
-        <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-      </Link>
-
-      {can('security', 'view') && (
-        <Link to="/settings/security"
-          className="bg-white border border-line rounded-xl p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Security</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Restrict sign-in by IP address, date range, or time of day.
-              </p>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-        </Link>
-      )}
-
-      <Link to="/settings/email"
-        className="bg-white border border-line rounded-xl p-5 mt-4 flex items-center justify-between flex-wrap gap-3 hover:border-amber transition-colors">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
-            <Mail className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-ink">Email</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Configure the mailbox this CRM sends from — organisation-wide or your own address.
-            </p>
-          </div>
-        </div>
-        <span className="text-xs font-medium text-amber shrink-0">Open →</span>
-      </Link>
-
-      {can('settings', 'edit') && (
-        <div className="card p-5 mt-4 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Demo Data</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Fills every module with about a year of realistic sample data — customers, deals,
-                quotations, proforma invoices, invoices with part payments, tickets and activity
-                history — so reports and dashboards have something real to show.
-                {' '}Records you entered yourself are never touched.
-              </p>
-
-              {demoStatus?.loaded && !seedResult && (
-                <p className="text-xs text-slate-500 mt-2">
-                  <span className="font-medium text-ink">Currently loaded:</span>{' '}
-                  {DEMO_ORDER.filter((k) => demoStatus.counts[k])
-                    .map((k) => `${demoStatus.counts[k]} ${demoLabel(k)}`)
-                    .join(' · ')}
-                </p>
-              )}
-
-              {seedResult && (
-                <p className="text-xs text-good mt-2">
-                  {seedResult.message}
-                  {seedResult.counts && Object.keys(seedResult.counts).length > 0 && (
-                    <span className="block text-slate-500 mt-1">
-                      {DEMO_ORDER.filter((k) => seedResult.counts[k])
-                        .map((k) => `${seedResult.counts[k]} ${demoLabel(k)}`)
-                        .join(' · ')}
+                {/* Storage health. On a host without a persistent disk,
+                    uploaded files are lost on every redeploy. */}
+                {storage && (
+                  <div className={`text-xs rounded-lg px-3 py-2.5 mb-3 flex items-start gap-2 ${
+                    storage.persistent ? 'bg-emerald-50 text-good' : 'bg-amber-50 text-warn'
+                  }`}>
+                    {storage.persistent
+                      ? <Check className="w-4 h-4 shrink-0 mt-px" />
+                      : <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />}
+                    <span>
+                      {storage.persistent ? (
+                        <>
+                          <strong>Data is safe across restarts.</strong> Records are in the PostgreSQL
+                          database ({storage.size_mb} MB); uploaded files are stored outside the application
+                          folder ({storage.data_dir}).
+                        </>
+                      ) : (
+                        <>
+                          <strong>Records are safe; uploaded files are not.</strong> Records are in the
+                          PostgreSQL database ({storage.size_mb} MB) and survive restarts, but uploaded files
+                          are inside the application folder, so a redeploy removes them. Set the{' '}
+                          <code>DATA_DIR</code> environment variable to a mounted disk on your host.
+                        </>
+                      )}
                     </span>
+                  </div>
+                )}
+
+                {storage?.restore_pending && (
+                  <p className="text-xs bg-blue-50 text-blue-700 rounded-lg px-3 py-2.5 mb-3">
+                    A restore is staged and will be applied the next time the backend restarts.
+                  </p>
+                )}
+
+                {backupResult && (
+                  <p className={`text-xs mb-3 ${backupResult.ok ? 'text-good' : 'text-warn'}`}>{backupResult.message}</p>
+                )}
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={downloadBackup} disabled={downloading}
+                    className="border border-line text-sm font-medium px-4 py-2 rounded-lg hover:bg-canvas disabled:opacity-60">
+                    {downloading ? 'Downloading…' : 'Download Backup Now'}
+                  </button>
+                  <button onClick={emailBackup} disabled={emailingBackup}
+                    className="border border-line text-sm font-medium px-4 py-2 rounded-lg hover:bg-canvas disabled:opacity-60">
+                    {emailingBackup ? 'Sending…' : 'Email Backup to Myself'}
+                  </button>
+                  <label className={`border border-line text-sm font-medium px-4 py-2 rounded-lg hover:bg-canvas cursor-pointer ${restoring ? 'opacity-60 pointer-events-none' : ''}`}>
+                    {restoring ? 'Checking…' : 'Restore from Backup…'}
+                    <input type="file" accept=".json,.gz" className="hidden" onChange={restoreBackup} disabled={restoring} />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {showDemo && (
+              <div className="card p-5 flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink">Demo Data</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Fills every module with about a year of realistic sample data — customers, deals,
+                      quotations, proforma invoices, invoices with part payments, tickets and activity
+                      history — so reports and dashboards have something real to show.
+                      {' '}Records you entered yourself are never touched.
+                    </p>
+
+                    {demoStatus?.loaded && !seedResult && (
+                      <p className="text-xs text-slate-500 mt-2">
+                        <span className="font-medium text-ink">Currently loaded:</span>{' '}
+                        {DEMO_ORDER.filter((k) => demoStatus.counts[k])
+                          .map((k) => `${demoStatus.counts[k]} ${demoLabel(k)}`)
+                          .join(' · ')}
+                      </p>
+                    )}
+
+                    {seedResult && (
+                      <p className="text-xs text-good mt-2">
+                        {seedResult.message}
+                        {seedResult.counts && Object.keys(seedResult.counts).length > 0 && (
+                          <span className="block text-slate-500 mt-1">
+                            {DEMO_ORDER.filter((k) => seedResult.counts[k])
+                              .map((k) => `${seedResult.counts[k]} ${demoLabel(k)}`)
+                              .join(' · ')}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 shrink-0">
+                  <button onClick={seedDemoData} disabled={seeding || wiping}
+                    className="bg-ink text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-ink-light disabled:opacity-60">
+                    {seeding ? 'Loading…' : demoStatus?.loaded ? 'Reload Demo Data' : 'Load Demo Data'}
+                  </button>
+                  {demoStatus?.loaded && (
+                    <button onClick={wipeDemoData} disabled={seeding || wiping}
+                      className="text-sm font-medium px-4 py-2 rounded-lg border border-line text-slate-600 hover:text-warn disabled:opacity-60">
+                      {wiping ? 'Removing…' : 'Remove Demo Data'}
+                    </button>
                   )}
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 shrink-0">
-            <button onClick={seedDemoData} disabled={seeding || wiping}
-              className="bg-ink text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-ink-light disabled:opacity-60">
-              {seeding ? 'Loading…' : demoStatus?.loaded ? 'Reload Demo Data' : 'Load Demo Data'}
-            </button>
-            {demoStatus?.loaded && (
-              <button onClick={wipeDemoData} disabled={seeding || wiping}
-                className="text-sm font-medium px-4 py-2 rounded-lg border border-line text-slate-600 hover:text-warn disabled:opacity-60">
-                {wiping ? 'Removing…' : 'Remove Demo Data'}
-              </button>
+                </div>
+              </div>
+            )}
+
+            {showRepair && (
+              <div className="card p-5 flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                    <Wrench className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink">Repair administrator access</h3>
+                    <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+                      If Company Profile or document templates are missing for an administrator, their
+                      permission was never granted on this install. This switches full access on for the
+                      Super Admin and Admin roles. Safe to run any time.
+                    </p>
+                    {repairResult && <p className="text-xs text-good mt-2">{repairResult.message}</p>}
+                  </div>
+                </div>
+                <button onClick={repairPermissions} disabled={repairing}
+                  className="text-sm font-medium px-4 py-2 rounded-lg border border-line bg-white hover:bg-[var(--color-canvas)] disabled:opacity-60 shrink-0">
+                  {repairing ? 'Checking…' : 'Repair access'}
+                </button>
+              </div>
+            )}
+
+            {showAiLog && (
+              <div>
+                <h3 className="text-sm font-semibold text-ink mt-2 mb-1 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber" /> AI Assistant Activity Log
+                </h3>
+                <p className="text-xs text-slate-400 mb-3">Every query and action the AI assistant has run, per user, for audit purposes.</p>
+                <AiAuditLog />
+              </div>
             )}
           </div>
-        </div>
+        </section>
       )}
 
-      {can('settings', 'edit') && (
-        <div className="card p-5 mt-4">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-good flex items-center justify-center shrink-0">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-ink">Database Backup &amp; Restore</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Download or email yourself a copy before any risky change, and restore from one if something goes wrong.
-              </p>
-            </div>
-          </div>
-
-          {/* Storage health. The single most useful thing to show here: on a
-              host without a persistent disk, the database is wiped on every
-              restart and no amount of backing up changes that. */}
-          {storage && (
-            <div className={`text-xs rounded-lg px-3 py-2.5 mb-3 flex items-start gap-2 ${
-              storage.persistent ? 'bg-emerald-50 text-good' : 'bg-amber-50 text-warn'
-            }`}>
-              {storage.persistent
-                ? <Check className="w-4 h-4 shrink-0 mt-px" />
-                : <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />}
-              <span>
-                {storage.persistent ? (
-                  <>
-                    <strong>Data is safe across restarts.</strong> Records are in the PostgreSQL
-                    database ({storage.size_mb} MB); uploaded files are stored outside the application
-                    folder ({storage.data_dir}).
-                  </>
-                ) : (
-                  <>
-                    <strong>Records are safe; uploaded files are not.</strong> Records are in the
-                    PostgreSQL database ({storage.size_mb} MB) and survive restarts, but uploaded files
-                    are inside the application folder, so a redeploy removes them. Set the{' '}
-                    <code>DATA_DIR</code> environment variable to a mounted disk on your host.
-                  </>
-                )}
-              </span>
-            </div>
-          )}
-
-          {storage?.restore_pending && (
-            <p className="text-xs bg-blue-50 text-blue-700 rounded-lg px-3 py-2.5 mb-3">
-              A restore is staged and will be applied the next time the backend restarts.
-            </p>
-          )}
-
-          {backupResult && (
-            <p className={`text-xs mb-3 ${backupResult.ok ? 'text-good' : 'text-warn'}`}>{backupResult.message}</p>
-          )}
-          <div className="flex gap-2 flex-wrap">
-            <button onClick={downloadBackup} disabled={downloading}
-              className="border border-line text-sm font-medium px-4 py-2 rounded-lg hover:bg-canvas disabled:opacity-60">
-              {downloading ? 'Downloading…' : 'Download Backup Now'}
-            </button>
-            <button onClick={emailBackup} disabled={emailingBackup}
-              className="border border-line text-sm font-medium px-4 py-2 rounded-lg hover:bg-canvas disabled:opacity-60">
-              {emailingBackup ? 'Sending…' : 'Email Backup to Myself'}
-            </button>
-            <label className={`border border-line text-sm font-medium px-4 py-2 rounded-lg hover:bg-canvas cursor-pointer ${restoring ? 'opacity-60 pointer-events-none' : ''}`}>
-              {restoring ? 'Checking…' : 'Restore from Backup…'}
-              <input type="file" accept=".json,.gz" className="hidden" onChange={restoreBackup} disabled={restoring} />
-            </label>
-          </div>
-        </div>
-      )}
-
-      <h2 className="text-sm font-semibold text-ink mt-8 mb-3">Receipt Templates</h2>
-      <p className="text-xs text-slate-400 mb-4">
-        Configure the two institute templates used on the Payments page. Fields still showing placeholders like
-        "[Institute A Name — configure in Settings]" haven't been filled in yet.
-      </p>
-      <div className="grid md:grid-cols-2 gap-6">
-        {templates.map((t) => <ReceiptTemplateCard key={t.id} template={t} onSaved={load} />)}
-      </div>
-
-      <h2 className="text-sm font-semibold text-ink mt-8 mb-3">Master Option Lists</h2>
-      <div className="grid md:grid-cols-3 gap-6">
-        {LIST_TYPES.map((l) => <OptionList key={l.key} listType={l.key} label={l.label} />)}
-      </div>
-
-      {can('users', 'view') && (
-        <>
-          <h2 className="text-sm font-semibold text-ink mt-8 mb-3 flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4 text-amber" /> AI Assistant Activity Log
-          </h2>
-          <p className="text-xs text-slate-400 mb-3">Every query and action the AI assistant has run, per user, for audit purposes.</p>
-          <AiAuditLog />
-        </>
+      {!groups.length && !anySystemPanel && (
+        <div className="card p-8 text-center t-meta mt-7">No settings match “{q}”.</div>
       )}
     </div>
   );

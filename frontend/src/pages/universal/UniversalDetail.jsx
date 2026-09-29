@@ -15,7 +15,9 @@ import { UniversalRecordEditModal, groupFields } from '../../components/RecordEd
 import WhatsAppTemplateModal from '../../components/WhatsAppTemplateModal';
 import { accentFor } from '../../theme/moduleAccents';
 import { avatarGradientFor, initialsOf } from '../../theme/avatarColors';
-import DisposeLeadModal from '../../components/DisposeLeadModal';
+import OutcomeModal from '../../components/followup/OutcomeModal';
+import FollowUpCard from '../../components/followup/FollowUpCard';
+import { userName } from '../../components/userDirectory';
 import DocumentItemsPanel from './DocumentItemsPanel';
 import DocumentActionsPanel from './DocumentActionsPanel';
 import DocumentPaymentsPanel from './DocumentPaymentsPanel';
@@ -238,6 +240,15 @@ function DetailRow({ label, value }) {
 // Field grouping (Contact / Address / Commercial…) lives with the edit popup
 // in components/RecordEditModal, imported above, so the page and the popup
 // can never group a field differently.
+
+// Modules whose "next follow-up" is a real follow-up with an exact time and a
+// reminder (the follow-up card). Other modules that only have a due/renewal
+// DATE keep the simple date panel below, unchanged.
+const REAL_FOLLOWUP_FIELDS = ['follow_up_date', 'next_followup', 'next_activity_at'];
+const FOLLOWUP_MODULES = new Set(['accounts', 'contacts', 'opportunities']);
+function usesFollowUpCard(module, fields) {
+  return FOLLOWUP_MODULES.has(module.api_name) || fields.some((f) => REAL_FOLLOWUP_FIELDS.includes(f.api_name));
+}
 
 function FollowUpPanel({ module, fields, record, onUpdated }) {
   const followupField = useMemo(() => findFollowupField(fields), [fields]);
@@ -580,7 +591,9 @@ export default function UniversalDetail() {
   const [schedulingMeeting, setSchedulingMeeting] = useState(false);
   const [waOpen, setWaOpen] = useState(false);
   const [acctScore, setAcctScore] = useState(null);
-  const [disposing, setDisposing] = useState(false);
+  const [loggingOutcome, setLoggingOutcome] = useState(false);
+  const [openFollowUp, setOpenFollowUp] = useState(null);
+  const [followUpVersion, setFollowUpVersion] = useState(0);
   const [layout, setLayout] = useState(null); // null until loaded; { sections: [] } means "no custom layout saved"
 
   const load = () => {
@@ -948,7 +961,18 @@ export default function UniversalDetail() {
           canCreate={can('subscriptions', 'create')} />
       )}
 
-      <FollowUpPanel module={module} fields={fields} record={record} onUpdated={load} />
+      {usesFollowUpCard(module, fields) ? (
+        <FollowUpCard module={module.api_name} recordId={Number(id)} recordName={title}
+          phone={record.phone || record.mobile} status={record.status}
+          ownerName={record.owner_id ? userName(record.owner_id) : null}
+          canEdit={can(module.api_name, 'edit')}
+          canLogOutcome={can('calls', 'create')}
+          onLogOutcome={() => setLoggingOutcome(true)}
+          onLoaded={setOpenFollowUp}
+          refreshKey={followUpVersion} onChanged={load} />
+      ) : (
+        <FollowUpPanel module={module} fields={fields} record={record} onUpdated={load} />
+      )}
 
       {module.api_name === 'invoices' && (
         <DocumentPaymentsPanel invoiceId={id} record={record}
@@ -977,7 +1001,7 @@ export default function UniversalDetail() {
           { key: 'whatsapp', label: 'WhatsApp', icon: MessageCircle, from: '#4ADE80', to: '#15803D',
             run: () => setWaOpen(true) },
           can('calls', 'create') && { key: 'call', label: 'Log Call', icon: PhoneCall, from: '#818CF8', to: '#4338CA',
-            run: () => setDisposing(true) },
+            run: () => setLoggingOutcome(true) },
           canCreateRelation('meetings', module.api_name) && can('meetings', 'create')
             && { key: 'meeting', label: 'Meeting', icon: CalendarPlus, from: '#6EE7B7', to: '#047857',
               // Not setAddingRelation('meetings'): that writes a meetings row
@@ -1154,12 +1178,13 @@ export default function UniversalDetail() {
           senderName={record.owner_name || ''} onClose={() => setWaOpen(false)} />
       )}
 
-      {disposing && (
-        <DisposeLeadModal
+      {loggingOutcome && (
+        <OutcomeModal
           subject={{ id: Number(id), module: module.api_name, name: title,
             phone: record.phone || record.mobile, status: record.status }}
-          onClose={() => setDisposing(false)}
-          onDisposed={() => { setDisposing(false); load(); }} />
+          followUp={openFollowUp} ownerName={record.owner_id ? userName(record.owner_id) : null}
+          onClose={() => setLoggingOutcome(false)}
+          onSaved={() => { setLoggingOutcome(false); setFollowUpVersion((v) => v + 1); load(); }} />
       )}
 
       {addingRelation && (

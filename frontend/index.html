@@ -32,6 +32,9 @@
       (function () {
         if (!('serviceWorker' in navigator)) return;
         navigator.serviceWorker.getRegistrations().then(function (regs) {
+          // The follow-up reminder worker (/notify-sw.js, scope /notify-sw/)
+          // is kept: it has no fetch handler and never controls a page.
+          regs = regs.filter(function (r) { return !/\/notify-sw\/$/.test(r.scope); });
           if (!regs.length) return;
           var hadWorker = regs.some(function (r) { return r.active; });
           Promise.all(regs.map(function (r) { return r.unregister(); }))
