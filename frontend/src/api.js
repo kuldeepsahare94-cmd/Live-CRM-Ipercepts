@@ -82,8 +82,186 @@ export async function openFileInTab(path) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+// ---------------------------------------------------------------------------
+// Faster screen changes
+//
+// 1. Settings-type data (modules, fields, layouts, dropdown options, the user
+//    list, saved views…) is kept in memory for five minutes. Every list and
+//    record screen needs it, and fetching it again each time put several
+//    round trips to the server in front of the real data.
+// 2. Identical requests made at the same moment share one answer.
+// 3. Prefetch: when the pointer rests on a link, or presses it, the data that
+//    screen asked for last time is requested at once (see prefetchRoute). The
+//    screen then finds its answers already on the way when it opens.
+// Any change (POST/PUT/PATCH/DELETE) empties all of this, so nothing shown is
+// older than your own last save. Record data itself is never kept beyond the
+// few seconds between a prefetch and the click.
+// ---------------------------------------------------------------------------
+const META_TTL_MS = 5 * 60 * 1000;
+const PREFETCH_TTL_MS = 10 * 1000;
+const META = [
+  /^\/modules(\?.*)?$/, /^\/modules\/[A-Za-z0-9_]+$/, /^\/modules\/\d+\/fields$/, /^\/modules\/\d+\/layout\/[a-z_]+$/,
+  /^\/option-lists\/module\/[a-z0-9_]+$/, /^\/option-lists\/shared\/[a-z0-9_]+\/options$/,
+  /^\/users\/directory$/, /^\/saved-filters(\/layout)?\?module=[A-Za-z0-9_%]+$/, /^\/pipelines(\?.*)?$/,
+  /^\/finance\/(currencies|taxes)$/, /^\/settings\/master-options(\?.*)?$/, /^\/company-profile$/, /^\/support\/meta$/,
+];
+// Requests that must always go to the server (live counters, polling, auth).
+const NEVER_SHARED = /^\/(auth\/|chat\/|notifications|follow-ups\/reminders|health)/;
+const getCache = new Map();          // path -> { at, data, meta, prefetched, promise }
+let cacheOwner = null;
+
+function cacheFor(token) {
+  if (cacheOwner !== token) { getCache.clear(); cacheOwner = token; }
+  return getCache;
+}
+export function clearApiCache() { getCache.clear(); }
+
+// Goes up by one after every change saved through this tab. Screens that show
+// their last data instantly on return (see screenMemory.js) only do so when
+// nothing has been saved since — so you never see your own edit "undone".
+let writeEpoch = 0;
+export const dataEpoch = () => writeEpoch;
+
+// Requests a person is waiting for (not background polling), for the thin
+// progress bar at the top of the screen (see TopProgress).
+let busyCount = 0;
+const busyListeners = new Set();
+export function onBusyChange(fn) { busyListeners.add(fn); return () => busyListeners.delete(fn); }
+function setBusy(delta) {
+  busyCount = Math.max(0, busyCount + delta);
+  busyListeners.forEach((fn) => { try { fn(busyCount); } catch { /* ignore */ } });
+}
+const BACKGROUND = /^\/(chat\/|notifications|follow-ups\/(reminders|preferences|push)|calendar\/agenda|health)/;
+
+// ---- Learning what each screen loads -------------------------------------
+// For a screen like /leads/132 the requests are remembered with the number
+// replaced (/leads/:id → /api/leads/{0}, /api/follow-ups?module=leads&record_id={0}),
+// so hovering any other lead link can prefetch the same things for that lead.
+const LEARNED_KEY = 'icrm_screen_requests';
+const learned = new Map((() => {     // route key -> [url templates], kept across visits
+  try { return JSON.parse(localStorage.getItem(LEARNED_KEY) || '[]'); } catch { return []; }
+})());
+let learning = null;
+const LEARN_MS = 2500;
+const idsIn = (pathname) => pathname.split('/').filter((s) => /^\d+$/.test(s));
+const routeKey = (pathname) => pathname.split('?')[0].replace(/\/\d+(?=\/|$)/g, '/:id');
+function templateOf(path, ids) {
+  let t = path;
+  // (No look-behind in this pattern: older Safari cannot parse it.)
+  ids.forEach((id, i) => { t = t.replace(new RegExp(`([/=])${id}(?=[/&?]|$)`, 'g'), `$1{${i}}`); });
+  return t;
+}
+export function noteNavigation(pathname) {
+  if (learning) finishLearning();
+  learning = { key: routeKey(pathname), ids: idsIn(pathname), urls: new Set(), timer: setTimeout(finishLearning, LEARN_MS) };
+}
+function finishLearning() {
+  if (!learning) return;
+  clearTimeout(learning.timer);
+  if (learning.urls.size) {
+    learned.delete(learning.key);
+    learned.set(learning.key, [...learning.urls].slice(0, 12));
+    while (learned.size > 100) learned.delete(learned.keys().next().value);
+    try { localStorage.setItem(LEARNED_KEY, JSON.stringify([...learned])); } catch { /* storage full or blocked */ }
+  }
+  learning = null;
+}
+function learn(path) {
+  if (!learning || /^\/(calendar\/|dashboard\/crm|follow-ups\/(preferences|push)|search)/.test(path)) return;
+  learning.urls.add(templateOf(path, learning.ids));
+}
+
+// Start this screen's requests now (pointer resting on / pressing a link).
+const recentPrefetch = new Map();
+export function prefetchRoute(pathname) {
+  const token = localStorage.getItem('cd_token');
+  if (!token) return;
+  const key = routeKey(pathname);
+  const list = learned.get(key);
+  if (!list) return;
+  const last = recentPrefetch.get(pathname);
+  if (last && Date.now() - last < PREFETCH_TTL_MS) return;
+  recentPrefetch.set(pathname, Date.now());
+  if (recentPrefetch.size > 200) recentPrefetch.clear();
+  const ids = idsIn(pathname);
+  // The record itself first (/leads/{0}), then its other parts, then lists
+  // and settings — the server answers one at a time, in the order asked.
+  const own = key.replace(/:id/g, () => '{0}');
+  const rank = (t) => (t === own ? 0 : t.includes('{') ? 1 : 2);
+  for (const t of [...list].sort((a, b) => rank(a) - rank(b))) {
+    const path = t.replace(/\{(\d+)\}/g, (m, i) => ids[Number(i)] ?? m);
+    if (/\{\d+\}/.test(path)) continue;
+    const cache = cacheFor(token);
+    const hit = cache.get(path);
+    if (hit && (hit.promise || (hit.data !== undefined && Date.now() - hit.at < (hit.meta ? META_TTL_MS : PREFETCH_TTL_MS)))) continue;
+    fetchAndKeep(path, token, { prefetched: true }).catch(() => {});
+  }
+}
+
+function fetchAndKeep(path, token, { prefetched = false } = {}) {
+  const cache = cacheFor(token);
+  const meta = META.some((re) => re.test(path));
+  const entry = { at: Date.now(), meta, prefetched, promise: null, data: undefined };
+  entry.promise = rawReq('GET', path, undefined, token, { quiet: prefetched }).then((data) => {
+    entry.data = data; entry.at = Date.now(); entry.promise = null;
+    if (!meta && !prefetched) cache.delete(path);   // plain data is not kept
+    return data;
+  }, (e) => { cache.delete(path); throw e; });
+  cache.set(path, entry);
+  return entry.promise;
+}
+
+const copy = (v) => {
+  if (!v || typeof v !== 'object') return v;
+  return typeof structuredClone === 'function' ? structuredClone(v) : JSON.parse(JSON.stringify(v));
+};
+
 async function req(method, path, body) {
   const token = localStorage.getItem('cd_token');
+  if (method === 'GET' && token && !NEVER_SHARED.test(path)) {
+    learn(path);
+    const cache = cacheFor(token);
+    const hit = cache.get(path);
+    if (hit) {
+      if (hit.promise) {
+        // Someone is now waiting for this one: show it on the progress bar.
+        const tracked = hit.prefetched && !BACKGROUND.test(path);
+        if (tracked) setBusy(1);
+        let data;
+        try { data = await hit.promise; } finally { if (tracked) setBusy(-1); }
+        if (hit.prefetched && !hit.meta && cache.get(path) === hit) cache.delete(path);
+        return copy(data);
+      }
+      const age = Date.now() - hit.at;
+      if (hit.meta && age < META_TTL_MS) return copy(hit.data);
+      if (hit.prefetched && age < PREFETCH_TTL_MS) {
+        if (!hit.meta) cache.delete(path);             // a prefetched answer is used once
+        return copy(hit.data);
+      }
+      cache.delete(path);
+    }
+    const data = await fetchAndKeep(path, token);
+    // A kept (settings-type) answer is copied, so a screen changing what it
+    // received cannot change what the next screen gets.
+    return META.some((re) => re.test(path)) ? copy(data) : data;
+  }
+  if (method !== 'GET') {
+    try { return await rawReq(method, path, body, token); } finally { getCache.clear(); writeEpoch += 1; }
+  }
+  return rawReq(method, path, body, token);
+}
+
+async function rawReq(method, path, body, token, { quiet = false } = {}) {
+  const tracked = !quiet && !BACKGROUND.test(path);
+  if (tracked) setBusy(1);
+  try {
+    return await sendRequest(method, path, body, token);
+  } finally {
+    if (tracked) setBusy(-1);
+  }
+}
+
+async function sendRequest(method, path, body, token) {
   const headers = {};
   if (body) headers['Content-Type'] = 'application/json';
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -700,10 +878,9 @@ export const api = {
   chatEditMessage: (id, body) => req('PUT', `/chat/messages/${id}`, { body }),
   chatDeleteMessage: (id) => req('DELETE', `/chat/messages/${id}`),
   chatSearch: (q) => req('GET', `/chat/search?q=${encodeURIComponent(q)}`),
-  chatPoll: (since, conversationId) => req(
-    'GET',
-    `/chat/poll?since=${since || 0}${conversationId ? `&conversation_id=${conversationId}` : ''}`,
-  ),
+  // POST to one fixed address (not GET ?since=…): a changing address makes the
+  // browser repeat its CORS check before every poll.
+  chatPoll: (since, conversationId) => req('POST', '/chat/poll', { since: since || 0, conversation_id: conversationId || null }),
   // NOT a plain URL. The JWT lives in localStorage and browsers do not attach
   // headers to <a href> navigations or <img src> loads, so linking straight
   // to the endpoint returned {"error":"Not logged in"} in a new tab and

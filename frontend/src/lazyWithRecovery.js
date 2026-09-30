@@ -114,6 +114,7 @@ export default function lazyWithRecovery(factory) {
     );
   });
 
-  Component.preload = () => { load().catch(() => {}); };
+  // Returns a promise (never rejecting) so callers can fetch pages one after another.
+  Component.preload = () => (loaded ? Promise.resolve() : load().then(() => {}, () => {}));
   return Component;
 }

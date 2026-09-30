@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import DetailSkeleton from '../components/DetailSkeleton';
+import { remember, recall } from '../screenMemory';
 import {
   ArrowLeft, ArrowRight, UserCheck, Phone, Mail, MessageCircle, CalendarClock, Pencil, Flame, Snowflake, Check, X,
   Info, PhoneCall, Calendar, CheckSquare, TrendingUp, Paperclip, StickyNote, LayoutGrid,
@@ -312,7 +314,9 @@ export default function LeadDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const can = usePermissions();
-  const [lead, setLead] = useState(null);
+  const location = useLocation();
+  // A lead seen before shows at once, then refreshes (screenMemory.js).
+  const [lead, setLead] = useState(() => recall(`lead:${id}`));
   // One flow for "what happened + what's next" (was: separate Dispose and
   // Schedule Call buttons that each set a follow-up their own way).
   const [loggingOutcome, setLoggingOutcome] = useState(false);
@@ -334,11 +338,16 @@ export default function LeadDetail() {
   // One popup for every field on the lead. `editing` is false, or the name of
   // the section to open it at (a card's own Edit link scrolls to that card).
   const [editing, setEditing] = useState(false);
-  const [customFields, setCustomFields] = useState([]);   // [{ field, value }]
+  const [customFields, setCustomFields] = useState(() => recall(`lead-custom:${id}`) || []);   // [{ field, value }]
   const scoring = useLeadScore(id);
   const { prevId, nextId, loaded: navLoaded } = usePrevNext(id);
 
-  const load = () => api.getLead(id).then((l) => { setLead(l); loadCustomFields(); });
+  // The lead and its custom fields are fetched side by side (they used to be
+  // one after the other).
+  const load = () => {
+    loadCustomFields();
+    return api.getLead(id).then((l) => { setLead(l); remember(`lead:${id}`, l); });
+  };
 
   // Custom fields an admin has added to Leads in Settings. They are editable
   // in the popup, so they have to be readable on the page too — otherwise a
@@ -350,13 +359,18 @@ export default function LeadDetail() {
         const custom = (fields || []).filter((f) => !f.is_system && f.show_in_detail);
         if (!custom.length) { setCustomFields([]); return; }
         const values = await api.getCustomFieldValues('leads', id).catch(() => ({}));
-        setCustomFields(custom.map((f) => ({ field: f, value: values?.[f.api_name] })));
+        const list = custom.map((f) => ({ field: f, value: values?.[f.api_name] }));
+        setCustomFields(list);
+        remember(`lead-custom:${id}`, list);
       })
       .catch(() => setCustomFields([]));
   };
   useEffect(() => { load(); setPageTab('overview'); }, [id]);
 
-  if (!lead) return <div className="p-8 text-slate-400">Loading…</div>;
+  if (!lead) {
+    const preview = location.state?.preview;
+    return <DetailSkeleton title={preview && String(preview.id) === String(id) ? preview.title : ''} />;
+  }
 
   const changeStatus = async (status) => { await api.updateLead(id, { status }); load(); };
 
@@ -419,11 +433,11 @@ export default function LeadDetail() {
 
         {navLoaded && (prevId || nextId) && (
           <div className="flex items-center gap-1 shrink-0">
-            <button disabled={!prevId} onClick={() => navigate(`/leads/${prevId}`)}
+            <button disabled={!prevId} onClick={() => navigate(`/leads/${prevId}`)} data-href={prevId ? `/leads/${prevId}` : undefined}
               className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-line text-slate-500 hover:text-ink hover:bg-[var(--color-canvas)] disabled:opacity-40 disabled:pointer-events-none">
               <ArrowLeft className="w-3.5 h-3.5" /> Previous
             </button>
-            <button disabled={!nextId} onClick={() => navigate(`/leads/${nextId}`)}
+            <button disabled={!nextId} onClick={() => navigate(`/leads/${nextId}`)} data-href={nextId ? `/leads/${nextId}` : undefined}
               className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-line text-slate-500 hover:text-ink hover:bg-[var(--color-canvas)] disabled:opacity-40 disabled:pointer-events-none">
               Next <ArrowRight className="w-3.5 h-3.5" />
             </button>

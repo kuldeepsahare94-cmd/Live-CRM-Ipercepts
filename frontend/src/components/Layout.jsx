@@ -7,7 +7,8 @@ import {
   ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../api';
+import { api, noteNavigation, prefetchRoute } from '../api';
+import { preloadRouteCode } from '../routePreload';
 import GlobalSearch from './GlobalSearch';
 import NotificationBell from './NotificationBell';
 import ChatWidget from './ChatWidget';
@@ -18,6 +19,7 @@ import { accentFor } from '../theme/moduleAccents';
 import { Avatar } from './ui';
 import ErrorBoundary from './ErrorBoundary';
 import ReminderCenter from './followup/ReminderCenter';
+import TopProgress from './TopProgress';
 
 // Hand-written links for the modules that have bespoke pages. Everything
 // else is generated from the module registry below, so a module created
@@ -244,7 +246,58 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Tell the API layer a new screen is opening, so it can learn which data
+  // that kind of screen asks for (see prefetchRoute in api.js). Done while
+  // rendering, because the page's own requests start before this component's
+  // effects would run.
+  const seenPath = useRef(null);
+  if (seenPath.current !== location.pathname) {
+    seenPath.current = location.pathname;
+    noteNavigation(location.pathname);
+  }
+
   useEffect(() => { setDrawerOpen(false); setMenuOpen(false); }, [location.pathname]);
+
+  // Start opening a screen before the click completes: when the pointer rests
+  // on a link (60 ms in the menu, 150 ms elsewhere) or presses it, fetch that
+  // screen's code and the data it asked for last time. By the time the click
+  // lands, most of it has arrived — so the move feels instant.
+  useEffect(() => {
+    let timer = null;
+    let over = null;
+    const pathOf = (el) => {
+      const a = el && el.closest ? el.closest('a[href], [data-href]') : null;
+      if (!a || a.target === '_blank' || a.hasAttribute('download')) return null;
+      const raw = a.getAttribute('data-href') || a.getAttribute('href');
+      if (!raw || raw.startsWith('#') || /^(mailto|tel|javascript):/i.test(raw)) return null;
+      try {
+        const url = new URL(raw, window.location.href);
+        return url.origin === window.location.origin ? url.pathname : null;
+      } catch { return null; }
+    };
+    const go = (path) => {
+      if (!path || path === window.location.pathname || path === '/login') return;
+      preloadRouteCode(path);
+      prefetchRoute(path);
+    };
+    const onOver = (e) => {
+      const path = pathOf(e.target);
+      if (path === over) return;
+      over = path;
+      clearTimeout(timer);
+      if (!path) return;
+      const inMenu = !!(e.target.closest && e.target.closest('nav, aside'));
+      timer = setTimeout(() => go(path), inMenu ? 60 : 150);
+    };
+    const onDown = (e) => { const path = pathOf(e.target); if (path) { clearTimeout(timer); go(path); } };
+    document.addEventListener('pointerover', onOver, { passive: true });
+    document.addEventListener('pointerdown', onDown, { passive: true, capture: true });
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('pointerover', onOver);
+      document.removeEventListener('pointerdown', onDown, { capture: true });
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') { setDrawerOpen(false); setMenuOpen(false); } };
@@ -260,6 +313,7 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen" style={{ fontFamily: 'var(--font-body)' }}>
+      <TopProgress />
       {/* Overlay drawer — every breakpoint, same behaviour. */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Navigation">
@@ -328,7 +382,10 @@ export default function Layout() {
                 here rather than around the whole app means the sidebar and
                 header stay on screen while the next page's chunk arrives. */}
             <Suspense fallback={<PageLoading />}>
-              <Outlet />
+              {/* Keyed by path: each new screen fades in (see .icrm-screen-in). */}
+              <div key={location.pathname} className="icrm-screen-in">
+                <Outlet />
+              </div>
             </Suspense>
           </ErrorBoundary>
         </main>

@@ -429,3 +429,30 @@ html.dark-mode .skeleton {
   background: linear-gradient(90deg, #1C1F27 25%, #23262F 50%, #1C1F27 75%);
   background-size: 800px 100%;
 }
+
+/* ---------------------------------------------------------------------------
+   Screen changes
+   - Each new screen fades in quickly (160 ms) instead of snapping, so moving
+     between modules and records feels smooth. It never delays content: the
+     screen is fully usable from the first frame.
+   - The thin loading bar at the top (components/TopProgress.jsx).
+   Both are switched off for people who ask their system for less motion.
+   --------------------------------------------------------------------------- */
+@keyframes icrm-screen-in {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+.icrm-screen-in { animation: icrm-screen-in 160ms ease-out both; }
+
+@keyframes icrm-progress-run {
+  0% { width: 0; }
+  30% { width: 45%; }
+  100% { width: 88%; }
+}
+.icrm-progress-run { animation: icrm-progress-run 4s cubic-bezier(0.1, 0.7, 0.2, 1) forwards; }
+.icrm-progress-done { width: 100%; opacity: 0; transition: width 150ms ease-out, opacity 250ms ease 100ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .icrm-screen-in { animation: none; }
+  .icrm-progress-run { animation: none; width: 60%; }
+}

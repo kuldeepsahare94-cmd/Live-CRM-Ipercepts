@@ -1,4 +1,5 @@
 import lazy from './lazyWithRecovery';
+import { registerRoutePreloads } from './routePreload';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -85,13 +86,50 @@ const SupportAnalytics = supportPage('Analytics');
 // pause. Each chunk is downloaded once and cached; nothing is re-fetched.
 // ---------------------------------------------------------------------------
 Dashboard.preload();
+
+// Page code for a path, fetched when the pointer rests on (or presses) a link
+// to it — see Layout. Most specific patterns first.
+registerRoutePreloads([
+  [/^\/$/, Dashboard],
+  [/^\/leads\/\d+$/, LeadDetail],
+  [/^\/leads$/, Leads],
+  [/^\/records\/[^/]+\/kanban$/, UniversalKanban],
+  [/^\/records\/[^/]+\/\d+$/, UniversalDetail],
+  [/^\/records\/[^/]+$/, UniversalList],
+  [/^\/payments/, Payments],
+  [/^\/reports/, Reports],
+  [/^\/call-reports/, CallReports],
+  [/^\/customer-360\//, Customer360],
+  [/^\/calendar/, CalendarPage],
+  [/^\/chat/, TeamChat],
+  [/^\/inbox/, Inbox],
+  [/^\/users/, Users],
+  [/^\/roles/, Roles],
+  [/^\/settings\/modules/, SettingsModules],
+  [/^\/settings\/options/, SettingsOptions],
+  [/^\/settings\/notifications/, SettingsNotifications],
+  [/^\/settings\/company/, SettingsCompany],
+  [/^\/settings\/data/, SettingsData],
+  [/^\/settings$/, Settings],
+  [/^\/whatsapp\/inbox/, WhatsAppInbox],
+  [/^\/support\/?$/, CommandCenter],
+]);
+
 if (typeof window !== 'undefined') {
   const whenIdle = window.requestIdleCallback
     ? (cb) => window.requestIdleCallback(cb, { timeout: 5000 })
     : (cb) => setTimeout(cb, 1);
-  setTimeout(() => whenIdle(() => {
-    [Leads, UniversalList, Payments, LeadDetail, UniversalDetail].forEach((page) => page.preload());
-  }), 2500);
+  // The everyday pages are fetched in the background soon after sign-in, one
+  // at a time when the browser is idle, so moving between modules never waits
+  // for page code. The rest are fetched on hover (see Layout).
+  const everyday = [Leads, UniversalList, UniversalDetail, LeadDetail, Payments, UniversalKanban,
+    Reports, CallReports, CalendarPage, Customer360, Settings, TeamChat, Inbox];
+  const next = () => {
+    const page = everyday.shift();
+    if (!page) return;
+    Promise.resolve(page.preload()).catch(() => {}).finally(() => whenIdle(next));
+  };
+  setTimeout(() => whenIdle(next), 2500);
 }
 
 export default function App() {

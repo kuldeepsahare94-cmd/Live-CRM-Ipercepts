@@ -19,6 +19,7 @@ import { KpiCard, SkeletonRows, ErrorState, EmptyState, friendlyError } from '..
 import DrillBanner, { useDrill, applyDrill } from '../../components/DrillBanner';
 import AssignPicker from '../../components/AssignPicker';
 import { loadDirectory } from '../../components/userDirectory';
+import { remember, recall } from '../../screenMemory';
 import {
   FilterButton, FilterPanel, ActiveFilterChips, SavedFiltersMenu, applyFilters, isComplete, useMe, extraRecordFields,
   useSelection, RowCheckbox, BulkBar, BulkUpdateModal, BulkAssignModal, BulkDeleteModal, runBulk,
@@ -78,10 +79,15 @@ export default function UniversalList() {
   const navigate = useNavigate();
   const can = usePermissions();
 
-  const [module, setModule] = useState(null);
-  const [fields, setFields] = useState([]);
-  const [records, setRecords] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Coming back to this list shows what it showed last time at once; fresh
+  // rows replace it a moment later (see screenMemory.js).
+  const memKey = `list:${moduleApiName}`;
+  const [shown] = useState(() => recall(memKey));
+  const [module, setModule] = useState(shown?.module || null);
+  const [fields, setFields] = useState(shown?.fields || []);
+  const [records, setRecords] = useState(shown?.records || []);
+  const [recordsLoaded, setRecordsLoaded] = useState(!!shown);
+  const [loading, setLoading] = useState(!shown);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -118,7 +124,7 @@ export default function UniversalList() {
   useEffect(() => { setConditions([]); setActiveSaved(null); setShowFilters(false); }, [moduleApiName]);
 
   useEffect(() => {
-    setLoading(true);
+    if (!recall(memKey)) setLoading(true);
     setError('');
     // Performance: the saved-filter menu and the owner/team names are needed
     // as soon as the list renders. Ask for them now, alongside the module
@@ -148,7 +154,12 @@ export default function UniversalList() {
       api.universalList(module, { q, ids: drill.active ? drill.idsParam : undefined }),
       hasCustom ? api.getAllCustomFieldValues(module.api_name).catch(() => ({})) : null,
     ])
-      .then(([rows, custom]) => setRecords(custom && Array.isArray(rows) ? rows.map((r) => ({ ...r, ...(custom[r.id] || {}) })) : rows))
+      .then(([rows, custom]) => {
+        const merged = custom && Array.isArray(rows) ? rows.map((r) => ({ ...r, ...(custom[r.id] || {}) })) : rows;
+        setRecords(merged);
+        setRecordsLoaded(true);
+        if (!q && !drill.active && Array.isArray(merged)) remember(memKey, { module, fields, records: merged });
+      })
       .catch((e) => setError(friendlyError(e, 'Unable to load records.')));
   };
   const customKey = fields.filter((f) => !f.is_system).length;
@@ -566,7 +577,8 @@ export default function UniversalList() {
               <tr key={r.id} className="border-b border-line/60 transition-colors cursor-pointer"
                 onMouseEnter={(e) => { e.currentTarget.style.background = `${accent.solid}0A`; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
-                onClick={() => navigate(`/records/${module.api_name}/${r.id}`)}
+                onClick={() => navigate(`/records/${module.api_name}/${r.id}`, { state: { preview: { id: r.id, title: recordTitle(r, fields) } } })}
+                data-href={`/records/${module.api_name}/${r.id}`}
                 style={selection.has(r.id) ? { background: `${accent.solid}0F` } : undefined}>
                 <td className="py-3 pl-4 pr-1 w-8" onClick={(e) => e.stopPropagation()}>
                   <RowCheckbox checked={selection.has(r.id)} label={`Select ${recordTitle(r, fields)}`} onChange={() => selection.toggle(r.id)} />
@@ -579,6 +591,7 @@ export default function UniversalList() {
                       // which is a large part of why the table read as flat.
                       // Deterministic per record name, in the module accent.
                       <Link to={`/records/${module.api_name}/${r.id}`} onClick={(e) => e.stopPropagation()}
+                        state={{ preview: { id: r.id, title: recordTitle(r, fields) } }}
                         className="flex items-center gap-2.5 group">
                         <span className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 shadow-sm"
                           style={{ background: avatarGradientFor(formatFieldValue(getFieldValue(r, f), f)) }}>
@@ -660,7 +673,8 @@ export default function UniversalList() {
         </table>
 
         {drill.active && drill.loading && <div className="p-4"><SkeletonRows rows={4} cols={5} /></div>}
-        {filtered.length === 0 && !(drill.active && (drill.loading || drill.error)) && (
+        {!recordsLoaded && !(drill.active && drill.loading) && <div className="p-4"><SkeletonRows rows={6} cols={5} /></div>}
+        {recordsLoaded && filtered.length === 0 && !(drill.active && (drill.loading || drill.error)) && (
           <div className="py-12 text-center">
             <p className="t-section mb-1">
               {drill.data

@@ -52,11 +52,22 @@ export default function NotificationBell() {
     .catch(() => { setItems([]); setUnread(0); });
 
   useEffect(() => {
-    load();
-    const interval = setInterval(load, 60000);
+    // The server answers one request at a time, so the page's own data (the
+    // dashboard right after sign-in) goes first; the bell follows a moment later.
+    const first = setTimeout(load, 1200);
+    // Every two minutes while the tab is in view; a hidden tab waits and
+    // refreshes the moment it is shown again (reminder popups do not depend
+    // on this — they have their own check).
+    const interval = setInterval(() => { if (!document.hidden) load(); }, 120000);
+    const onVisible = () => { if (!document.hidden) load(); };
+    document.addEventListener('visibilitychange', onVisible);
     // A follow-up snoozed or completed from a reminder popup updates the bell at once.
     window.addEventListener('icrm-followups-changed', load);
-    return () => { clearInterval(interval); window.removeEventListener('icrm-followups-changed', load); };
+    return () => {
+      clearTimeout(first); clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('icrm-followups-changed', load);
+    };
   }, []);
 
   useEffect(() => {

@@ -12,6 +12,7 @@ import { useModuleOptions, allOptions, selectableOptions, labelFor, toOptionsJso
 import { localToIso, browserTimeZone } from '../components/followup/time';
 import DrillBanner, { useDrill, applyDrill } from '../components/DrillBanner';
 import AssignPicker from '../components/AssignPicker';
+import { remember, recall } from '../screenMemory';
 import {
   FilterButton, FilterPanel, ActiveFilterChips, SavedFiltersMenu, applyFilters, isComplete, useMe,
   useSelection, RowCheckbox, BulkBar, BulkUpdateModal, BulkAssignModal, BulkDeleteModal, runBulk,
@@ -154,7 +155,7 @@ function LeadCardBody({ lead, statuses, sourceLabel, canEdit, moving, moveError,
   const followUp = lead.follow_up_date ? String(lead.follow_up_date).slice(0, 10) : null;
   const isToday = followUp === new Date().toISOString().slice(0, 10);
   return (
-    <Link to={`/leads/${lead.id}`}
+    <Link to={`/leads/${lead.id}`} state={{ preview: { id: lead.id, title: lead.student_name } }}
       draggable={canEdit}
       onDragStart={(e) => {
         // dataTransfer must be set for the drop to register in Firefox.
@@ -485,13 +486,14 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
 
 export default function Leads() {
   const can = usePermissions();
-  const [list, setList] = useState([]);
+  // Coming back to Leads shows the last list at once; fresh rows follow.
+  const [list, setList] = useState(() => recall('leads:list') || []);
   const leadOpts = useModuleOptions('leads');
   const statuses = useMemo(() => allOptions(leadOpts?.status, FALLBACK_STATUSES), [leadOpts]);
   const sources = useMemo(() => allOptions(leadOpts?.source), [leadOpts]);
   const qualifications = useMemo(() => allOptions(leadOpts?.qualification), [leadOpts]);
   const sourceLabel = (v) => labelFor(leadOpts?.source, v);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !recall('leads:list'));
   const [error, setError] = useState(null);
   const [view, setView] = useState(() => localStorage.getItem('leads_view') || 'list');
   const [statusFilter, setStatusFilter] = useState('');
@@ -515,7 +517,7 @@ export default function Leads() {
   const load = () => {
     setError(null);
     return api.listLeads({ status: statusFilter, q })
-      .then(setList)
+      .then((rows) => { setList(rows); if (!statusFilter && !q && Array.isArray(rows)) remember('leads:list', rows); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
@@ -750,7 +752,7 @@ export default function Leads() {
                       <RowCheckbox checked={selection.has(l.id)} label={`Select ${l.student_name}`} onChange={() => selection.toggle(l.id)} />
                     </td>
                     <td className="py-3 px-4">
-                      <Link to={`/leads/${l.id}`} className="flex items-center gap-2.5 group">
+                      <Link to={`/leads/${l.id}`} state={{ preview: { id: l.id, title: l.student_name } }} className="flex items-center gap-2.5 group">
                         <Avatar name={l.student_name} size="sm" />
                         <span className="font-medium text-ink group-hover:text-[var(--color-brand)] truncate">
                           {l.student_name}

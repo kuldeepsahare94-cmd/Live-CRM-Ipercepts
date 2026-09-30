@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { ArrowLeft, Trash2, Pencil, Send, MessageCircle, Sparkles, CheckSquare, FileText, Download, Paperclip, Upload, PhoneCall, CalendarPlus, StickyNote, Building2 } from 'lucide-react';
 import { api } from '../../api';
 import { usePermissions } from '../../context/usePermissions';
@@ -25,6 +25,8 @@ import SubscriptionPanels, { CustomerSubscriptions } from './SubscriptionPanels'
 import AssignPicker from '../../components/AssignPicker';
 import { TicketSupportPanel, IncidentPanel, ProblemPanel } from '../support/SupportRecordPanels';
 import { USER_TYPES } from './fieldUtils';
+import DetailSkeleton from '../../components/DetailSkeleton';
+import { remember, recall } from '../../screenMemory';
 
 // Modules whose records are sales documents: line items, a PDF, a place in a
 // conversion chain.
@@ -579,11 +581,18 @@ export default function UniversalDetail() {
   const navigate = useNavigate();
   const can = usePermissions();
 
-  const [module, setModule] = useState(null);
-  const [fields, setFields] = useState([]);
-  const [record, setRecord] = useState(null);
-  const [related, setRelated] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Opening a record seen before shows it at once, then refreshes it
+  // (screenMemory.js). A record opened from a list shows its name at once.
+  const location = useLocation();
+  const memKey = `rec:${moduleApiName}:${id}`;
+  const [shown] = useState(() => recall(memKey));
+  const [module, setModule] = useState(shown?.module || null);
+  const [fields, setFields] = useState(shown?.fields || []);
+  const [record, setRecord] = useState(shown?.record || null);
+  const [related, setRelated] = useState(shown?.related || []);
+  const [loading, setLoading] = useState(!shown);
+  const recordRef = useRef(record);
+  recordRef.current = record;
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState('overview');
@@ -594,17 +603,23 @@ export default function UniversalDetail() {
   const [loggingOutcome, setLoggingOutcome] = useState(false);
   const [openFollowUp, setOpenFollowUp] = useState(null);
   const [followUpVersion, setFollowUpVersion] = useState(0);
-  const [layout, setLayout] = useState(null); // null until loaded; { sections: [] } means "no custom layout saved"
+  const [layout, setLayout] = useState(shown?.layout ?? null); // null until loaded; { sections: [] } means "no custom layout saved"
+  const snapshot = useRef(shown ? { ...shown } : {});
+  const keep = (part) => { snapshot.current = { ...snapshot.current, ...part }; if (snapshot.current.record) remember(memKey, snapshot.current); };
 
   const load = () => {
-    setLoading(true);
+    // Refreshing a record already on screen (after an edit, or one shown from
+    // memory) keeps it visible instead of blanking the page to "Loading…".
+    if (!recordRef.current) setLoading(true);
     setError('');
     api.getModuleMeta(moduleApiName)
       .then(async (mod) => {
         setModule(mod);
         const [f, rec] = await Promise.all([api.listModuleFields(mod.id), api.universalGet(mod, id)]);
         setFields(f);
-        api.getModuleLayout(mod.id, 'detail').then((r) => setLayout(r.layout_json || { sections: [] })).catch(() => setLayout({ sections: [] }));
+        api.getModuleLayout(mod.id, 'detail')
+          .then((r) => { const l = r.layout_json || { sections: [] }; setLayout(l); keep({ layout: l }); })
+          .catch(() => setLayout({ sections: [] }));
 
         // Custom fields added to a STANDARD module (table_name set) live in
         // a separate EAV store, not on the record itself — fetch and merge
@@ -613,9 +628,11 @@ export default function UniversalDetail() {
         // other field with no special-casing needed.
         const hasCustomFields = mod.table_name && f.some((field) => !field.is_system);
         const customValues = hasCustomFields ? await api.getCustomFieldValues(mod.api_name, id).catch(() => ({})) : {};
-        setRecord({ ...rec, ...customValues });
+        const merged = { ...rec, ...customValues };
+        setRecord(merged);
+        keep({ module: mod, fields: f, record: merged });
 
-        api.listRelated(mod.api_name, id).then(setRelated).catch(() => setRelated([]));
+        api.listRelated(mod.api_name, id).then((r) => { setRelated(r); keep({ related: r }); }).catch(() => setRelated([]));
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -670,7 +687,10 @@ export default function UniversalDetail() {
     }
   }, [searchParams, record, editFields, editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) return <div className="py-8 t-meta">Loading…</div>;
+  if (loading) {
+    const preview = location.state?.preview;
+    return <DetailSkeleton title={preview && String(preview.id) === String(id) ? preview.title : ''} />;
+  }
   if (error) return <div className="py-8 text-sm" style={{ color: "var(--color-danger)" }}>{error}</div>;
   if (!module || !record) return null;
 

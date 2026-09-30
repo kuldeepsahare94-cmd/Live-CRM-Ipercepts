@@ -27,8 +27,13 @@ import { useAuth } from '../context/AuthContext';
 import { avatarGradientFor, initialsOf } from '../theme/avatarColors';
 import { TONES, getTone, setTone, playTone } from './chatSounds';
 
-const POLL_ACTIVE_MS = 5000;
-const POLL_HIDDEN_MS = 20000;
+// How often new messages are checked. The server answers one request at a
+// time, so every check briefly delays whatever you clicked; they are spaced
+// out when the chat panel is closed (the badge can wait a few seconds) and
+// kept quick while you are in a conversation.
+const POLL_OPEN_MS = 4000;
+const POLL_CLOSED_MS = 12000;
+const POLL_HIDDEN_MS = 30000;
 // How long a popup stays. Seven seconds was long enough to miss entirely if
 // you happened to be looking at another part of the screen.
 const TOAST_MS = 12000;
@@ -433,17 +438,19 @@ export default function ChatWidget({ variant = 'popup' }) {
 
   useEffect(() => {
     if (!canChat) return undefined;
-    tick();
+    // First check a moment after the page loads, so the page's own data is
+    // answered first (the server handles one request at a time).
+    const first = setTimeout(tick, 1500);
     let timer;
     const schedule = () => {
       clearTimeout(timer);
       timer = setTimeout(async () => { await tick(); schedule(); },
-        document.hidden ? POLL_HIDDEN_MS : POLL_ACTIVE_MS);
+        document.hidden ? POLL_HIDDEN_MS : (openRef.current && !minimisedRef.current ? POLL_OPEN_MS : POLL_CLOSED_MS));
     };
     schedule();
     const onVis = () => { if (!document.hidden) { tick(); schedule(); } };
     document.addEventListener('visibilitychange', onVis);
-    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
+    return () => { clearTimeout(first); clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
   }, [canChat, tick]);
 
   useEffect(() => {

@@ -88,13 +88,16 @@ export default function CalendarWidget() {
   };
 
   useEffect(() => {
-    load();
+    // After the page's own data (see NotificationBell): the server answers
+    // one request at a time.
+    const first = setTimeout(load, 2500);
     // Calendar events change far less often than chat/notifications, and
     // every open of this popup already refreshes on demand (see toggle
-    // below) — a 3-minute background refresh is enough to keep the badge
+    // below) — a 10-minute background refresh (skipped while the tab is
+    // hidden) is enough to keep the badge
     // honest without adding load for something this low-urgency.
-    const interval = setInterval(load, 3 * 60000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => { if (!document.hidden) load(); }, 10 * 60000);
+    return () => { clearTimeout(first); clearInterval(interval); };
   }, []);
 
   useEffect(() => {
