@@ -330,14 +330,17 @@ function refresh(ticketId, now = Date.now()) {
   if (!t) return null;
   const ev = evaluate(t, now);
   if (!ev.policy) return { ticket: t, ev };
-  db.prepare(`UPDATE tickets SET first_response_due_at=?, resolution_due_at=?, sla_state=?, response_sla_state=?, sla_elapsed_pct=?,
+  // These columns are SLA bookkeeping (no cached screen reads them), so the
+  // write is not counted as a data change — see db.quietly.
+  const quietly = typeof db.quietly === 'function' ? (fn) => db.quietly(fn) : (fn) => fn();
+  quietly(() => db.prepare(`UPDATE tickets SET first_response_due_at=?, resolution_due_at=?, sla_state=?, response_sla_state=?, sla_elapsed_pct=?,
       first_response_breached=?, resolution_breached=?, sla_due_at=? WHERE id=?`).run(
     ev.first_response_due_at, ev.resolution_due_at, ev.state, ev.response?.state || null,
     ev.resolution?.pct ?? ev.response?.pct ?? null,
     ['breached', 'missed'].includes(ev.response?.state) ? 1 : 0,
     ['breached', 'missed'].includes(ev.resolution?.state) ? 1 : 0,
     ev.resolution_due_at, ticketId,
-  );
+  ));
   return { ticket: t, ev };
 }
 

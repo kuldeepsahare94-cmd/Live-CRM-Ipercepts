@@ -439,12 +439,83 @@ function sweepOne(ticketId, now = Date.now(), { silent = false } = {}) {
   }
 }
 
+// Runs every minute. It used to run the full per-ticket routine (about 15
+// database round trips) for every open ticket every time — several seconds on
+// a small server, during which every other request waited. Now it works out
+// in memory, for all open tickets at once, which ones actually need anything
+// (a stored SLA value that changed, a warning or breach not yet recorded, an
+// escalation level reached but not yet raised), and only touches those. What
+// happens to those tickets is exactly what sweepOne always did.
+const sameNum = (a, b) => (a === null || a === undefined || a === '' ? null : Number(a)) === (b === null || b === undefined || b === '' ? null : Number(b));
+const sameText = (a, b) => String(a ?? '') === String(b ?? '');
+
+function storedSlaChanged(t, ev) {
+  const breached = (part) => (['breached', 'missed'].includes(part?.state) ? 1 : 0);
+  return !sameText(t.first_response_due_at, ev.first_response_due_at)
+    || !sameText(t.resolution_due_at, ev.resolution_due_at)
+    || !sameText(t.sla_due_at, ev.resolution_due_at)
+    || !sameText(t.sla_state, ev.state)
+    || !sameText(t.response_sla_state, ev.response?.state || null)
+    || !sameNum(t.sla_elapsed_pct, ev.resolution?.pct ?? ev.response?.pct ?? null)
+    || !sameNum(t.first_response_breached || 0, breached(ev.response))
+    || !sameNum(t.resolution_breached || 0, breached(ev.resolution));
+}
+
 function sweepAll(now = Date.now()) {
-  const ids = db.prepare(`SELECT id FROM tickets WHERE ${OPEN} AND sla_policy_id IS NOT NULL`).all().map((r) => r.id);
-  for (const id of ids) {
-    try { sweepOne(id, now); } catch (e) { console.warn('[support] sweep failed for ticket', id, e.message); }
+  const tickets = db.prepare(`SELECT * FROM tickets WHERE ${OPEN} AND sla_policy_id IS NOT NULL`).all();
+  if (!tickets.length) return 0;
+
+  // What has already been recorded, for all of these tickets in two queries.
+  const fired = new Set();
+  const escalated = new Set();
+  const ids = tickets.map((t) => t.id);
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const marks = chunk.map(() => '?').join(',');
+    db.prepare(`SELECT ticket_id, event_type, field FROM ticket_events WHERE event_type IN ('sla_warning','sla_breached') AND ticket_id IN (${marks})`)
+      .all(...chunk).forEach((r) => fired.add(`${r.ticket_id}|${r.event_type}|${r.field}`));
+    db.prepare(`SELECT ticket_id, metric, level FROM ticket_escalations WHERE ticket_id IN (${marks})`)
+      .all(...chunk).forEach((r) => escalated.add(`${r.ticket_id}|${r.metric}|${Number(r.level)}`));
   }
-  return ids.length;
+  const rules = db.prepare('SELECT * FROM escalation_rules WHERE active=1 ORDER BY sort_order, id').all();
+
+  for (const t of tickets) {
+    try {
+      const ev = sla.evaluate(t, now);
+      if (!ev.policy) continue;
+
+      // A warning or breach event that sweepOne would record now.
+      const parts = [['resolution', ev.resolution], ['response', ev.response]];
+      const needsEvent = parts.some(([metric, part]) => part && (
+        (part.state === 'at_risk' && !fired.has(`${t.id}|sla_warning|${metric}`))
+        || (part.state === 'breached' && !fired.has(`${t.id}|sla_breached|${metric}`))));
+
+      // An escalation level reached and not yet raised (same rule order and
+      // "first matching rule per metric" as sweepOne).
+      let needsEscalation = false;
+      if (!t.sla_paused_at && rules.length) {
+        const partFor = (metric) => (metric === 'response' ? ev.response : ev.resolution);
+        const pending = (rule) => {
+          const part = partFor(rule.metric);
+          if (!part || part.pct == null || ['met', 'missed'].includes(part.state)) return false;
+          return parseLevels(rule).some((l) => part.pct >= l.pct && !escalated.has(`${t.id}|${rule.metric}|${Number(l.level)}`));
+        };
+        if (rules.some(pending)) {
+          const ctx = { account: t.account_id ? db.prepare('SELECT id, account_name, account_type FROM accounts WHERE id=?').get(t.account_id) : null };
+          const handled = new Set();
+          for (const rule of rules) {
+            if (handled.has(rule.metric) || !ruleMatches(rule, t, ctx)) continue;
+            handled.add(rule.metric);
+            if (pending(rule)) { needsEscalation = true; break; }
+          }
+        }
+      }
+
+      if (needsEvent || needsEscalation) sweepOne(t.id, now);
+      else if (storedSlaChanged(t, ev)) sla.refresh(t.id, now);
+    } catch (e) { console.warn('[support] sweep failed for ticket', t.id, e.message); }
+  }
+  return tickets.length;
 }
 
 // Tickets that predate the support desk get a policy on first boot.

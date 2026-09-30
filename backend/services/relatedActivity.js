@@ -25,8 +25,15 @@ const SOURCES = [
   { key: 'documents', table: 'documents', order: 'created_at DESC' },
 ];
 
+// Tables only appear (never vanish) while the server runs, so a table found
+// once is remembered; a missing one is checked again next time. This used to
+// cost five extra database round trips on every record page.
+const knownTables = new Set();
 function tableExists(name) {
-  return !!db.prepare('SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?').get(name);
+  if (knownTables.has(name)) return true;
+  const found = !!db.prepare('SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ?').get(name);
+  if (found) knownTables.add(name);
+  return found;
 }
 
 /**

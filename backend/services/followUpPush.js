@@ -155,17 +155,26 @@ async function sweep() {
 
 function start() {
   // Follow-up dates written by bulk paths (CSV import, mass update, restore,
-  // demo data, workflows) are brought into the schedule shortly after boot
-  // and then every minute. The check is a couple of indexed queries.
-  const reconcile = () => {
+  // demo data, workflows) are brought into the schedule shortly after boot.
+  // After that the check runs within a minute of any change to leads or
+  // contacts, and every ten minutes regardless (a deleted record elsewhere).
+  // On a small server the check is not free, so it is skipped while nothing
+  // has changed — it would otherwise pause every screen once a minute.
+  let seenVersion = null;
+  let lastRun = 0;
+  const reconcile = (force = false) => {
+    const version = typeof db.versionOf === 'function' ? db.versionOf(['leads', 'contacts']) : null;
+    if (!force && version !== null && version === seenVersion && Date.now() - lastRun < 10 * 60 * 1000) return;
     try {
       const r = followUps.reconcile();
       if (r.created) console.log(`[follow-ups] ${r.created} follow-up(s) brought into the reminder schedule`);
       if (r.cancelled || r.orphans) console.log(`[follow-ups] ${r.cancelled + r.orphans} follow-up(s) closed (date cleared or record deleted)`);
     } catch (e) { console.warn('[follow-ups] reconcile failed:', e.message); }
+    seenVersion = typeof db.versionOf === 'function' ? db.versionOf(['leads', 'contacts']) : null;
+    lastRun = Date.now();
   };
-  setTimeout(reconcile, 5000).unref();
-  setInterval(reconcile, 60 * 1000).unref();
+  setTimeout(() => reconcile(true), 5000).unref();
+  setInterval(() => reconcile(false), 60 * 1000).unref();
   setInterval(() => { sweep(); }, 30 * 1000).unref();
   if (!webpush) console.warn('[push] web-push is not installed — reminders work while the CRM is open, not while it is closed');
 }

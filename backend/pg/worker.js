@@ -109,9 +109,10 @@ async function handle(msg) {
 port.on('message', async (msg) => {
   let reply;
   try {
-    reply = { result: await handle(msg) };
+    reply = { id: msg.id, result: await handle(msg) };
   } catch (e) {
     reply = {
+      id: msg.id,
       error: {
         message: e.message, code: e.code, detail: e.detail, table: e.table,
         column: e.column, constraint: e.constraint, position: e.position,
@@ -119,6 +120,8 @@ port.on('message', async (msg) => {
     };
   }
   port.postMessage(reply);
-  Atomics.store(signal, 0, 1);
+  // A counter, not a flag: the waiting thread compares it with the value it
+  // saw before asking, so an answer can never slip past unnoticed.
+  Atomics.add(signal, 0, 1);
   Atomics.notify(signal, 0);
 });

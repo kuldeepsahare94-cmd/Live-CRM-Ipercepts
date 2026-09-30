@@ -25,6 +25,12 @@ const { Worker, MessageChannel, receiveMessageOnPort } = require('worker_threads
 const { translate, mask, unmask, orderTarget, addIdOrder } = require('./translate');
 
 const QUERY_TIMEOUT_MS = Number(process.env.DB_QUERY_TIMEOUT_MS || 120000);
+
+// Which table a data-changing statement writes to (for db.versionOf).
+const WRITE_TARGET = /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?)\s+(?:ONLY\s+)?"?([A-Za-z_][A-Za-z0-9_]*)"?/i;
+// The sign-in presence stamp (users.last_seen_at) changes nothing anyone
+// caches, and it is written constantly, so it does not count as a change.
+const PRESENCE_ONLY = /^\s*UPDATE\s+"?users"?\s+SET\s+last_seen_at\s*=\s*[^,]*\s+WHERE\s+id\s*=\s*\$1\s*$/i;
 const NUMERIC_TYPES = new Set(['bigint', 'integer', 'smallint', 'double precision', 'real', 'numeric']);
 
 function sqliteStyleError(e, sql) {
@@ -160,6 +166,10 @@ class Database {
     this._cache = new Map();
     this._columns = new Map();
     this._warned = new Set();
+    // Change counters, per table, for caches elsewhere in the app (see
+    // versionOf). _epoch moves when a change cannot be pinned to one table.
+    this._tableVersions = new Map();
+    this._epoch = 0;
 
     // Identical reads within one request (one turn of the event loop) are
     // answered once. Routes here run synchronously, so nothing else can
@@ -190,16 +200,33 @@ class Database {
   }
 
   // Send one request to the worker and wait for the answer.
+  //
+  // Every request carries a number and the worker sends it back with the
+  // answer. An answer that does not match (one that arrived after its own
+  // request had already given up) is thrown away, so a single slow query can
+  // never shift every later answer onto the wrong request. The worker counts
+  // its answers in the shared cell (rather than setting a flag), so no wake-up
+  // is ever missed.
   _call(msg) {
     if (this._workerError) throw this._workerError;
     if (msg.op === 'script' && this._readCache) this._readCache.clear();
-    Atomics.store(this._signal, 0, 0);
-    this._port.postMessage(msg);
-    const waited = Atomics.wait(this._signal, 0, 0, QUERY_TIMEOUT_MS);
-    const reply = receiveMessageOnPort(this._port);
-    if (!reply) {
+    this._seq = (this._seq || 0) + 1;
+    const id = this._seq;
+    let seen = Atomics.load(this._signal, 0);
+    this._port.postMessage({ ...msg, id });
+    const deadline = Date.now() + QUERY_TIMEOUT_MS;
+    let reply = null;
+    for (;;) {
+      let r;
+      while ((r = receiveMessageOnPort(this._port))) {
+        if (r.message && r.message.id === id) { reply = r; break; }
+      }
+      if (reply) break;
       if (this._workerError) throw this._workerError;
-      throw new Error(waited === 'timed-out' ? `Database did not answer within ${QUERY_TIMEOUT_MS / 1000}s` : 'Database connection lost');
+      const left = deadline - Date.now();
+      if (left <= 0) throw new Error(`Database did not answer within ${QUERY_TIMEOUT_MS / 1000}s`);
+      Atomics.wait(this._signal, 0, seen, left);
+      seen = Atomics.load(this._signal, 0);
     }
     if (reply.message.error) {
       const e = reply.message.error;
@@ -209,7 +236,39 @@ class Database {
     return reply.message.result;
   }
 
+  // Record that data may have changed (called before every non-SELECT).
+  _noteWrite(sql) {
+    if (this._quiet) return;
+    if (/^\s*SELECT\b/i.test(sql)) return;
+    if (/^\s*WITH\b/i.test(sql) && !/\b(INSERT|UPDATE|DELETE)\b/i.test(sql)) return;
+    if (PRESENCE_ONLY.test(sql)) return;
+    const m = WRITE_TARGET.exec(sql);
+    if (m) {
+      const table = m[1].toLowerCase();
+      this._tableVersions.set(table, (this._tableVersions.get(table) || 0) + 1);
+    } else {
+      this._epoch += 1;
+    }
+  }
+
+  // Run fn without counting its writes as changes (for bookkeeping columns no
+  // cache depends on, e.g. the SLA percentage the support sweep updates every
+  // minute — counting it would make the dashboard recompute every minute).
+  quietly(fn) {
+    this._quiet = (this._quiet || 0) + 1;
+    try { return fn(); } finally { this._quiet -= 1; }
+  }
+
+  // A value that changes whenever any of these tables is written to (or the
+  // schema changes). Caches keep it next to what they hold and recompute when
+  // it no longer matches — so a cached figure can never outlive a change made
+  // through this server.
+  versionOf(tables) {
+    return `${this._epoch}:${tables.map((t) => this._tableVersions.get(t) || 0).join('.')}`;
+  }
+
   _query(sql, values, source) {
+    this._noteWrite(sql);
     // Anything that is not a plain read may change data: forget cached reads.
     if (this._readCache && !/^\s*(SELECT|WITH)\b/i.test(sql)) this._readCache.clear();
     try {
@@ -259,6 +318,7 @@ class Database {
   }
 
   _schemaChanged() {
+    this._epoch += 1;
     this._columns.clear();
     this._call({ op: 'forget' });
   }
@@ -453,7 +513,10 @@ class Database {
   }
 
   // Run raw PostgreSQL (no translation). Used by the backup/restore tools.
-  pgQuery(sql, params = []) { return this._call({ op: 'query', sql, params, savepoint: this._depth > 0 }); }
+  pgQuery(sql, params = []) {
+    if (!/^\s*SELECT\b/i.test(sql)) this._epoch += 1;
+    return this._call({ op: 'query', sql, params, savepoint: this._depth > 0 });
+  }
 
   close() {
     try { this._worker.terminate(); } catch { /* ignore */ }
