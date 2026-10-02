@@ -43,6 +43,27 @@ function createActivityRouter(config) {
     res.json(db.prepare(sql).all(...params));
   });
 
+  // Real totals for the status cards above the list. The list above returns
+  // only the newest 200 rows, so counting those would under-report a busy
+  // module (calls grow by hundreds a day); this counts the whole table.
+  // Same filters as the list, except the status itself.
+  // Must stay ABOVE '/:id', or "status-counts" would be read as an id.
+  router.get('/status-counts', requirePermission(moduleApiName, 'view'), (req, res) => {
+    const { related_module, related_record_id, q } = req.query;
+    let where = ' WHERE 1=1';
+    const params = [];
+    if (related_module) { where += ' AND related_module=?'; params.push(related_module); }
+    if (related_record_id) { where += ' AND related_record_id=?'; params.push(related_record_id); }
+    if (q) { where += ` AND (${config.titleColumn} LIKE ?)`; params.push(`%${q}%`); }
+    if (!columnNames.includes('status')) {
+      const total = db.prepare(`SELECT COUNT(*) AS n FROM ${tableName}${where}`).get(...params).n;
+      return res.json({ total: Number(total) || 0, limit: 200, counts: [] });
+    }
+    const counts = db.prepare(`SELECT status AS value, COUNT(*) AS n FROM ${tableName}${where} GROUP BY status`).all(...params)
+      .map((r) => ({ value: r.value, n: Number(r.n) || 0 }));
+    res.json({ total: counts.reduce((sum, r) => sum + r.n, 0), limit: 200, counts });
+  });
+
   router.get('/:id', requirePermission(moduleApiName, 'view'), (req, res) => {
     const row = db.prepare(`SELECT * FROM ${tableName} WHERE id=?`).get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Not found' });
