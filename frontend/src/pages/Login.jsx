@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   User, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Cloud, TabletSmartphone,
-  Users, BarChart3, Headset, Settings, AlertCircle, Loader2, Globe,
+  Users, BarChart3, Headset, Settings, AlertCircle, Loader2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { forgetThisBrowser } from '../components/followup/notify';
@@ -247,9 +247,48 @@ const PAGE_CSS = `
 .icrm-login .li-input:focus { outline: none; border-color: #1677F2 !important; box-shadow: 0 0 0 4px rgba(22,119,242,0.15); }
 .icrm-login .li-card { padding: clamp(20px, 3.8vh, 48px) clamp(20px, 3.6vw, 56px); }
 .icrm-login .li-btn { height: clamp(46px, 7vh, 58px); }
-.icrm-login .li-feature { width: clamp(48px, 8vh, 64px); height: clamp(48px, 8vh, 64px); }
-@media (max-height: 760px) { .icrm-login .li-tagline { display: none; } }
+/* The four feature icons.
+   Tall screens: a small row under the text, above the mountains.
+   Shorter screens (most laptops): the text block would push that row onto
+   the mountain, so a compact 2 × 2 version sits at the bottom left, on the
+   snow, where nothing is behind it. */
+.icrm-login .li-features-row { display: flex; gap: 26px; margin-top: calc(var(--gap) * 1.3); }
+.icrm-login .li-features-row .li-feature { width: 46px; height: 46px; }
+.icrm-login .li-features-row .li-feature svg { width: 21px; height: 21px; }
+.icrm-login .li-features-row .li-feature-label { margin-top: 7px; font-size: 13px; line-height: 1.3; }
+.icrm-login .li-features-grid { display: none; }
+@media (max-height: 859px) {
+  .icrm-login .li-tagline { display: none; }
+  .icrm-login .li-features-row { display: none; }
+  .icrm-login .li-features-grid {
+    display: grid; grid-template-columns: auto auto; column-gap: 22px; row-gap: 10px;
+    position: absolute; left: 3.5rem; bottom: clamp(12px, 3vh, 26px);   /* 3.5rem = the page's side padding */
+  }
+  .icrm-login .li-features-grid li { display: flex; align-items: center; gap: 9px; }
+  .icrm-login .li-features-grid .li-feature { width: 32px; height: 32px; }
+  .icrm-login .li-features-grid .li-feature svg { width: 16px; height: 16px; }
+  .icrm-login .li-features-grid .li-feature-label { font-size: 12px; line-height: 1.25; }
+  .icrm-login .li-story-text { max-width: 500px; }
+}
+@media (max-width: 1279px) { .icrm-login .li-features-grid { display: none; } }
 `;
+
+function Features({ className }) {
+  return (
+    <ul className={className}>
+      {FEATURES.map(({ icon: Icon, label, bg, fg }) => (
+        <li key={label[1]} className={className === 'li-features-row' ? 'flex flex-col items-center text-center' : undefined}>
+          <span className="li-feature rounded-full flex items-center justify-center shadow-sm shrink-0" style={{ background: bg }}>
+            <Icon style={{ color: fg }} strokeWidth={2.2} />
+          </span>
+          <span className="li-feature-label font-medium" style={{ color: '#0F172A' }}>
+            {label[0]}<br />{label[1]}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -326,39 +365,30 @@ export default function Login() {
       <style>{PAGE_CSS}</style>
       <Scenery />
 
-      {/* top bar */}
-      <div className="relative z-10 flex items-center justify-between px-5 sm:px-10 lg:px-14" style={{ paddingTop: 'clamp(14px, 3.2vh, 34px)' }}>
+      {/* Company logo. On wide screens it floats over the top-left corner, so
+          the sign-in card can use the full height of the screen. */}
+      <div className="relative xl:absolute xl:top-0 xl:left-0 z-10 px-5 sm:px-10 lg:px-14" style={{ paddingTop: 'clamp(14px, 3.2vh, 34px)' }}>
         <IperceptsLogo size={26} tagline />
-        <span className="inline-flex items-center gap-1.5 text-[15px] font-medium" style={{ color: '#1E293B' }}>
-          <Globe className="w-4 h-4" style={{ color: '#475569' }} /> English
-        </span>
       </div>
 
       <div className="relative z-10 flex-1 w-full mx-auto max-w-[1480px] px-5 sm:px-10 lg:px-14 grid xl:grid-cols-[minmax(0,1fr)_minmax(460px,600px)] gap-10 items-center"
         style={{ paddingTop: 'clamp(8px, 2vh, 32px)', paddingBottom: 'clamp(12px, 3vh, 48px)' }}>
 
-        {/* left: product story (large screens) */}
-        <div className="hidden xl:block">
+        {/* left: product story (large screens), starting near the top so the
+            text stays above the mountains */}
+        <div className="hidden xl:block self-start" style={{ paddingTop: 'clamp(84px, 14vh, 150px)' }}>
           <ICrmLogo size="clamp(64px, min(6.6vw, 12vh), 110px)" />
           <h1 className="font-bold leading-[1.1]" style={{ marginTop: 'var(--gap)', fontSize: 'clamp(28px, min(3vw, 5.4vh), 48px)', letterSpacing: '-0.02em' }}>
             All Your Business<br />Relationships. <span style={{ color: BLUE }}>Smarter.</span>
           </h1>
-          <p className="max-w-[560px] leading-relaxed" style={{ marginTop: 'var(--gap)', fontSize: 'clamp(15px, min(1.3vw, 2.6vh), 20px)', color: '#1E293B' }}>
+          <p className="li-story-text max-w-[560px] leading-relaxed" style={{ marginTop: 'var(--gap)', fontSize: 'clamp(15px, min(1.3vw, 2.6vh), 20px)', color: '#1E293B' }}>
             A powerful, flexible and industry-ready CRM to manage leads, customers, sales, projects, support and more — built for growing businesses.
           </p>
-          <ul className="flex gap-8 xl:gap-10" style={{ marginTop: 'calc(var(--gap) * 1.4)' }}>
-            {FEATURES.map(({ icon: Icon, label, bg, fg }) => (
-              <li key={label[1]} className="flex flex-col items-center text-center">
-                <span className="li-feature rounded-full flex items-center justify-center shadow-sm" style={{ background: bg }}>
-                  <Icon className="w-7 h-7" style={{ color: fg }} strokeWidth={2.2} />
-                </span>
-                <span className="mt-2.5 text-[15px] font-medium leading-snug" style={{ color: '#0F172A' }}>
-                  {label[0]}<br />{label[1]}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <Features className="li-features-row" />
         </div>
+        {/* the same four, compact, at the bottom left on shorter screens
+            (placed by the stylesheet above; it takes no space in the layout) */}
+        <Features className="li-features-grid" />
 
         {/* right: sign-in card */}
         <form onSubmit={submit} noValidate
