@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Download, X, Wallet, Plus, Pencil } from 'lucide-react';
+import { Download, X, Wallet, Plus, Pencil, IndianRupee } from 'lucide-react';
 import Avatar from '../components/Avatar';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -10,6 +10,7 @@ import { PageHeader } from '../components/ui';
 import { UniversalRecordEditModal } from '../components/RecordEditModal';
 import DrillBanner, { useDrill, applyDrill } from '../components/DrillBanner';
 import { useSharedOptions, selectableOptions } from '../components/fieldOptions';
+import StatusCards, { statusBreakdown, matchesStatus } from '../components/StatusCards';
 
 const STATUSES = ['Pending', 'Partial', 'Paid', 'Failed'];
 // Payment modes come from Settings → Dropdown Options (Payment Mode list);
@@ -140,12 +141,25 @@ export default function Payments() {
   const drill = useDrill();
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const load = () => api.listPayments({ status: statusFilter })
+  // Every payment is loaded once; the status is chosen and applied here, so
+  // the cards can show each status's real count and a click needs no wait.
+  const load = () => api.listPayments()
     .then((rows) => { setList(rows); setLoadError(''); })
     .catch((e) => setLoadError(e.message))
     .finally(() => setLoaded(true));
-  useEffect(() => { load(); }, [statusFilter]);
-  const rows = applyDrill(list, drill);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, []);
+  const allRows = useMemo(() => applyDrill(list, drill), [list, drill.idSet, drill.active]); // eslint-disable-line react-hooks/exhaustive-deps
+  // One card per real payment status, with its real count.
+  const statusCards = useMemo(
+    () => statusBreakdown(allRows, (p) => p.status, STATUSES, { selected: statusFilter, blankLabel: 'No status' }),
+    [allRows, statusFilter],
+  );
+  const rows = useMemo(
+    () => (statusFilter ? allRows.filter((p) => matchesStatus(p.status, statusFilter)) : allRows),
+    [allRows, statusFilter],
+  );
+  const collected = rows.filter((p) => p.status === 'Paid').reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const waiting = !loaded || (drill.active && drill.loading);
 
   // Deep-linked (e.g. from a Dashboard link) — open the mark-paid modal directly
@@ -196,10 +210,19 @@ export default function Payments() {
 
       <DrillBanner drill={drill} shown={drill.data ? rows.length : undefined} noun="payments" />
 
+      {/* Total + one card per real status. Click a card to see only those
+          payments; click it again, or the total, to see all. */}
+      {!waiting && allRows.length > 0 && (
+        <StatusCards className="mt-5"
+          total={{ label: 'Total payments', value: allRows.length, icon: Wallet, from: '#4ADE80', to: '#15803D' }}
+          items={statusCards} selected={statusFilter} onSelect={setStatusFilter}
+          extras={[{ label: 'Collected (paid)', value: `₹${collected.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`, icon: IndianRupee, tone: 'success' }]} />
+      )}
+
       <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border border-line rounded-lg px-3 py-2 text-sm mt-5"
         aria-label="Filter by status">
         <option value="">All statuses</option>
-        {STATUSES.map((s) => <option key={s}>{s}</option>)}
+        {statusCards.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
       </select>
 
       <div className="card mt-6 overflow-hidden overflow-x-auto shadow-sm">
@@ -280,7 +303,8 @@ export default function Payments() {
             )}
             {!waiting && !loadError && rows.length === 0 && !(drill.active && drill.error) && (
               <tr><td colSpan={9} className="py-8 text-center text-slate-400">
-                {drill.data ? 'No payments match these dashboard filters — the dashboard figure is genuinely zero.' : 'No payments yet.'}
+                {drill.data ? 'No payments match these dashboard filters — the dashboard figure is genuinely zero.'
+                  : statusFilter ? 'No payments with this status.' : 'No payments yet.'}
               </td></tr>
             )}
           </tbody>

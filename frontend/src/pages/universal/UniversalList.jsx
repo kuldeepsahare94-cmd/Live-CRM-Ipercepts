@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Kanban as KanbanIcon, Search, MoreHorizontal, Eye, Pencil, LayoutGrid } from 'lucide-react';
 import { UniversalRecordEditModal } from '../../components/RecordEditModal';
@@ -14,8 +14,9 @@ import { downloadCSV } from '../../utils/csv';
 import { getFieldValue, formatFieldValue, renderFieldValue, FieldInput, recordTitle } from './fieldUtils';
 import { cachedLabel } from './lookupCache';
 import { computeFollowupStatus, findFollowupField } from './followupUtils';
-import { kpisFor } from './listKpis';
-import { KpiCard, SkeletonRows, ErrorState, EmptyState, friendlyError } from '../../components/ui';
+import { pickCardField, extrasFor } from './listKpis';
+import StatusCards, { statusBreakdown, breakdownFromServer, matchesStatus, normaliseOptions, BLANK } from '../../components/StatusCards';
+import { SkeletonRows, ErrorState, friendlyError } from '../../components/ui';
 import DrillBanner, { useDrill, applyDrill } from '../../components/DrillBanner';
 import AssignPicker from '../../components/AssignPicker';
 import { loadDirectory } from '../../components/userDirectory';
@@ -28,51 +29,11 @@ import { USER_TYPES } from './fieldUtils';
 
 const STATUS_TYPES = new Set(['status', 'contact_status', 'priority']);
 
+// These lists come from the server as the newest 200 rows only (they grow by
+// hundreds a day). Their status cards therefore take the real totals from
+// the server instead of counting the rows on screen — see "bigList" below.
+const NEWEST_ROWS_ONLY = new Set(['calls', 'meetings', 'tasks', 'notes', 'emails']);
 
-// Shared KPI tile for every module list. The uniform part is the treatment
-// — gradient chip, accent bar, same proportions everywhere. The distinct
-// part is the hue, taken from that module's own accent. Semantic tones
-// (success/warning/danger) still win where a metric genuinely carries
-// meaning, e.g. "Overdue" should read as a warning regardless of module.
-const TONE_GRADIENTS = {
-  success: ['#6EE7B7', '#047857'],
-  warning: ['#FCD34D', '#B45309'],
-  danger: ['#FDA4AF', '#BE123C'],
-  info: ['#93C5FD', '#1D4ED8'],
-  special: ['#C4B5FD', '#6D28D9'],
-  neutral: ['#A7F3D0', '#0F766E'],
-};
-
-function ModuleKpi({ label, value, tone, accent, index, icon: Icon, clickable, active, onClick }) {
-  // The first tile always carries the module's own identity colour; the
-  // rest use their semantic tone so status still reads correctly.
-  const [from, to] = index === 0
-    ? [accent.from, accent.to]
-    : (TONE_GRADIENTS[tone] || [accent.from, accent.to]);
-  // Only tiles that can genuinely narrow the list become buttons — a total
-  // or a money figure has nothing to filter to, and making it look
-  // clickable would be a promise the tile can't keep.
-  const Tag = clickable ? 'button' : 'div';
-  return (
-    <Tag onClick={onClick}
-      className={`relative bg-white border rounded-2xl p-4 pt-5 overflow-hidden transition-all w-full text-left ${
-        clickable ? 'hover:shadow-md hover:-translate-y-0.5 cursor-pointer' : ''} ${
-        active ? 'border-transparent' : 'border-line'}`}
-      style={active ? { boxShadow: `0 0 0 2px ${to}` } : undefined}>
-      <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${from}, ${to})` }} />
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl shrink-0 flex items-center justify-center text-white shadow-sm"
-          style={{ background: `linear-gradient(135deg, ${from}, ${to})` }}>
-          {Icon && <Icon className="w-[18px] h-[18px]" />}
-        </div>
-        <div className="min-w-0">
-          <div className="text-xl font-bold text-ink leading-none">{value}</div>
-          <div className="text-xs text-slate-500 mt-1 truncate">{label}</div>
-        </div>
-      </div>
-    </Tag>
-  );
-}
 
 export default function UniversalList() {
   const { moduleApiName } = useParams();
@@ -108,6 +69,13 @@ export default function UniversalList() {
   const [openMenu, setOpenMenu] = useState(null);
   const [editingId, setEditingId] = useState(null);   // row being edited in the popup
   const [kpiFilter, setKpiFilter] = useState(null);
+  // The status card that is chosen, when the cards are built from a field
+  // other than the one the Status dropdown filters (Accounts: account type).
+  const [cardFilter, setCardFilter] = useState('');
+  // Whole-table totals per status ({ total, limit, counts }) for the lists
+  // above; null for every other module.
+  const [serverCounts, setServerCounts] = useState(shown?.counts || null);
+  const loadSeq = useRef(0);
   const [fieldErrors, setFieldErrors] = useState({});
   const PAGE_SIZE = 25;
   // Opened from a dashboard figure: narrow to exactly the records behind it.
@@ -141,30 +109,6 @@ export default function UniversalList() {
       .finally(() => setLoading(false));
   }, [moduleApiName]);
 
-  const load = () => {
-    if (!module) return;
-    // While a drill-down is resolving, wait for its ids rather than loading
-    // (and briefly showing) the unfiltered list. The ids are passed to the
-    // API too, so a list endpoint with a row cap still returns every match.
-    if (drill.active && !drill.idSet) return;
-    // Custom fields on a standard module live in a separate store; their
-    // values are merged onto each row so the list can filter on them too.
-    const hasCustom = !!module.table_name && fields.some((f) => !f.is_system);
-    Promise.all([
-      api.universalList(module, { q, ids: drill.active ? drill.idsParam : undefined }),
-      hasCustom ? api.getAllCustomFieldValues(module.api_name).catch(() => ({})) : null,
-    ])
-      .then(([rows, custom]) => {
-        const merged = custom && Array.isArray(rows) ? rows.map((r) => ({ ...r, ...(custom[r.id] || {}) })) : rows;
-        setRecords(merged);
-        setRecordsLoaded(true);
-        if (!q && !drill.active && Array.isArray(merged)) remember(memKey, { module, fields, records: merged });
-      })
-      .catch((e) => setError(friendlyError(e, 'Unable to load records.')));
-  };
-  const customKey = fields.filter((f) => !f.is_system).length;
-  useEffect(() => { load(); }, [module, drill.idsParam, drill.active, customKey]);
-  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [q]);
 
   const listFields = useMemo(() => fields.filter((f) => f.show_in_list), [fields]);
   const createFields = useMemo(() => fields.filter((f) => f.show_in_create), [fields]);
@@ -202,42 +146,139 @@ export default function UniversalList() {
     return [...new Set(records.map((r) => r[statusField.api_name]).filter(Boolean))];
   }, [statusField, records]);
 
-  const kpis = useMemo(() => kpisFor(moduleApiName, records), [moduleApiName, records]);
+  // The field the status cards are built from (see listKpis.js). When it is
+  // the same field as the Status dropdown, the two are one control.
+  const cardField = useMemo(() => pickCardField(moduleApiName, fields, records), [moduleApiName, fields, records]);
+  const cardIsDropdown = !!cardField && !!statusField && cardField.api_name === statusField.api_name;
+  const cardValue = cardIsDropdown ? statusFilter : cardFilter;
+  const setCardValue = cardIsDropdown ? setStatusFilter : setCardFilter;
+
+  // A list that is longer than the server sends (more than 200 calls, say):
+  // the cards show the server's real totals, and choosing a status card asks
+  // the server for that status's rows, so nothing older is left out.
+  const bigList = !!serverCounts && !drill.active && serverCounts.total > (serverCounts.limit || 200);
+  // Server totals are per Status, so they are used only when the cards are
+  // built from the Status field.
+  const serverCards = bigList && cardField?.api_name === 'status';
+  const serverStatus = serverCards && cardValue && cardValue !== BLANK ? cardValue : '';
+
+  const load = () => {
+    if (!module) return;
+    // While a drill-down is resolving, wait for its ids rather than loading
+    // (and briefly showing) the unfiltered list. The ids are passed to the
+    // API too, so a list endpoint with a row cap still returns every match.
+    if (drill.active && !drill.idSet) return;
+    // Custom fields on a standard module live in a separate store; their
+    // values are merged onto each row so the list can filter on them too.
+    const hasCustom = !!module.table_name && fields.some((f) => !f.is_system);
+    const wantCounts = NEWEST_ROWS_ONLY.has(module.api_name) && !drill.active;
+    const seq = ++loadSeq.current;
+    Promise.all([
+      api.universalList(module, { q, ids: drill.active ? drill.idsParam : undefined, status: serverStatus || undefined }),
+      hasCustom ? api.getAllCustomFieldValues(module.api_name).catch(() => ({})) : null,
+      // An older server without this route answers "not found": the cards
+      // then count the rows on screen, as for every other module.
+      wantCounts ? api.statusCounts(module, { q }).catch(() => null) : null,
+    ])
+      .then(([rows, custom, counts]) => {
+        if (seq !== loadSeq.current) return;   // an older answer arriving late
+        const merged = custom && Array.isArray(rows) ? rows.map((r) => ({ ...r, ...(custom[r.id] || {}) })) : rows;
+        const totals = counts && typeof counts.total === 'number' ? counts : null;
+        setRecords(merged);
+        setServerCounts(totals);
+        setRecordsLoaded(true);
+        if (!q && !drill.active && !serverStatus && Array.isArray(merged)) remember(memKey, { module, fields, records: merged, counts: totals });
+      })
+      .catch((e) => { if (seq === loadSeq.current) setError(friendlyError(e, 'Unable to load records.')); });
+  };
+  const customKey = fields.filter((f) => !f.is_system).length;
+  useEffect(() => { load(); }, [module, drill.idsParam, drill.active, customKey, serverStatus]);
+  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [q]);
   // Every configured field, plus columns the records carry that are not
   // configured fields (a pipeline's Stage, for one).
   const filterFields = useMemo(() => [...fields, ...extraRecordFields(records, fields, module)], [fields, records, module]);
   // Opportunities: Stage is set through the pipeline, so mass update offers it
   // as its own field, listing the pipeline's stages.
   const [stages, setStages] = useState([]);
+  // The pipeline's stage names in pipeline order, for the Deals status cards.
+  const [stageOrder, setStageOrder] = useState([]);
   useEffect(() => {
-    if (module?.api_name !== 'opportunities') { setStages([]); return; }
+    if (module?.api_name !== 'opportunities') { setStages([]); setStageOrder([]); return; }
     api.listPipelines('opportunities').then((ps) => {
-      const many = ps.filter((x) => x.active !== 0).length > 1;
-      setStages(ps.filter((x) => x.active !== 0).flatMap((pl) => (pl.stages || []).filter((st) => st.active !== 0)
-        .map((st) => ({ value: st.id, label: many ? `${pl.name} · ${st.name}` : st.name }))));
-    }).catch(() => setStages([]));
+      const live = ps.filter((x) => x.active !== 0);
+      const many = live.length > 1;
+      const liveStages = live.flatMap((pl) => (pl.stages || []).filter((st) => st.active !== 0).map((st) => ({ pl, st })));
+      setStages(liveStages.map(({ pl, st }) => ({ value: st.id, label: many ? `${pl.name} · ${st.name}` : st.name })));
+      const names = new Set();
+      setStageOrder(liveStages.filter(({ st }) => !names.has(st.name) && names.add(st.name))
+        .map(({ st }) => ({ value: st.name, label: st.name, color: st.color || undefined })));
+    }).catch(() => { setStages([]); setStageOrder([]); });
   }, [module?.api_name]);
   const massFields = useMemo(() => (stages.length
     ? [{ api_name: 'stage_id', label: 'Stage', field_type: 'dropdown', value_type: 'number', pipeline_stage: true, is_system: 1, show_in_edit: 1, options_json: JSON.stringify(stages) }, ...fields]
     : fields), [stages, fields]);
 
-  const filtered = useMemo(() => {
+  // Every control narrows the list, and each card is counted with all the
+  // OTHER controls applied — so the number on a card is always the number of
+  // rows you get when you click it.
+  //   common    search, dashboard drill-down, Status dropdown, filter panel
+  //   forCards  common + the chosen "other figure" card (Overdue, …)
+  //   filtered  forCards + the chosen status card = the rows in the table
+  const common = useMemo(() => {
     let rows = applyDrill(records, drill);
-    rows = statusField && statusFilter
-      ? rows.filter((r) => r[statusField.api_name] === statusFilter)
-      : rows;
-    // A KPI tile filter stacks on top of the dropdown filters rather than
-    // replacing them, so the two controls compose instead of fighting.
-    const active = kpis?.find((k) => k.label === kpiFilter);
-    if (active?.filter) rows = rows.filter(active.filter);
-    rows = applyFilters(rows, conditions, match, filterFields, getFieldValue, me);
-    return rows;
-  }, [records, statusField, statusFilter, kpiFilter, kpis, drill.idSet, drill.active, conditions, match, filterFields, me]);
+    if (statusField && statusFilter && !cardIsDropdown) {
+      rows = rows.filter((r) => matchesStatus(getFieldValue(r, statusField), statusFilter));
+    }
+    return applyFilters(rows, conditions, match, filterFields, getFieldValue, me);
+  }, [records, statusField, statusFilter, cardIsDropdown, drill.idSet, drill.active, conditions, match, filterFields, me]);
+
+  const inCard = useMemo(
+    () => (cardField && cardValue ? (r) => matchesStatus(getFieldValue(r, cardField), cardValue) : null),
+    [cardField, cardValue],
+  );
+  // The money / date figures describe the rows of the chosen status. They are
+  // sums over the rows on screen, so they are left out when the screen holds
+  // only the newest part of a long list — a partial sum would be a wrong one.
+  const extras = useMemo(
+    () => (records.length && !bigList ? extrasFor(moduleApiName, inCard ? common.filter(inCard) : common) : []),
+    [moduleApiName, records.length, bigList, common, inCard],
+  );
+  const activeExtra = extras.find((k) => k.label === kpiFilter && k.filter) || null;
+  const forCards = useMemo(
+    () => (activeExtra ? common.filter(activeExtra.filter) : common),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [common, activeExtra?.label],
+  );
+  const cardOptions = useMemo(
+    () => (cardField?.api_name === 'stage_name' ? stageOrder : normaliseOptions(cardField?.options_json)),
+    [cardField, stageOrder],
+  );
+  const statusCards = useMemo(() => {
+    if (!cardField) return [];
+    const blankLabel = `No ${(cardField.label || 'status').toLowerCase()}`;
+    // A long list: the server's totals for the whole module.
+    if (serverCards) return breakdownFromServer(serverCounts.counts, cardOptions, { selected: cardValue, blankLabel });
+    return statusBreakdown(forCards, (r) => getFieldValue(r, cardField), cardOptions, {
+      selected: cardValue,
+      blankLabel,
+      colorOf: cardField.api_name === 'stage_name' ? (r) => r.stage_color : undefined,
+    });
+  }, [cardField, forCards, cardOptions, cardValue, serverCards, serverCounts]);
+  const totalCount = serverCards ? serverCounts.total : forCards.length;
+  // How many records the current choice really has, when that is more than
+  // the server sent (shown under the table so nobody thinks the rest is gone).
+  const fullCount = !bigList ? null
+    : (serverStatus ? (statusCards.find((c) => c.value === serverStatus)?.count ?? null) : serverCounts.total);
+  const filtered = useMemo(() => (inCard ? forCards.filter(inCard) : forCards), [forCards, inCard]);
+  const TotalIcon = useMemo(() => {
+    const name = module?.icon;
+    return function TotalIcon(props) { return <ModuleIcon name={name} {...props} />; };
+  }, [module?.icon]);
 
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [q, statusFilter, kpiFilter, moduleApiName, drill.metric, conditions, match]);
+  useEffect(() => { setPage(1); }, [q, statusFilter, cardFilter, kpiFilter, moduleApiName, drill.metric, conditions, match]);
   // Filters that could no longer match are dropped from the selection, so a
   // bulk action never touches a record the user can't see.
   useEffect(() => {
@@ -464,14 +505,23 @@ export default function UniversalList() {
         </div>
       </div>
 
-      {kpis && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
-          {kpis.map((k, i) => (
-            <ModuleKpi key={k.label} label={k.label} value={k.value} tone={k.tone} accent={accent} index={i} icon={k.icon}
-              clickable={!!k.filter} active={kpiFilter === k.label}
-              onClick={k.filter ? () => setKpiFilter(kpiFilter === k.label ? null : k.label) : undefined} />
-          ))}
-        </div>
+      {/* Total + one card per real status (real counts), then the module's
+          money / date figures — one row; the cards beyond the fifth slide in
+          from the right. Click a card to see only those records; click it
+          again, or the total, to see all. */}
+      {recordsLoaded && (records.length > 0 || serverCards) && (cardField || extras.length > 0) && (
+        <StatusCards className="mt-5" fieldLabel={(cardField?.label || 'status').toLowerCase()}
+          total={{ label: `Total ${pluralLabel}`, value: totalCount, icon: TotalIcon, from: accent.from, to: accent.to }}
+          items={statusCards} selected={cardValue} onSelect={setCardValue}
+          // Invoices are about money first: Invoiced / Collected / Outstanding
+          // / Overdue stay in view, the statuses follow to the right.
+          extrasFirst={module.api_name === 'invoices'}
+          extras={extras.map((k) => ({
+            label: k.label, value: k.value, icon: k.icon, tone: k.tone,
+            active: !!k.filter && kpiFilter === k.label,
+            onClick: k.filter ? () => setKpiFilter(kpiFilter === k.label ? null : k.label) : undefined,
+            title: k.filter ? (kpiFilter === k.label ? 'Click again to show all' : `Show only: ${k.label}`) : undefined,
+          }))} />
       )}
 
       <DrillBanner drill={drill} shown={drill.data ? filtered.length : undefined} noun={pluralLabel.toLowerCase()} />
@@ -487,7 +537,9 @@ export default function UniversalList() {
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
             className="input w-auto min-w-[150px]" aria-label={`Filter by ${statusField.label || 'status'}`}>
             <option value="">All {(statusField.label || 'statuses').toLowerCase()}</option>
-            {statusOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+            {cardIsDropdown
+              ? statusCards.map((o) => <option key={o.value} value={o.value}>{o.inactive ? `${o.label} (inactive)` : o.label}</option>)
+              : statusOptions.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
         )}
         <FilterButton count={conditions.filter(isComplete).length} open={showFilters} onClick={() => setShowFilters((v) => !v)} />
@@ -560,6 +612,9 @@ export default function UniversalList() {
               </th>
               {listFields.map((f) => <th key={f.id} className="py-3 px-4 font-medium">{f.label}</th>)}
               {listFields.length === 0 && <th className="py-3 px-4 font-medium">Record</th>}
+              {/* A deal's stage is not one of its fields, so it gets its own
+                  column — the cards above count it, the rows should show it. */}
+              {cardField?.virtual && <th className="py-3 px-4 font-medium">{cardField.label}</th>}
               {followupField && <th className="py-3 px-4 font-medium">Follow-up</th>}
               {module.api_name === 'accounts' && (
                 <>
@@ -612,6 +667,18 @@ export default function UniversalList() {
                   </td>
                 )) : (
                   <td className="py-3 px-4"><Link to={`/records/${module.api_name}/${r.id}`} className="text-ink font-medium hover:text-amber">{recordTitle(r, fields)}</Link></td>
+                )}
+                {cardField?.virtual && (
+                  <td className="py-3 px-4 whitespace-nowrap">
+                    {r[cardField.api_name]
+                      ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={r.stage_color ? { background: `${r.stage_color}22`, color: r.stage_color } : { background: '#F1F5F9', color: '#475569' }}>
+                          {r[cardField.api_name]}
+                        </span>
+                      )
+                      : <span className="text-slate-300 text-xs">—</span>}
+                  </td>
                 )}
                 {module.api_name === 'accounts' && (
                   <>
@@ -679,12 +746,12 @@ export default function UniversalList() {
             <p className="t-section mb-1">
               {drill.data
                 ? `No ${pluralLabel.toLowerCase()} match these dashboard filters`
-                : `No ${pluralLabel.toLowerCase()} ${q || statusFilter ? 'match your filters' : 'yet'}`}
+                : `No ${pluralLabel.toLowerCase()} ${q || statusFilter || cardFilter || kpiFilter ? 'match your filters' : 'yet'}`}
             </p>
             <p className="t-meta">
               {drill.data
                 ? 'Nothing currently meets the criteria above — the dashboard figure is genuinely zero.'
-                : q || statusFilter
+                : q || statusFilter || cardFilter || kpiFilter
                   ? 'Try clearing the search or filter.'
                   : `Add your first ${singularLabel.toLowerCase()} to get started.`}
             </p>
@@ -696,6 +763,9 @@ export default function UniversalList() {
             <span className="t-meta">
               Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
               {filtered.length !== records.length ? ` (filtered from ${records.length})` : ''}
+              {fullCount !== null && fullCount > records.length
+                ? ` — these are the newest ${records.length} of ${fullCount}. ${serverStatus ? 'Search' : 'Search, or choose a status card,'} to reach older ones.`
+                : ''}
             </span>
             {totalPages > 1 && (
               <div className="flex items-center gap-1">

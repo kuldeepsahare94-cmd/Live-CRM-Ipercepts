@@ -646,6 +646,9 @@ export const api = {
 
   // Universal CRM — generic record CRUD (works for standard + custom modules)
   universalList: (module, params) => req('GET', recordsBase(module) + qs(params)),
+  // Whole-table totals per status, for modules whose list returns only the
+  // newest 200 rows (calls, meetings, tasks, notes, emails).
+  statusCounts: (module, params) => req('GET', `${recordsBase(module)}/status-counts${qs(params)}`),
 
   // Subscriptions / AMC — schedule, renewal cycles and history
   listSubscriptions: (params) => req('GET', '/subscriptions' + qs(params)),

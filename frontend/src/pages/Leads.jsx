@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   UserPlus, List, Columns3, Search, Mail, Phone, Clock, Download, X,
-  Users as UsersIcon, Sparkles, TrendingUp, CheckCircle2, XCircle, MoreVertical, Plus, Pencil,
+  Users as UsersIcon, Sparkles, MoreVertical, Plus, Pencil,
 } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -13,6 +13,7 @@ import { localToIso, browserTimeZone } from '../components/followup/time';
 import DrillBanner, { useDrill, applyDrill } from '../components/DrillBanner';
 import AssignPicker from '../components/AssignPicker';
 import { remember, recall } from '../screenMemory';
+import StatusCards, { statusBreakdown, matchesStatus, BLANK } from '../components/StatusCards';
 import {
   FilterButton, FilterPanel, ActiveFilterChips, SavedFiltersMenu, applyFilters, isComplete, useMe,
   useSelection, RowCheckbox, BulkBar, BulkUpdateModal, BulkAssignModal, BulkDeleteModal, runBulk,
@@ -104,31 +105,6 @@ const empty = {
 };
 
 
-// Leads KPI tile. Clickable: each one filters the list to that status, so
-// the numbers are a control rather than just a readout. Uses the same
-// gradient-chip + accent-bar treatment as the dashboard so the two pages
-// read as one product.
-function LeadKpi({ label, value, icon: Icon, from, to, active, onClick }) {
-  return (
-    <button onClick={onClick}
-      className={`relative bg-white border rounded-2xl p-4 pt-5 overflow-hidden text-left transition-all hover:shadow-md hover:-translate-y-0.5 ${
-        active ? 'border-transparent ring-2' : 'border-line'}`}
-      style={active ? { boxShadow: `0 0 0 2px ${to}` } : undefined}>
-      <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: `linear-gradient(90deg, ${from}, ${to})` }} />
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white shadow-sm"
-          style={{ background: `linear-gradient(135deg, ${from}, ${to})` }}>
-          {Icon && <Icon className="w-[18px] h-[18px]" />}
-        </div>
-        <div className="min-w-0">
-          <div className="text-xl font-bold text-ink leading-none">{value}</div>
-          <div className="text-xs text-slate-500 mt-1 truncate">{label}</div>
-        </div>
-      </div>
-    </button>
-  );
-}
-
 function LeadCard({ lead, statuses, sourceLabel, onMoved, canEdit, onDragStart, onDragEnd, dragging }) {
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState('');
@@ -216,7 +192,7 @@ function LeadCardBody({ lead, statuses, sourceLabel, canEdit, moving, moveError,
   );
 }
 
-function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, onMoved }) {
+function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, onMoved, only = '', order = [] }) {
   // Drag-and-drop, implemented with the native HTML5 drag events rather
   // than pulling in a drag library for one board.
   //
@@ -239,14 +215,27 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
     statuses.filter((s) => !s.active && held.has(s.value)).forEach((s) => cols.push(s));
     // A status the data holds but the list does not (older data, an import).
     held.forEach((v) => { if (!cols.some((c) => c.value === v)) cols.push({ value: v, label: v, active: true, unlisted: true }); });
-    return cols;
-  }, [statuses, leads, optimistic]);
+    // Leads with no status get their own column, so the board's numbers are
+    // the same as the cards above it.
+    if (only === BLANK || leads.some((l) => !(optimistic[l.id] || l.status))) {
+      cols.push({ value: BLANK, label: 'No status', active: true, unlisted: true, blank: true });
+    }
+    // A status card is chosen: show that status alone, using the full width.
+    if (only) {
+      const one = cols.filter((c) => c.value === only);
+      return one.length ? one : [{ value: only, label: only, active: true, unlisted: true }];
+    }
+    // Same left-to-right order as the status cards above the board.
+    const at = (v) => { const i = order.indexOf(v); return i < 0 ? order.length : i; };
+    return cols.map((c, i) => [c, i]).sort((a, b) => at(a[0].value) - at(b[0].value) || a[1] - b[1]).map(([c]) => c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statuses, leads, optimistic, only, order.join('\u0001')]);
 
   const byStatus = useMemo(() => {
     const map = Object.fromEntries(columns.map((s) => [s.value, []]));
     const first = columns[0]?.value;
     leads.forEach((l) => {
-      const effective = optimistic[l.id] || l.status;
+      const effective = optimistic[l.id] || l.status || BLANK;
       const key = map[effective] ? effective : first;
       if (key) map[key].push(l);
     });
@@ -257,7 +246,7 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
     setDragOver(null);
     const lead = dragLead;
     setDragLead(null);
-    if (!lead || lead.status === status) return;
+    if (!lead || lead.status === status || status === BLANK) return;
 
     setOptimistic((o) => ({ ...o, [lead.id]: status }));
     setDropError('');
@@ -283,17 +272,17 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
         <div className="text-sm rounded-lg px-3 py-2 mb-3"
           style={{ background: 'var(--color-danger-soft)', color: 'var(--color-danger)' }}>{dropError}</div>
       )}
-      {canEdit && (
+      {canEdit && !only && (
         <p className="t-meta mb-2">Drag a card to another column to change its status.</p>
       )}
     <div className="flex gap-4 overflow-x-auto thin-scroll pb-4 -mx-1 px-1">
-      {columns.map(({ value: status, label: statusName, active, unlisted }) => {
+      {columns.map(({ value: status, label: statusName, active, unlisted, blank }) => {
         const [soft, solid] = toneVars(status);
         const items = byStatus[status] || [];
         const isTarget = dragOver === status && dragLead && dragLead.status !== status;
         return (
-          <section key={status} className="w-[280px] shrink-0 rounded-xl flex flex-col transition-all"
-            onDragOver={(e) => { if (canEdit && dragLead) { e.preventDefault(); setDragOver(status); } }}
+          <section key={status} className={`${only ? 'w-full' : 'w-[280px]'} shrink-0 rounded-xl flex flex-col transition-all`}
+            onDragOver={(e) => { if (canEdit && dragLead && !blank) { e.preventDefault(); setDragOver(status); } }}
             onDragLeave={() => setDragOver((d) => (d === status ? null : d))}
             onDrop={(e) => { e.preventDefault(); if (canEdit) handleDrop(status); }}
             style={{
@@ -319,14 +308,15 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
               <p className="text-[11px] mt-0.5 opacity-70" style={{ color: solid }}>{STATUS_HINT[status]}</p>
             </header>
 
-            <div className="px-2 pb-2 space-y-2 overflow-y-auto thin-scroll flex-1">
+            <div className={`px-2 pb-2 overflow-y-auto thin-scroll flex-1 ${only ? 'grid gap-2 content-start' : 'space-y-2'}`}
+              style={only ? { gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))' } : undefined}>
               {items.map((l) => (
                 <LeadCard key={l.id} lead={l} statuses={statuses} sourceLabel={sourceLabel} canEdit={canEdit} onMoved={onMoved}
                   onDragStart={setDragLead} onDragEnd={() => { setDragLead(null); setDragOver(null); }}
                   dragging={dragLead?.id === l.id} />
               ))}
               {items.length === 0 && (
-                <p className="text-[11px] text-center py-6 opacity-60" style={{ color: solid }}>No leads</p>
+                <p className="text-[11px] text-center py-6 opacity-60 col-span-full" style={{ color: solid }}>No leads</p>
               )}
             </div>
 
@@ -514,17 +504,21 @@ export default function Leads() {
   const [bulk, setBulk] = useState(null);
   const selection = useSelection('leads');
 
+  // The status is chosen on this screen (cards / dropdown) and applied here,
+  // not by the server: the cards need every status's count at the same time,
+  // and a click then shows its leads at once with no wait.
   const load = () => {
     setError(null);
-    return api.listLeads({ status: statusFilter, q })
-      .then((rows) => { setList(rows); if (!statusFilter && !q && Array.isArray(rows)) remember('leads:list', rows); })
+    return api.listLeads({ q })
+      .then((rows) => { setList(rows); if (!q && Array.isArray(rows)) remember('leads:list', rows); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
     load();
-  }, [statusFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Search box debounce. It is skipped on the first render: the effect above
   // has already loaded the list, and running here too fetched every lead a
@@ -556,10 +550,25 @@ export default function Leads() {
     { ratings: leadOpts?.lead_rating, genders: leadOpts?.gender },
   ), [list, statuses, sources, qualifications, leadOpts]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = useMemo(() => applyFilters(applyDrill(list, drill).filter((l) => (
+  // Everything except the status choice: search, source, owner, the filter
+  // panel and a dashboard drill-down. The cards are counted from this, so a
+  // card's number is always the number of leads it shows when clicked.
+  const base = useMemo(() => applyFilters(applyDrill(list, drill).filter((l) => (
     (!sourceFilter || l.source === sourceFilter) &&
     (!ownerFilter || l.assigned_counselor === ownerFilter)
   )), conditions, match, fields, leadValue, me), [list, sourceFilter, ownerFilter, drill.idSet, drill.active, conditions, match, fields, me]);
+
+  // One card per real status: the configured ones in their order, plus any
+  // other status the leads actually hold. Nothing is grouped or renamed.
+  const statusCards = useMemo(
+    () => statusBreakdown(base, (l) => l.status, statuses, { selected: statusFilter, blankLabel: 'No status' }),
+    [base, statuses, statusFilter],
+  );
+
+  const filtered = useMemo(
+    () => (statusFilter ? base.filter((l) => matchesStatus(l.status, statusFilter)) : base),
+    [base, statusFilter],
+  );
 
   useEffect(() => {
     const visible = new Set(filtered.map((r) => r.id));
@@ -593,17 +602,6 @@ export default function Leads() {
     setList((ls) => ls.map((x) => (x.id === l.id ? { ...x, assigned_counselor: value } : x)));
   };
 
-  const kpis = useMemo(() => {
-    const by = (s) => list.filter((l) => l.status === s).length;
-    return {
-      total: list.length,
-      isNew: by('New'),
-      progress: by('Contacted') + by('Interested') + by('Follow-up'),
-      converted: by('Converted'),
-      lost: by('Dropped') + by('Not Interested'),
-    };
-  }, [list]);
-
   const viewBtn = (id, Icon, label) => (
     <button onClick={() => setView(id)} aria-pressed={view === id}
       className={`btn ${view === id ? 'btn-primary' : 'btn-secondary'}`}>
@@ -628,19 +626,14 @@ export default function Leads() {
         )}
       </PageHeader>
 
+      {/* Total + one card per real status, each with its real count, in one
+          row: Total Leads stays put and the statuses beyond the first four
+          slide in from the right. Click a card to see only those leads (list
+          and board); click it again, or click Total Leads, to see all. */}
       {loading ? <SkeletonCards count={5} /> : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          <LeadKpi label="Total Leads" value={kpis.total} icon={UsersIcon} from="#E879F9" to="#A21CAF"
-            active={!statusFilter} onClick={() => setStatusFilter('')} />
-          <LeadKpi label="New" value={kpis.isNew} icon={Sparkles} from="#93C5FD" to="#1D4ED8"
-            active={statusFilter === 'New'} onClick={() => setStatusFilter('New')} />
-          <LeadKpi label="In Progress" value={kpis.progress} icon={TrendingUp} from="#FCD34D" to="#B45309"
-            active={false} onClick={() => setStatusFilter('')} />
-          <LeadKpi label="Converted" value={kpis.converted} icon={CheckCircle2} from="#6EE7B7" to="#047857"
-            active={statusFilter === 'Converted'} onClick={() => setStatusFilter('Converted')} />
-          <LeadKpi label="Lost" value={kpis.lost} icon={XCircle} from="#FDA4AF" to="#BE123C"
-            active={statusFilter === 'Dropped'} onClick={() => setStatusFilter('Dropped')} />
-        </div>
+        <StatusCards
+          total={{ label: 'Total Leads', value: base.length, icon: UsersIcon, from: '#E879F9', to: '#A21CAF' }}
+          items={statusCards} selected={statusFilter} onSelect={setStatusFilter} />
       )}
 
       {/* One compact toolbar. These were four full-width blocks stacked
@@ -656,7 +649,7 @@ export default function Leads() {
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
           className="input w-auto min-w-[130px]" aria-label="Filter by status">
           <option value="">All Statuses</option>
-          {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          {statusCards.map((s) => <option key={s.value} value={s.value}>{s.inactive ? `${s.label} (inactive)` : s.label}</option>)}
         </select>
         <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
           className="input w-auto min-w-[130px]" aria-label="Filter by source">
@@ -725,7 +718,7 @@ export default function Leads() {
 
       {!loading && !error && !(drill.active && drill.loading) && filtered.length > 0 && view === 'kanban' && (
         <KanbanBoard leads={filtered} statuses={statuses} sourceLabel={sourceLabel} onAdd={setAddFor} canCreate={can('leads', 'create')}
-          canEdit={can('leads', 'edit')} onMoved={load} />
+          canEdit={can('leads', 'edit')} onMoved={load} only={statusFilter} order={statusCards.map((c) => c.value)} />
       )}
 
       {!loading && !error && !(drill.active && drill.loading) && filtered.length > 0 && view === 'list' && (
@@ -767,7 +760,7 @@ export default function Leads() {
                       </div>
                     </td>
                     <td className="py-3 px-4 text-[var(--color-muted)] whitespace-nowrap">{sourceLabel(l.source) || '—'}</td>
-                    <td className="py-3 px-4"><Badge status={l.status}>{labelFor(statuses, l.status)}</Badge></td>
+                    <td className="py-3 px-4">{l.status ? <Badge status={l.status}>{labelFor(statuses, l.status)}</Badge> : <span className="text-[var(--color-faint)]">—</span>}</td>
                     <td className="py-3 px-4">{l.lead_rating ? <Badge status={l.lead_rating}>{l.lead_rating}</Badge> : <span className="text-[var(--color-faint)]">—</span>}</td>
                     <td className="py-3 px-4 whitespace-nowrap">
                       <AssignPicker mode="name" label="Owner" value={l.assigned_counselor || null}
