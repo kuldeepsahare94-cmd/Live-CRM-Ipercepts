@@ -62,6 +62,14 @@ export function renderFieldValue(record, field) {
   if (field.field_type === 'user' || field.field_type === 'team') {
     return <DirectoryValue field={field} value={value} />;
   }
+  // An email address opens the CRM's compose pop-up (EmailCompose.jsx
+  // catches every mailto: link), wherever the field is shown.
+  if (field.field_type === 'email' && value && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value).trim())) {
+    return (
+      <a href={`mailto:${String(value).trim()}`} title={`Write an email to ${value}`}
+        className="text-[var(--color-brand)] hover:underline break-all">{value}</a>
+    );
+  }
   return formatFieldValue(value, field);
 }
 

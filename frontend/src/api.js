@@ -291,6 +291,7 @@ async function sendRequest(method, path, body, token) {
     // .error would throw that away.
     const err = new Error(data?.error || res.statusText);
     err.status = res.status;
+    err.code = data?.code;
     err.requestId = data?.request_id;
     err.rawError = data?.raw_error;
     // Per-item validation messages (the dropdown option editor shows them
@@ -739,6 +740,28 @@ export const api = {
   linkEmail: (id, relatedModule, relatedRecordId) =>
     req('POST', `/inbox/${id}/link`, { related_module: relatedModule, related_record_id: relatedRecordId }),
   replyEmail: (id, body) => req('POST', `/inbox/${id}/reply`, body),
+  // Writing a new email. `composeStatus` says whether this user can send
+  // right now and from which address; `sendNewEmail` sends it (multipart when
+  // there are attachments) and files a copy under the record it belongs to.
+  composeStatus: () => req('GET', '/inbox/compose/status'),
+  sendNewEmail: async ({ to, cc, bcc, subject, html, body, related_module: relatedModule, related_record_id: relatedId, files = [] }) => {
+    const fields = { to, cc, bcc, subject, html, body, related_module: relatedModule, related_record_id: relatedId };
+    if (!files.length) return req('POST', '/inbox/send', fields);
+    const token = localStorage.getItem('cd_token');
+    const fd = new FormData();
+    Object.entries(fields).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') fd.append(k, v); });
+    for (const f of files) fd.append('attachments', f);
+    const res = await fetch(`${BASE}/inbox/send`, {
+      method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || `The email could not be sent (${res.status})`);
+      err.status = res.status; err.code = data.code; err.requestId = data.request_id; err.rawError = data.raw_error;
+      throw err;
+    }
+    return data;
+  },
   syncInbox: (accountId) => req('POST', '/inbox/sync', accountId ? { account_id: accountId } : {}),
   inboxSyncStatus: () => req('GET', '/inbox/sync/status'),
   downloadEmailAttachment: (id, name) => downloadFile(`/inbox/attachments/${id}/download`, name || 'attachment'),
@@ -750,6 +773,10 @@ export const api = {
   emailDiagnostics: (params) => req('GET', '/email-settings/diagnostics' + qs(params)),
   saveMyEmail: (body) => req('PUT', '/email-settings/me', body),
   testEmail: (scope) => req('POST', '/email-settings/test', { scope }),
+  // Receiving: log in to the mailbox without importing / fetch new mail now.
+  testInboundEmail: (scope) => req('POST', '/email-settings/test-inbound', { scope }),
+  checkInboundNow: (scope) => req('POST', '/email-settings/check-now', { scope }),
+  emailHosting: () => req('GET', '/email-settings/hosting'),
 
   listWaQuickTemplates: () => req('GET', '/wa-quick-templates'),
   createWaQuickTemplate: (body) => req('POST', '/wa-quick-templates', body),

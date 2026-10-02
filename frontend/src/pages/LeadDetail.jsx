@@ -10,6 +10,8 @@ import {
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
 import StatusBadge from '../components/StatusBadge';
+import { openCompose, EmailLink } from '../components/EmailCompose';
+import RecordEmails from '../components/RecordEmails';
 import OutcomeModal from '../components/followup/OutcomeModal';
 import FollowUpCard from '../components/followup/FollowUpCard';
 import { useModuleOptions, selectableOptions, labelFor } from '../components/fieldOptions';
@@ -38,6 +40,7 @@ const PAGE_TABS = [
   { key: 'overview', label: 'Overview', icon: LayoutGrid },
   { key: 'activity', label: 'Activity', icon: Info },
   { key: 'calls', label: 'Calls', icon: PhoneCall },
+  { key: 'emails', label: 'Emails', icon: Mail },
   { key: 'meetings', label: 'Meetings', icon: Calendar },
   { key: 'tasks', label: 'Tasks', icon: CheckSquare },
   { key: 'deals', label: 'Deals', icon: TrendingUp },
@@ -402,7 +405,8 @@ export default function LeadDetail() {
   const runQuickAction = (key) => {
     if (key === 'call') return setLoggingOutcome(true);
     if (key === 'whatsapp') return setWaOpen(true);
-    if (key === 'email') return lead.email && window.open(`mailto:${lead.email}`, '_self');
+    // The CRM's own compose pop-up (it says so if email is not set up yet).
+    if (key === 'email') return openCompose({ to: lead.email || '', name: lead.student_name, module: 'leads', recordId: lead.id });
     // "Schedule Meeting" now schedules one, rather than moving you to the tab
     // where you then have to press a second button.
     if (key === 'meeting') { setPageTab('meetings'); return setSchedulingMeeting(true); }
@@ -482,8 +486,12 @@ export default function LeadDetail() {
                 )}
                 {lead.email && (
                   <span className="flex items-center gap-1.5 truncate">
-                    <Mail className="w-3.5 h-3.5" /> {lead.email}
-                    <a href={`mailto:${lead.email}`} aria-label="Email" className="text-[var(--color-brand)] hover:opacity-70 shrink-0"><Mail className="w-3.5 h-3.5" /></a>
+                    <Mail className="w-3.5 h-3.5 shrink-0" />
+                    {/* the address itself opens the compose pop-up */}
+                    <EmailLink email={lead.email} name={lead.student_name} module="leads" recordId={lead.id}
+                      className="truncate hover:text-[var(--color-brand)] hover:underline" />
+                    <a href={`mailto:${lead.email}`} data-name={lead.student_name} data-module="leads" data-record-id={lead.id}
+                      aria-label="Write an email" title="Write an email" className="text-[var(--color-brand)] hover:opacity-70 shrink-0"><Mail className="w-3.5 h-3.5" /></a>
                   </span>
                 )}
                 {lead.city && <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {lead.city}</span>}
@@ -652,7 +660,7 @@ export default function LeadDetail() {
                   <Row label="Company" value={lead.account_name} />
                   <Row label="Mobile" value={lead.mobile} />
                   <Row label="Alternate Mobile" value={lead.alternate_mobile} />
-                  <Row label="Email" value={lead.email} />
+                  <Row label="Email" value={lead.email && <EmailLink email={lead.email} name={lead.student_name} module="leads" recordId={lead.id} />} />
                   <Row label="City" value={lead.city} />
                   <Row label="Address" value={lead.address} />
                   <Row label="Source" value={labelFor(leadOptions?.source, lead.source)} />
@@ -825,6 +833,11 @@ export default function LeadDetail() {
             </div>
           )}
           <CallsTab leadId={id} />
+        </div>
+      )}
+      {pageTab === 'emails' && (
+        <div className="card p-4">
+          <RecordEmails module="leads" recordId={Number(id)} to={lead.email} name={lead.student_name} />
         </div>
       )}
       {pageTab === 'meetings' && (

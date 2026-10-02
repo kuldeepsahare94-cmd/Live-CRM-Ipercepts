@@ -754,7 +754,13 @@ export default function Leads() {
                     </td>
                     <td className="py-3 px-4">
                       <div className="text-[var(--color-muted)] text-xs space-y-0.5">
-                        {l.email && <div className="truncate max-w-[180px]">{l.email}</div>}
+                        {l.email && (
+                          <div className="truncate max-w-[180px]">
+                            {/* opens the CRM's compose pop-up */}
+                            <a href={`mailto:${l.email}`} data-name={l.student_name} data-module="leads" data-record-id={l.id}
+                              title={`Write an email to ${l.email}`} className="hover:text-[var(--color-brand)] hover:underline">{l.email}</a>
+                          </div>
+                        )}
                         {l.mobile && <div>{l.mobile}</div>}
                         {!l.email && !l.mobile && '—'}
                       </div>

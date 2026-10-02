@@ -20,6 +20,7 @@ import { Avatar } from './ui';
 import ErrorBoundary from './ErrorBoundary';
 import ReminderCenter from './followup/ReminderCenter';
 import TopProgress from './TopProgress';
+import ComposeHost from './EmailCompose';
 
 // Hand-written links for the modules that have bespoke pages. Everything
 // else is generated from the module registry below, so a module created
@@ -395,6 +396,10 @@ export default function Layout() {
       {/* Follow-up reminders: in-app popup, sound and browser notification. */}
       <ErrorBoundary fallback={null}>
         <ReminderCenter />
+      </ErrorBoundary>
+      {/* The one compose pop-up: opens for any email address clicked. */}
+      <ErrorBoundary fallback={null}>
+        <ComposeHost />
       </ErrorBoundary>
     </div>
   );

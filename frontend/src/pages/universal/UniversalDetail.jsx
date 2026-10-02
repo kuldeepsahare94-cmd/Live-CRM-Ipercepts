@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
-import { ArrowLeft, Trash2, Pencil, Send, MessageCircle, Sparkles, CheckSquare, FileText, Download, Paperclip, Upload, PhoneCall, CalendarPlus, StickyNote, Building2 } from 'lucide-react';
+import { ArrowLeft, Trash2, Pencil, Send, MessageCircle, Sparkles, CheckSquare, FileText, Download, Paperclip, Upload, PhoneCall, CalendarPlus, StickyNote, Building2, Mail } from 'lucide-react';
 import { api } from '../../api';
 import { usePermissions } from '../../context/usePermissions';
 import StatusBadge from '../../components/StatusBadge';
@@ -27,6 +27,12 @@ import { TicketSupportPanel, IncidentPanel, ProblemPanel } from '../support/Supp
 import { USER_TYPES } from './fieldUtils';
 import DetailSkeleton from '../../components/DetailSkeleton';
 import { remember, recall } from '../../screenMemory';
+import { openCompose } from '../../components/EmailCompose';
+import RecordEmails from '../../components/RecordEmails';
+
+// Records that email is exchanged about. They get an Emails tab even before
+// the first message; any other record gets one once it has an address.
+const EMAIL_TAB_MODULES = new Set(['contacts', 'accounts', 'opportunities', 'tickets', 'quotations', 'proforma_invoices', 'invoices', 'subscriptions']);
 
 // Modules whose records are sales documents: line items, a PDF, a place in a
 // conversion chain.
@@ -706,7 +712,13 @@ export default function UniversalDetail() {
 
   const title = recordTitle(record, fields);
   const showWhatsApp = WHATSAPP_CAPABLE_MODULES.has(module.api_name);
-  const tabs = ['overview', ...embeddedRelations.map(([k]) => k), ...(showWhatsApp ? ['whatsapp'] : []), 'related'];
+  // Who an email from this record goes to: its own address, or — for a deal,
+  // quotation or ticket — the contact / account it belongs to.
+  const emailTo = heroSummary(record, fields).email || linkedComms(record).email || '';
+  const showEmails = module.api_name !== 'emails' && !embeddedRelations.some(([k]) => k === 'emails')
+    && can('emails', 'view') && (EMAIL_TAB_MODULES.has(module.api_name) || !!emailTo);
+  const writeEmail = () => openCompose({ to: emailTo, name: title, module: module.api_name, recordId: Number(id) });
+  const tabs = ['overview', ...embeddedRelations.map(([k]) => k), ...(showEmails ? ['emails'] : []), ...(showWhatsApp ? ['whatsapp'] : []), 'related'];
 
   return (
     <div className="relative max-w-[1400px] mx-auto rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
@@ -780,8 +792,11 @@ export default function UniversalDetail() {
                       )}
                       {h.email && (
                         <span className="flex items-center gap-1.5 truncate">
-                          <Send className="w-3.5 h-3.5" /> {h.email}
-                          <a href={`mailto:${h.email}`} aria-label="Email"
+                          <Send className="w-3.5 h-3.5 shrink-0" />
+                          {/* the address itself opens the compose pop-up */}
+                          <a href={`mailto:${h.email}`} data-name={title} data-module={module.api_name} data-record-id={id}
+                            title={`Write an email to ${h.email}`} className="truncate hover:text-[var(--color-brand)] hover:underline">{h.email}</a>
+                          <a href={`mailto:${h.email}`} data-name={title} data-module={module.api_name} data-record-id={id} aria-label="Write an email"
                             className="text-[var(--color-brand)] hover:opacity-70 shrink-0"><Send className="w-3.5 h-3.5" /></a>
                         </span>
                       )}
@@ -823,7 +838,8 @@ export default function UniversalDetail() {
                           </span>
                         )}
                         {lc.email && (
-                          <a href={`mailto:${lc.email}`} title={`${lc.emailOwner}'s email`}
+                          <a href={`mailto:${lc.email}`} title={`Write an email to ${lc.emailOwner}`}
+                            data-name={lc.emailOwner} data-module={module.api_name} data-record-id={id}
                             className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-ink truncate">
                             <Send className="w-3.5 h-3.5" /> {lc.email}
                           </a>
@@ -1022,6 +1038,9 @@ export default function UniversalDetail() {
             run: () => setWaOpen(true) },
           can('calls', 'create') && { key: 'call', label: 'Log Call', icon: PhoneCall, from: '#818CF8', to: '#4338CA',
             run: () => setLoggingOutcome(true) },
+          // The CRM's own compose pop-up; it says so if email is not set up.
+          showEmails && can('emails', 'create') && { key: 'email', label: 'Send Email', icon: Mail, from: '#93C5FD', to: '#1D4ED8',
+            run: writeEmail },
           canCreateRelation('meetings', module.api_name) && can('meetings', 'create')
             && { key: 'meeting', label: 'Meeting', icon: CalendarPlus, from: '#6EE7B7', to: '#047857',
               // Not setAddingRelation('meetings'): that writes a meetings row
@@ -1240,6 +1259,11 @@ export default function UniversalDetail() {
           onSaved={() => { setSchedulingMeeting(false); setTab('meetings'); load(); }} />
       )}
 
+      {tab === 'emails' && showEmails && (
+        <div className="card p-4 mt-4">
+          <RecordEmails module={module.api_name} recordId={Number(id)} to={emailTo} name={title} />
+        </div>
+      )}
       {tab === 'whatsapp' && showWhatsApp && <WhatsAppPanel moduleApiName={module.api_name} recordId={id} />}
 
       {tab === 'related' && (

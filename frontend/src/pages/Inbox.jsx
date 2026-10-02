@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMemo } from 'react';
 import {
   Inbox as InboxIcon, RefreshCw, Mail, MailOpen, Send, Paperclip, Link2,
-  AlertTriangle, CornerUpLeft, Search, Download,
+  AlertTriangle, CornerUpLeft, Search, Download, PenSquare,
 } from 'lucide-react';
+import { openCompose, onEmailSent } from '../components/EmailCompose';
 import { api } from '../api';
 import {
   PageHeader, Badge, Avatar, SkeletonRows, ErrorState, EmptyState, friendlyError,
@@ -14,13 +15,19 @@ import { sanitizeEmailHtml, hasBlockedImages } from '../utils/emailHtml';
 
 const when = (v) => {
   if (!v) return '';
-  const d = new Date(v);
+  const d = asDate(v);
   if (Number.isNaN(d.getTime())) return String(v).slice(0, 16);
   const mins = Math.floor((Date.now() - d.getTime()) / 60000);
   if (mins < 60) return `${Math.max(1, mins)}m ago`;
   if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
-  return d.toISOString().slice(0, 10);
+  return d.toLocaleDateString('en-CA');
 };
+
+// Leads have their own page; every other module uses the shared record page.
+const recordPath = (module, id) => (module === 'leads' ? `/leads/${id}` : `/records/${module}/${id}`);
+
+// Times are stored in UTC ("2026-10-02 09:29:10"); show them in local time.
+const asDate = (v) => new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(String(v)) ? v : `${String(v).replace(' ', 'T')}Z`);
 
 const FILTERS = [
   { key: 'inbound', label: 'Inbox' },
@@ -151,7 +158,7 @@ function MessageView({ id, onChanged }) {
         <div className="flex items-center gap-2">
           <Badge tone={email.direction === 'Inbound' ? 'info' : 'success'} size="xs">{email.direction}</Badge>
           {email.related_record_id ? (
-            <Link to={`/records/${email.related_module}/${email.related_record_id}`} className="text-xs text-[var(--color-brand)] hover:underline">
+            <Link to={recordPath(email.related_module, email.related_record_id)} className="text-xs text-[var(--color-brand)] hover:underline">
               View {email.related_module?.replace(/s$/, '')} →
             </Link>
           ) : (
@@ -251,6 +258,9 @@ export default function Inbox() {
   const [error, setError] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState(null);
+  const [mailboxes, setMailboxes] = useState(null);   // mailboxes that receive into the CRM
+  // /inbox?open=123 — a message opened from a record's Emails tab.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const load = () => {
     setError(null);
@@ -260,6 +270,17 @@ export default function Inbox() {
       .finally(() => setLoading(false));
   };
   useEffect(() => { setLoading(true); load(); }, [filter]);
+  useEffect(() => {
+    const open = Number(searchParams.get('open'));
+    if (!open) return;
+    setSelected(open);
+    const next = new URLSearchParams(searchParams); next.delete('open');
+    setSearchParams(next, { replace: true });
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const loadMailboxes = () => api.inboxSyncStatus().then(setMailboxes).catch(() => setMailboxes([]));
+  useEffect(() => { loadMailboxes(); }, []);
+  // A message sent from the compose pop-up shows in Sent without a reload.
+  useEffect(() => onEmailSent(() => load()), [filter, q]); // eslint-disable-line react-hooks/exhaustive-deps
   // Search box debounce, skipped on the first render: the effect above has
   // already loaded the inbox (running here too fetched it twice per visit).
   const searchReady = useRef(false);
@@ -278,7 +299,7 @@ export default function Inbox() {
       setSyncMsg(failed.length
         ? { ok: false, text: failed[0].error }
         : { ok: true, text: total === 0 ? 'No new mail.' : `Imported ${total} message(s)${unmatched ? `, ${unmatched} not linked to a record` : ''}.` });
-      load();
+      load(); loadMailboxes();
     } catch (err) {
       setSyncMsg({ ok: false, text: friendlyError(err, 'Sync failed.').message });
     } finally { setSyncing(false); }
@@ -289,11 +310,27 @@ export default function Inbox() {
   return (
     <div className="max-w-[1600px] mx-auto">
       <PageHeader title="Inbox" icon={InboxIcon} accent="inbox"
-        subtitle="Email received into the CRM, linked to the right customer record">
-        <button onClick={sync} disabled={syncing} className="btn btn-primary disabled:opacity-50">
+        subtitle="Email sent from and received into the CRM, linked to the right customer record">
+        <button onClick={sync} disabled={syncing} className="btn btn-secondary disabled:opacity-50">
           <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} /> {syncing ? 'Checking…' : 'Check for new mail'}
         </button>
+        <button onClick={() => openCompose({})} className="btn btn-primary">
+          <PenSquare className="w-4 h-4" /> Compose
+        </button>
       </PageHeader>
+
+      {/* Which mailbox feeds this inbox, and when it was last checked. */}
+      {mailboxes && mailboxes.length > 0 && (
+        <p className="t-meta -mt-3 mb-4">
+          {mailboxes.map((m) => `${m.from_email} — ${m.last_error ? `last check failed: ${m.last_error}` : m.last_synced_at ? `checked ${when(m.last_synced_at)}` : 'not checked yet'}`).join('  ·  ')}
+          {'. '}New mail is fetched automatically every few minutes.
+        </p>
+      )}
+      {mailboxes && mailboxes.length === 0 && (
+        <p className="t-meta -mt-3 mb-4">
+          Replies are not being fetched into the CRM yet. <Link to="/settings/email" className="underline text-[var(--color-brand)]">Switch on "Receive replies in the CRM"</Link> in Settings → Email.
+        </p>
+      )}
 
       {syncMsg && (
         <div className="text-sm rounded-lg px-3 py-2 mb-4"
@@ -317,7 +354,7 @@ export default function Inbox() {
         })}
         <div className="relative flex-1 min-w-[200px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-faint)]" />
-          <input className="input pl-9" value={q} onChange={(e) => setQ(e.target.value)}
+          <input className="input pl-9" style={{ paddingLeft: 36 }} value={q} onChange={(e) => setQ(e.target.value)}
             placeholder="Search subject, sender or body…" aria-label="Search email" />
         </div>
       </div>
@@ -330,9 +367,9 @@ export default function Inbox() {
           title={filter === 'unmatched' ? 'Nothing unlinked' : 'No email here yet'}
           description={
             counts.inbound === 0
-              ? 'Once inbound email is switched on in Settings → Email, messages will appear here automatically.'
+              ? 'Messages your customers send will appear here automatically once "Receive replies in the CRM" is switched on in Settings → Email.'
               : 'Nothing matches this filter.'}>
-          {counts.inbound === 0 && <Link to="/settings/email" className="btn btn-primary mx-auto">Set up email</Link>}
+          {counts.inbound === 0 && mailboxes && mailboxes.length === 0 && <Link to="/settings/email" className="btn btn-primary mx-auto">Set up email</Link>}
         </EmptyState>
       )}
 

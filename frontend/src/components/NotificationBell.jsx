@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, UserPlus, PhoneCall, ClipboardList, Wallet, CheckCircle2, CalendarClock, Briefcase } from 'lucide-react';
+import { Bell, UserPlus, PhoneCall, ClipboardList, Wallet, CheckCircle2, CalendarClock, Briefcase, Mail } from 'lucide-react';
 import { api } from '../api';
 
 const ICONS = {
@@ -12,6 +12,7 @@ const ICONS = {
   interview_scheduled: Briefcase,
   interview_reminder: CalendarClock,
   placement_result_updated: CheckCircle2,
+  email_received: Mail,
 };
 
 const COLORS = {
@@ -23,6 +24,7 @@ const COLORS = {
   interview_scheduled: 'text-sky-600 bg-sky-50',
   interview_reminder: 'text-warn bg-red-50',
   placement_result_updated: 'text-good bg-emerald-50',
+  email_received: 'text-sky-600 bg-sky-50',
 };
 
 // Follow-up items carry an exact instant (UTC); show it in the viewer's time.
