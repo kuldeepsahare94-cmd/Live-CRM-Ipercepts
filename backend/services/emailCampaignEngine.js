@@ -208,7 +208,7 @@ async function runCampaign(campaignId, senderUserId) {
         || html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
       try {
-        const result = await sendEmail({ to: rec.email, subject, html, text, userId: senderUserId });
+        const result = await sendEmail({ to: rec.email, subject, html, text, userId: senderUserId, kind: 'campaign_send' });
         db.prepare(`UPDATE email_campaign_recipients SET status='Sent', sent_at=datetime('now'), message_id=?, error=NULL WHERE id=?`)
           .run(result.messageId || null, rec.id);
         sent++;
@@ -217,7 +217,9 @@ async function runCampaign(campaignId, senderUserId) {
         failed++;
         // A credential or connection failure will fail for everyone, so stop
         // rather than burning through the whole list generating errors.
-        if (/auth|credential|not configured|535/i.test(e.message)) {
+        // (A blocked mail port is the same: every recipient would wait out
+        // the full connection timeout and then fail.)
+        if (/auth|credential|not configured|535|could not reach|did not accept|refused the from address/i.test(e.message)) {
           db.prepare(`UPDATE email_campaigns SET status='Failed', last_error=? WHERE id=?`).run(e.message, campaignId);
           break;
         }

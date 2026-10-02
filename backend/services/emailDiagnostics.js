@@ -34,10 +34,21 @@ function logEmailAttempt({
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(requestId, kind, accountScope || null, userId || null, smtpHost || null, smtpPort || null,
         toAddress || null, outcome, durationMs || null, errorCode, errorMessage, friendlyMessage || null);
+    prune();
   } catch (e) {
     // Logging must never be the reason a request fails.
     console.error('[email:log] could not persist diagnostic row:', e.message);
   }
+}
+
+// The log is for "what just happened", not an archive: now and then, rows
+// older than 30 days are dropped so a large campaign cannot grow it forever.
+let sinceLastPrune = 0;
+function prune() {
+  sinceLastPrune += 1;
+  if (sinceLastPrune < 200) return;
+  sinceLastPrune = 0;
+  try { db.prepare("DELETE FROM email_diagnostic_log WHERE created_at < datetime('now', '-30 days')").run(); } catch { /* next time */ }
 }
 
 module.exports = { newRequestId, logEmailAttempt };

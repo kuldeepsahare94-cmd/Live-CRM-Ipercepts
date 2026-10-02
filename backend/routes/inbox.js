@@ -1,4 +1,5 @@
-// Email inbox — reading what came in, replying, and correcting matches.
+// Email inbox — reading what came in, writing new mail, replying, and
+// correcting matches.
 //
 // Mount: app.use('/api/inbox', requireAuth, require('./routes/inbox'));
 
@@ -8,8 +9,21 @@ const path = require('path');
 const fs = require('fs');
 const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
-const { syncAccount, syncAll } = require('../services/inboundEmail');
-const { sendEmail } = require('../services/email');
+const multer = require('multer');
+const { syncAccount, syncAll, matchRecord, threadKeyFor, saveAttachments } = require('../services/inboundEmail');
+const { sendEmail, sendingStatus, addressList } = require('../services/email');
+
+// Attachments on a new message are held in memory just long enough to send
+// them and keep a copy with the sent mail.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 8 } });
+const withFiles = (req, res, next) => upload.array('attachments', 8)(req, res, (err) => {
+  if (!err) return next();
+  const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Each attachment can be at most 10 MB.'
+    : err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE' ? 'At most 8 attachments can be sent with one email.'
+    : `The attachment could not be read: ${err.message}`;
+  res.status(400).json({ error: msg });
+});
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const { UPLOAD_DIR } = require('../dataDir');
 
@@ -46,6 +60,72 @@ router.get('/', requirePermission('emails', 'view'), (req, res) => {
       COALESCE(SUM(CASE WHEN direction='Outbound' THEN 1 ELSE 0 END),0) sent
     FROM emails`).get();
   res.json({ emails: rows, counts });
+});
+
+// ---------------------------------------------------------------------------
+// Writing a new email (the compose pop-up)
+// ---------------------------------------------------------------------------
+// Can this user send right now, and from which address? The pop-up asks
+// before it lets anyone type a long message into a box that cannot send.
+router.get('/compose/status', (req, res) => {
+  const status = sendingStatus(req.user.id);
+  res.json({
+    ...status,
+    can_send: !!req.user.permissions?.emails?.create,
+    // Everyone may set up their own address; only an administrator the shared one.
+    can_configure_org: !!req.user.permissions?.email_settings?.edit,
+  });
+});
+
+router.post('/send', requirePermission('emails', 'create'), withFiles, async (req, res) => {
+  const b = req.body || {};
+  const to = addressList(b.to);
+  const cc = addressList(b.cc);
+  const bcc = addressList(b.bcc);
+  if (!to.length) return res.status(400).json({ error: 'Add at least one address in "To".' });
+  const bad = [...to, ...cc, ...bcc].find((a) => !EMAIL_RE.test(a));
+  if (bad) return res.status(400).json({ error: `"${bad}" is not a valid email address.` });
+
+  const html = String(b.html || '').trim();
+  const text = String(b.body || '').trim();
+  const files = (req.files || []).map((f) => ({ filename: f.originalname, content: f.buffer, contentType: f.mimetype, size: f.size }));
+  if (!text && !html && !files.length) return res.status(400).json({ error: 'Write a message before sending.' });
+  const subject = String(b.subject || '').trim() || '(no subject)';
+
+  // Which record this belongs to: the one the pop-up was opened from, or —
+  // when it was opened from a bare address — the contact, lead or account
+  // that owns the address.
+  let relatedModule = b.related_module || null;
+  let relatedId = Number(b.related_record_id) || null;
+  if (!relatedModule || !relatedId) {
+    const match = matchRecord(to[0]);
+    relatedModule = match ? match.module : null;
+    relatedId = match ? match.id : null;
+  }
+
+  try {
+    const sent = await sendEmail({
+      to, cc, bcc, subject, text: text || undefined, html: html || undefined,
+      attachments: files.map(({ filename, content, contentType }) => ({ filename, content, contentType })),
+      userId: req.user.id, kind: 'compose',
+    });
+    const info = db.prepare(`
+      INSERT INTO emails (subject, from_address, to_address, cc_address, related_module, related_record_id,
+        direction, status, body, body_html, message_id, thread_key, is_read, has_attachments, created_by, sent_at, received_at)
+      VALUES (?,?,?,?,?,?, 'Outbound', 'Sent', ?,?,?,?, 1, ?, ?, datetime('now'), datetime('now'))
+    `).run(subject, sent.sent_from || '', to.join(', '), cc.length ? cc.join(', ') : null, relatedModule, relatedId,
+      text, html || null, sent.messageId || null, threadKeyFor({ subject }), files.length ? 1 : 0, req.user.id);
+    try { saveAttachments(info.lastInsertRowid, files); } catch (e) { console.warn('[inbox] sent mail saved without its attachments:', e.message); }
+    res.json({ ok: true, id: info.lastInsertRowid, sent_from: sent.sent_from, to: to.join(', '),
+      related_module: relatedModule, related_record_id: relatedId });
+  } catch (e) {
+    const notSetUp = e.code === 'ENOTCONFIGURED';
+    res.status(notSetUp ? 409 : 502).json({
+      error: e.message, code: notSetUp ? 'not_configured' : (e.code || null),
+      request_id: e.requestId || null,
+      raw_error: e.rawMessage ? { code: e.code || null, message: e.rawMessage } : undefined,
+    });
+  }
 });
 
 // One message plus its whole thread, so a reply has context.
@@ -95,7 +175,12 @@ router.post('/:id/reply', requirePermission('emails', 'create'), async (req, res
     || (/^re:/i.test(original.subject || '') ? original.subject : `Re: ${original.subject || ''}`.trim());
 
   try {
-    const sent = await sendEmail({ to, subject, text: body || undefined, html: html || undefined, userId: req.user.id });
+    // In-Reply-To / References are what make the customer's mail program
+    // show this under their own message instead of as a new conversation.
+    const sent = await sendEmail({
+      to, subject, text: body || undefined, html: html || undefined, userId: req.user.id, kind: 'reply',
+      inReplyTo: original.message_id || undefined, references: original.message_id || undefined,
+    });
     db.prepare(`
       INSERT INTO emails (subject, from_address, to_address, related_module, related_record_id,
         direction, status, body, body_html, message_id, in_reply_to, thread_key, is_read, created_by, sent_at, received_at)
@@ -104,7 +189,7 @@ router.post('/:id/reply', requirePermission('emails', 'create'), async (req, res
       body, html || null, sent.messageId || null, original.message_id || null, original.thread_key, req.user.id);
     res.json({ ok: true, sent_from: sent.sent_from, to });
   } catch (e) {
-    res.status(502).json({ error: e.message });
+    res.status(e.code === 'ENOTCONFIGURED' ? 409 : 502).json({ error: e.message, request_id: e.requestId || null });
   }
 });
 
@@ -124,7 +209,7 @@ router.post('/sync', requirePermission('emails', 'view'), async (req, res) => {
       ? [await syncAccount(req.body.account_id)]
       : await syncAll();
     if (results.length === 0) {
-      return res.status(400).json({ error: 'No mailbox has inbound enabled. Turn it on in Settings → Email.' });
+      return res.status(400).json({ error: 'No mailbox is set to receive mail yet. Switch on "Receive replies in the CRM" in Settings → Email.' });
     }
     res.json({ results });
   } catch (e) {
