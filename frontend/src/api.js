@@ -758,10 +758,13 @@ export const api = {
   exportUrl: (moduleApiName) => `${BASE}/admin/export/${moduleApiName}`,
   importTemplateUrl: (moduleApiName) => `${BASE}/admin/import-template/${moduleApiName}`,
   // duplicates: { mobile, email, name, action: 'skip' | 'merge' | 'allow' }
-  importCsv: (moduleApiName, csv, dryRun, createMissingFields, duplicates) =>
+  // mapping:    where each column of the file goes, by column number —
+  //             { "0": "student_name", "3": "__new__", "4": "__skip__" }
+  importCsv: (moduleApiName, csv, dryRun, createMissingFields, duplicates, mapping) =>
     req('POST', `/admin/import/${moduleApiName}`, {
       csv, dry_run: !!dryRun, create_missing_fields: !!createMissingFields,
       ...(duplicates ? { duplicates } : {}),
+      ...(mapping ? { mapping } : {}),
     }),
   importDuplicateOptions: (moduleApiName) => req('GET', `/admin/import-duplicate-options/${moduleApiName}`),
 
@@ -773,7 +776,13 @@ export const api = {
   mergeDuplicates: (module, keepId, removeIds) => req('POST', '/duplicates/merge', { module, keep_id: keepId, remove_ids: removeIds }),
   duplicateHistory: (module, id) => req('GET', `/duplicates/history/${module}/${id}`),
   duplicateLog: (params) => req('GET', `/duplicates/log${qs(params)}`),
-  importAnalyze: (moduleApiName, csv) => req('POST', `/admin/import-analyze/${moduleApiName}`, { csv }),
+  // What a file would do: for every column, the field it matches (by the
+  // field's label, its name, or the person's own choice) and sample values;
+  // plus every field of the module, for the "goes to" list.
+  importAnalyze: (moduleApiName, csv, { createMissingFields = true, mapping } = {}) =>
+    req('POST', `/admin/import-analyze/${moduleApiName}`, {
+      csv, create_missing_fields: !!createMissingFields, ...(mapping ? { mapping } : {}),
+    }),
 
   // Customer 360 + scoring
   customer360: (accountId) => req('GET', `/c360/accounts/${accountId}`),

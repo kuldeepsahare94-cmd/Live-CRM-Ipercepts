@@ -1,11 +1,150 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Database, History, Download, Upload, FileText, GitMerge } from 'lucide-react';
+import { Database, History, Download, Upload, FileText, GitMerge, ArrowRight, Columns3, AlertTriangle, RotateCcw } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
 import { PageHeader } from '../components/ui';
 
 const inputClass = 'border border-line rounded-lg px-3 py-1.5 text-sm';
+
+/* ------------------------------------------------------------------
+   Match your columns
+
+   Every column of the file, and the CRM field it goes to. The CRM fills
+   this in by itself — it compares the column's heading with each field's
+   LABEL ("Name"), not with the name the field has in the database
+   (student_name) — and the person importing can change any of them:
+   another field, a new field, or "do not import".
+   ------------------------------------------------------------------ */
+const NEW_FIELD = '__new__';
+const SKIP = '__skip__';
+const HOW = {
+  'field label': 'Matched by label',
+  'exact name': 'Matched by name',
+  'name match': 'Matched by name',
+  'similar name': 'Similar name',
+  'your choice': 'Your choice',
+};
+
+function ColumnMatcher({ analysis, analysing, moduleLabel, changed, onChoose, onReset }) {
+  const usedBy = useMemo(
+    () => new Map(analysis.columns.filter((c) => c.action === 'map').map((c) => [c.field, c])),
+    [analysis],
+  );
+  const byLabel = (a, b) => a.label.localeCompare(b.label);
+  const main = useMemo(() => analysis.fields.filter((f) => f.listed).sort(byLabel), [analysis]);
+  const more = useMemo(() => analysis.fields.filter((f) => !f.listed).sort(byLabel), [analysis]);
+  const count = (action) => analysis.columns.filter((c) => c.action === action).length;
+
+  const option = (f, column) => {
+    const other = usedBy.get(f.key);
+    const taken = other && other.index !== column.index;
+    return (
+      <option key={f.key} value={f.key} disabled={taken}>
+        {f.label}{f.required ? ' *' : ''}{f.hint ? ` (${f.hint})` : ''}{taken ? ` — used by “${other.header}”` : ''}
+      </option>
+    );
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-line overflow-hidden" data-import-mapping>
+      <div className="px-3.5 py-3 border-b border-line bg-canvas flex items-start gap-3 flex-wrap">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+            <Columns3 className="w-3.5 h-3.5 text-amber" /> Match your columns
+            {analysing && <span className="font-normal text-slate-400">· checking…</span>}
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Each column of your file goes to one {moduleLabel} field. The CRM matched them by the field&apos;s label —
+            change any of them, create a new field, or leave a column out.
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap text-[11px] font-medium" data-mapping-summary>
+          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">{count('map')} matched</span>
+          {count('new') > 0 && <span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">{count('new')} new field{count('new') > 1 ? 's' : ''}</span>}
+          {count('skip') > 0 && <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{count('skip')} not imported</span>}
+          {changed && (
+            <button type="button" onClick={onReset} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-line text-slate-500 hover:text-ink">
+              <RotateCcw className="w-3 h-3" /> Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* What must be fixed before importing — above the list, so it is seen. */}
+      {(analysis.problems?.length > 0 || analysis.missing_required?.length > 0) && (
+        <div className="px-3.5 py-2.5 border-b border-line text-xs bg-red-50 text-warn space-y-1" data-mapping-problems>
+          {analysis.missing_required?.length > 0 && (
+            <div className="flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>
+                No column is matched to <strong>{analysis.missing_required.join(', ')}</strong>. A record cannot be saved
+                without {analysis.missing_required.length > 1 ? 'them' : 'it'} — choose the column that holds it.
+              </span>
+            </div>
+          )}
+          {(analysis.problems || []).map((p) => (
+            <div key={p} className="flex items-start gap-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span>{p}</span></div>
+          ))}
+        </div>
+      )}
+
+      <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 bg-white z-[1]">
+            <tr className="text-left text-slate-400 border-b border-line">
+              <th className="py-2 px-3.5 font-medium">Column in your file</th>
+              <th className="py-2 px-1 w-6" />
+              <th className="py-2 px-2 font-medium">Goes to this CRM field</th>
+              <th className="py-2 px-3.5 font-medium">How</th>
+            </tr>
+          </thead>
+          <tbody>
+            {analysis.columns.map((c) => {
+              const value = c.action === 'map' ? c.field : c.action === 'new' ? NEW_FIELD : SKIP;
+              return (
+                <tr key={c.index} className="border-b border-line/60 align-top" data-column={c.header}>
+                  <td className="py-2 px-3.5 max-w-[260px]">
+                    <div className="font-semibold text-ink break-words">{c.header || <span className="text-slate-400">(no heading)</span>}</div>
+                    <div className="text-slate-400 truncate" title={c.samples.join(' · ')}>
+                      {c.samples.length ? c.samples.join(' · ') : 'empty in every row'}
+                    </div>
+                  </td>
+                  <td className="py-3 px-1 text-slate-300"><ArrowRight className="w-3.5 h-3.5" /></td>
+                  <td className="py-2 px-2">
+                    <select value={value} onChange={(e) => onChoose(c.index, e.target.value)}
+                      aria-label={`Field for column ${c.header || c.index + 1}`}
+                      className={`border rounded-lg px-2 py-1.5 text-xs w-full min-w-[220px] max-w-[340px] ${
+                        c.action === 'skip' ? 'border-line text-slate-400' : c.action === 'new' ? 'border-sky-300 text-ink' : 'border-line text-ink'}`}>
+                      <optgroup label={`${moduleLabel} fields`}>{main.map((f) => option(f, c))}</optgroup>
+                      {more.length > 0 && <optgroup label="More columns">{more.map((f) => option(f, c))}</optgroup>}
+                      <optgroup label="Or">
+                        <option value={NEW_FIELD} disabled={!c.header}>➕ Create a new field{c.header ? ` “${c.header}”` : ''}</option>
+                        <option value={SKIP}>Do not import this column</option>
+                      </optgroup>
+                    </select>
+                  </td>
+                  <td className="py-2.5 px-3.5 whitespace-nowrap">
+                    {c.action === 'map' && (
+                      <span className={`px-2 py-0.5 rounded-full font-medium ${c.via === 'your choice' ? 'bg-violet-50 text-violet-700' : c.via === 'similar name' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                        {HOW[c.via] || 'Matched'}
+                      </span>
+                    )}
+                    {c.action === 'new' && (
+                      <span className="px-2 py-0.5 rounded-full font-medium bg-sky-50 text-sky-700">New field · {c.new_field.field_type}</span>
+                    )}
+                    {c.action === 'skip' && <span className="text-slate-400 whitespace-normal">{c.reason}</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  );
+}
 
 function ImportExportSection({ modules }) {
   const [selected, setSelected] = useState('');
@@ -39,6 +178,41 @@ function ImportExportSection({ modules }) {
     return () => { live = false; };
   }, [selected]);
 
+  // ---- which column goes to which field ---------------------------------
+  // `analysis` is the server's answer for the file as it stands; `choices`
+  // holds only what the person changed (by column number). The server puts
+  // their choices first and matches the remaining columns by itself.
+  const [analysis, setAnalysis] = useState(null);
+  const [analysing, setAnalysing] = useState(false);
+  const [choices, setChoices] = useState({});
+  const analysisSeq = useRef(0);
+  const headerLine = useMemo(() => csv.split(/\r?\n/, 1)[0] || '', [csv]);
+  const hasRows = useMemo(() => csv.trim().split(/\r?\n/).length >= 2, [csv]);
+
+  // Another file (or module) starts again from the automatic matching.
+  useEffect(() => { setChoices((c) => (Object.keys(c).length ? {} : c)); }, [selected, headerLine]);
+
+  useEffect(() => {
+    const mine = ++analysisSeq.current;
+    if (!selected || !hasRows) { setAnalysis(null); setAnalysing(false); return undefined; }
+    setAnalysing(true);
+    const timer = setTimeout(() => {
+      api.importAnalyze(selected, csv, { createMissingFields: autoCreate, mapping: choices })
+        .then((a) => { if (mine === analysisSeq.current) setAnalysis(a && Array.isArray(a.columns) && Array.isArray(a.fields) ? a : null); })
+        .catch(() => { if (mine === analysisSeq.current) setAnalysis(null); })
+        .finally(() => { if (mine === analysisSeq.current) setAnalysing(false); });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [selected, csv, hasRows, autoCreate, choices]);
+
+  const choose = (index, value) => { setChoices((c) => ({ ...c, [index]: value })); setResult(null); setError(null); };
+  // Exactly what is on screen is what gets imported.
+  const mapping = analysis
+    ? Object.fromEntries(analysis.columns.map((c) => [String(c.index), c.action === 'map' ? c.field : c.action === 'new' ? NEW_FIELD : SKIP]))
+    : undefined;
+  const mappingBlocked = !!analysis && ((analysis.problems?.length || 0) > 0 || (analysis.missing_required?.length || 0) > 0);
+  const moduleLabel = modules.find((m) => m.api_name === selected)?.singular_label || 'CRM';
+
   const changeDup = (patch) => { setDup((d) => ({ ...d, ...patch })); setResult(null); setError(null); };
   const dupChecked = dupInfo?.available && dup.action !== 'allow' && (dup.mobile || dup.email || dup.name);
 
@@ -56,7 +230,8 @@ function ImportExportSection({ modules }) {
     setBusy(true); setResult(null); setError(null);
     try {
       const r = await api.importCsv(selected, csv, dryRun, autoCreate,
-        dupChecked ? { mobile: dup.mobile, email: dup.email, name: dup.name, action: dup.action } : undefined);
+        dupChecked ? { mobile: dup.mobile, email: dup.email, name: dup.name, action: dup.action } : undefined,
+        mapping);
       setResult(r);
     } catch (err) {
       // The backend returns structured validation detail (which lines failed,
@@ -102,11 +277,19 @@ function ImportExportSection({ modules }) {
             <input type="checkbox" checked={autoCreate} onChange={(e) => { setAutoCreate(e.target.checked); setResult(null); setError(null); }}
               className="mt-0.5 w-3.5 h-3.5" />
             <span>
-              <strong className="text-ink">Create missing fields automatically</strong> — columns this module
-              doesn't have yet become new fields, with the type worked out from the data. Headers that mean the
-              same as an existing field (e.g. "Email Address" → Email) are matched to it instead of duplicated.
+              <strong className="text-ink">Create missing fields automatically</strong> — a column that matches
+              no field becomes a new field, with the type worked out from the data. A heading that is the label of
+              an existing field (e.g. "Name", "Email Address") always goes to that field, never to a new one.
+              Untick to leave unmatched columns out instead.
             </span>
           </label>
+
+          {analysis && (
+            <ColumnMatcher analysis={analysis} analysing={analysing} moduleLabel={moduleLabel}
+              changed={Object.keys(choices).length > 0} onChoose={choose}
+              onReset={() => { setChoices({}); setResult(null); setError(null); }} />
+          )}
+          {!analysis && analysing && <p className="text-xs text-slate-400 mt-3">Reading the columns of your file…</p>}
 
           {dupInfo?.available && (
             <div className="mt-4 rounded-xl border border-line p-3.5" data-import-duplicates>
@@ -166,14 +349,17 @@ function ImportExportSection({ modules }) {
           )}
 
           <div className="flex gap-2 mt-3">
-            <button onClick={() => run(true)} disabled={busy || !csv.trim()}
+            <button onClick={() => run(true)} disabled={busy || !csv.trim() || analysing || mappingBlocked}
               className="border border-line text-sm font-medium px-4 py-2 rounded-lg hover:bg-canvas disabled:opacity-50">
               {busy ? 'Checking…' : 'Validate only'}
             </button>
-            <button onClick={() => run(false)} disabled={busy || !csv.trim()}
+            <button onClick={() => run(false)} disabled={busy || !csv.trim() || analysing || mappingBlocked}
               className="btn btn-primary disabled:opacity-50">
               {busy ? 'Importing…' : 'Import'}
             </button>
+            {mappingBlocked && (
+              <span className="text-xs text-warn self-center">Fix the column matching above to continue.</span>
+            )}
           </div>
 
           {result && (
@@ -224,6 +410,17 @@ function ImportExportSection({ modules }) {
                       )}
                     </>
                   )}
+                </div>
+              )}
+
+              {result.value_notes?.length > 0 && (
+                <div className="text-amber" data-import-notes>
+                  <div className="font-medium">Some values could not be used as they are:</div>
+                  <ul className="list-disc list-inside mt-0.5">
+                    {result.value_notes.map((n) => (
+                      <li key={`${n.field}-${n.kind}`}>{n.message}{n.examples?.length ? ` (e.g. ${n.examples.join(', ')})` : ''}</li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
