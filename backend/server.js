@@ -69,7 +69,10 @@ app.use('/api/capture', cors(), express.json(), require('./routes/leadCapture'))
 
 // In production, set FRONTEND_URL to your Vercel URL (e.g. https://your-crm.vercel.app)
 // so only your deployed frontend can call this API. Left open (*) if unset, for local dev.
-app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
+// maxAge: the browser remembers this answer for 2 hours instead of asking
+// again ("preflight") before nearly every API call — each of those questions
+// is a full round trip to the server before the real request can start.
+app.use(cors({ origin: process.env.FRONTEND_URL || '*', maxAge: 7200 }));
 
 // WhatsApp webhook receiver — PUBLIC (providers can't send our JWT) and needs
 // the raw request body for signature verification, so it's registered here,
@@ -87,6 +90,34 @@ app.use(express.json());
 // Public routes
 app.use('/api/auth', require('./routes/auth'));
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+// Speed check: how long one trip from this server to the database takes.
+// Open /api/health/db in a browser. Well under 5 ms means the server and the
+// database are close together; 50 ms or more means every screen waits on
+// that distance many times over (see DEPLOY notes: same region, internal URL).
+app.get('/api/health/db', (req, res) => {
+  const db = require('./db');
+  const samples = [];
+  try {
+    for (let i = 0; i < 5; i += 1) {
+      const t = process.hrtime.bigint();
+      db.pgQuery('SELECT 1');
+      samples.push(Math.round(Number(process.hrtime.bigint() - t) / 1e4) / 100);
+    }
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+  const sorted = samples.slice().sort((a, b) => a - b);
+  const ms = sorted[Math.floor(sorted.length / 2)];
+  res.json({
+    ok: true,
+    database_round_trip_ms: ms,
+    samples_ms: samples,
+    verdict: ms < 5 ? 'Good: the database is close to the server.'
+      : ms < 25 ? 'OK, but slower than it should be. Use the Internal Database URL, in the same region as this server.'
+        : 'Slow: the database is far from the server, or reached over the public internet. Put both in the same region and use the Internal Database URL.',
+    server_up_for_seconds: Math.round(process.uptime()),
+  });
+});
 
 // Required-field enforcement runs before every record route, so a field
 // marked mandatory in Settings is actually enforced on save — previously
@@ -173,6 +204,9 @@ app.use('/api/notes', requireAuth, require('./routes/notes'));
 app.use('/api/emails', requireAuth, require('./routes/emails'));
 app.use('/api/activities', requireAuth, require('./routes/activities'));
 app.use('/api/search', requireAuth, require('./routes/search'));
+// Duplicate check and merge: the rule per module, "does this already exist?",
+// the duplicates already in the CRM, and merging them.
+app.use('/api/duplicates', requireAuth, require('./routes/duplicates'));
 app.use('/api/workflows', requireAuth, require('./routes/workflows'));
 app.use('/api/pipelines', requireAuth, require('./routes/pipelines'));
 app.use('/api/teams', requireAuth, require('./routes/teams'));

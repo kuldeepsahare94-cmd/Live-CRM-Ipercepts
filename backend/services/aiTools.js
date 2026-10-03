@@ -261,10 +261,22 @@ register({
   },
   handler: (user, i) => {
     requirePerm(user, 'leads', 'create');
+    // The same mobile or email as a lead that is already here: follow the
+    // duplicate setting instead of making a second lead.
+    try {
+      const checked = require('./duplicates').screen('leads', i, { channel: 'assistant', source: i.source || null, user });
+      if (checked.action === 'merged') {
+        return { ...checked.record, already_existed: true, note: `This lead already existed (same ${checked.matched_on.join(' and ')}). No second lead was created; the existing lead now shows it came in again today.` };
+      }
+      if (checked.action === 'skipped') {
+        return { ...checked.record, already_existed: true, note: `This lead already exists (same ${checked.matched_on.join(' and ')}), so no new lead was created.` };
+      }
+    } catch (e) { console.warn('[assistant] duplicate check skipped:', e.message); }
     const info = db.prepare(`
       INSERT INTO leads (student_name, mobile, email, source, city, assigned_counselor, follow_up_date, remarks, status)
       VALUES (?,?,?,?,?,?,?,?, 'New')
     `).run(i.student_name, i.mobile || null, i.email || null, i.source || null, i.city || null, i.assigned_counselor || null, i.follow_up_date || null, i.remarks || null);
+    try { require('./duplicates').noteCreated('leads', info.lastInsertRowid, { channel: 'assistant', source: i.source || null, user }); } catch { /* history only */ }
     return db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid);
   },
 });

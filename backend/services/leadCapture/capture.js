@@ -1,4 +1,5 @@
 const db = require('../../db');
+const duplicates = require('../duplicates');
 
 // Incoming forms name fields all kinds of things — normalize common variants
 // to our actual lead columns. A source's own field_mapping_json (configured
@@ -29,13 +30,18 @@ function isSpam(payload, ipAddress) {
   return recentCount >= 10; // more than 10 submissions/minute from one IP is not a real person
 }
 
+// Kept for callers that only want to know whether a number is already a lead.
 function findDuplicate(mobile) {
   if (!mobile) return null;
-  const target = normalizePhone(mobile);
-  if (!target) return null;
-  const recent = db.prepare(`SELECT id, mobile, created_at FROM leads WHERE mobile IS NOT NULL AND date(created_at) >= date('now','-1 day')`).all();
-  return recent.find((l) => normalizePhone(l.mobile) === target) || null;
+  const hit = duplicates.findMatches('leads', { mobile }, { rule: { ...duplicates.getRule('leads'), match_mobile: true, match_email: false } })[0];
+  return hit ? hit.record : null;
 }
+
+// How a lead source is named in a lead's history.
+const CHANNEL = {
+  website_form: 'website', zapier_webhook: 'api', facebook_leads: 'facebook',
+  instagram_leads: 'instagram', linkedin_leads: 'linkedin',
+};
 
 // Maps the raw incoming payload to lead columns using the source's custom
 // mapping (if configured) falling back to sensible defaults, then creates
@@ -53,9 +59,6 @@ function captureLead(source, payload) {
     return { status: 'rejected_no_data', error: 'Submission had no recognizable name or phone number.' };
   }
 
-  const dup = findDuplicate(fields.mobile);
-  if (dup) return { status: 'duplicate', duplicateOf: dup };
-
   // interested_course_name arrives as free text from a form — try to match it
   // to a real course by name; fall back to the source's configured default.
   let courseId = source.default_course_id || null;
@@ -63,6 +66,28 @@ function captureLead(source, payload) {
     const match = db.prepare('SELECT id FROM courses WHERE course_name LIKE ?').get(`%${fields.interested_course_name}%`);
     if (match) courseId = match.id;
   }
+
+  // ---- The same person again? ------------------------------------------
+  // What happens is the setting in Settings → Duplicate Check & Merge:
+  //   merge → no second lead; the lead already here gets a "came in again"
+  //           entry with today's date and this source, and its empty fields
+  //           are filled from this submission      → status 'merged'
+  //   skip  → nothing is created or changed          → status 'duplicate'
+  //   allow → a second lead is created (below)
+  const incoming = {
+    student_name: fields.student_name || null, mobile: fields.mobile || null, email: fields.email || null,
+    city: fields.city || null, qualification: fields.qualification || null, remarks: fields.remarks || null,
+    interested_course_id: courseId, assigned_counselor: source.default_counselor || null, source: source.name,
+  };
+  const checked = duplicates.screen('leads', incoming, {
+    channel: CHANNEL[source.source_type] || 'api', source: source.name,
+  });
+  if (checked.action === 'merged') return { status: 'merged', lead: checked.record, duplicateOf: checked.record, filled: checked.filled };
+  if (checked.action === 'skipped') return { status: 'duplicate', duplicateOf: checked.record };
+  // Even when duplicates are allowed, the same form sent twice within two
+  // minutes is a double click, not a second enquiry.
+  const again = duplicates.isDoubleSubmit(incoming);
+  if (again) return { status: 'duplicate', duplicateOf: again };
 
   const info = db.prepare(`
     INSERT INTO leads (student_name, mobile, email, city, qualification, source, interested_course_id, assigned_counselor, status, remarks)
@@ -73,6 +98,7 @@ function captureLead(source, payload) {
     source.default_status || 'New', fields.remarks || null
   );
 
+  duplicates.noteCreated('leads', info.lastInsertRowid, { channel: CHANNEL[source.source_type] || 'api', source: source.name });
   return { status: 'success', lead: db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid) };
 }
 

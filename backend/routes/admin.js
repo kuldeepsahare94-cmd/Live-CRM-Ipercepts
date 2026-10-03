@@ -11,6 +11,7 @@ const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const svc = require('../services/metadataService');
 const { planImport, createFields, displayNamePlan } = require('../services/importMapping');
+const duplicates = require('../services/duplicates');
 
 // ===== Audit log =====
 router.get('/audit', requirePermission('settings', 'view'), (req, res) => {
@@ -105,6 +106,96 @@ router.get('/import-template/:module', requirePermission('settings', 'view'), (r
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=${mod.api_name}-template.csv`);
     res.send(importableColumns(mod.table_name).join(',') + '\n');
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// ===== Duplicate check while importing =====
+// The person importing chooses what to compare (mobile, email — and the
+// company name for accounts) and what to do with a row that is already in
+// the CRM, or that appears twice in the file:
+//   skip   the row is left out
+//   merge  no new record; the empty fields of the record already there are
+//          filled from the row (for leads it also shows "came in again")
+//   allow  import it anyway (the way imports always worked)
+// "Validate only" counts all of this without writing anything.
+function duplicateOptions(body) {
+  const d = body && body.duplicates;
+  if (!d || typeof d !== 'object') return null;
+  const by = { mobile: !!d.mobile, email: !!d.email, name: !!d.name };
+  const action = ['skip', 'merge', 'allow'].includes(d.action) ? d.action : 'skip';
+  if (action === 'allow' || (!by.mobile && !by.email && !by.name)) return null;
+  return { by, action };
+}
+
+// Goes through the rows once. `write` is false for "Validate only".
+function importRows({ mod, dataRows, toObject, insertRow, dup, user, write }) {
+  const matcher = dup ? duplicates.importMatcher(mod.api_name, mod.table_name, dup.by) : null;
+  const stats = { imported: 0, merged: 0, skipped: 0, existing: 0, in_file: 0, rows: [] };
+  dataRows.forEach((r, idx) => {
+    const rowNo = idx + 2;                       // row 1 of the sheet is the header
+    const obj = toObject(r);
+    const hit = matcher && matcher.active ? matcher.find(obj) : null;
+    if (hit) {
+      if (hit.inFile) stats.in_file++; else stats.existing++;
+      if (stats.rows.length < 200) {
+        stats.rows.push({
+          row: rowNo, matched_on: hit.matched_on,
+          value: hit.matched_on.map((k) => (k === 'mobile' ? matcher.columns.mobile.map((c) => obj[c]).find(Boolean)
+            : k === 'email' ? matcher.columns.email.map((c) => obj[c]).find(Boolean) : obj[matcher.columns.name])).filter(Boolean).join(', '),
+          same_as: hit.inFile ? `row ${hit.row} of this file` : `${hit.title} (already in the CRM)`,
+          existing_id: hit.inFile ? null : hit.id,
+          result: dup.action === 'merge' ? 'merged' : 'skipped',
+        });
+      }
+      if (dup.action === 'merge') {
+        if (write) duplicates.mergeImportRow(mod.api_name, mod.table_name, hit.id, obj, { user, on: hit.matched_on, inFile: hit.inFile });
+        stats.merged++;
+      } else {
+        stats.skipped++;
+      }
+      return;
+    }
+    const id = write ? insertRow(r, obj) : `row-${rowNo}`;
+    stats.imported++;
+    if (matcher) matcher.add(id, obj, rowNo);
+  });
+  return {
+    stats,
+    summary: dup ? {
+      checked: {
+        mobile: dup.by.mobile && matcher.columns.mobile.length > 0,
+        email: dup.by.email && matcher.columns.email.length > 0,
+        name: dup.by.name && !!matcher.columns.name,
+      },
+      action: dup.action,
+      found: stats.existing + stats.in_file,
+      already_in_crm: stats.existing,
+      repeated_in_file: stats.in_file,
+      merged: stats.merged,
+      skipped: stats.skipped,
+      rows: stats.rows,
+    } : null,
+  };
+}
+
+// GET /api/admin/import-duplicate-options/:module
+// What can be compared for this module, and what its duplicate rule says.
+router.get('/import-duplicate-options/:module', requirePermission('settings', 'view'), (req, res) => {
+  try {
+    const mod = resolveModuleOrThrow(req.params.module);
+    const m = duplicates.importMatcher(mod.api_name, mod.table_name, { mobile: false, email: false, name: false });
+    const rule = duplicates.getRule(mod.api_name);
+    res.json({
+      module: mod.api_name,
+      mobile: m.columns.mobile, email: m.columns.email, name: m.columns.name,
+      available: m.columns.mobile.length > 0 || m.columns.email.length > 0 || !!m.columns.name,
+      default_action: rule && rule.enabled ? (rule.action === 'allow' ? 'allow' : rule.action) : 'skip',
+      default_by: rule
+        ? { mobile: rule.match_mobile, email: rule.match_email, name: rule.match_name }
+        : { mobile: true, email: true, name: false },
+    });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -209,25 +300,27 @@ router.post('/import/:module', requirePermission('settings', 'edit'), (req, res)
     }
     if (errors.length) return res.status(400).json({ error: 'Import rejected — nothing was written', issues: errors.slice(0, 50), total_issues: errors.length });
 
+    const dup = duplicateOptions(req.body);
+    const headerIndex = usable.map((c) => header.indexOf(c));
+    const cell = (r, hi) => { const v = r[hi]; return v === undefined || v === '' ? null : v; };
+    const toObject = (r) => Object.fromEntries(usable.map((c, i) => [c, cell(r, headerIndex[i])]));
+
     if (req.body.dry_run) {
-      return res.json({ dry_run: true, would_import: dataRows.length, columns: usable });
+      const { stats, summary } = importRows({ mod, dataRows, toObject, dup, user: req.user, write: false });
+      return res.json({ dry_run: true, would_import: stats.imported, columns: usable, duplicates: summary });
     }
 
     const placeholders = usable.map(() => '?').join(',');
     const insert = db.prepare(`INSERT INTO ${mod.table_name} (${usable.join(',')}) VALUES (${placeholders})`);
-    const headerIndex = usable.map((c) => header.indexOf(c));
-    let imported = 0;
+    let outcome;
     const tx = db.transaction(() => {
-      for (const r of dataRows) {
-        insert.run(headerIndex.map((hi) => {
-          const v = r[hi];
-          return v === undefined || v === '' ? null : v;
-        }));
-        imported++;
-      }
+      outcome = importRows({
+        mod, dataRows, toObject, dup, user: req.user, write: true,
+        insertRow: (r) => insert.run(headerIndex.map((hi) => cell(r, hi))).lastInsertRowid,
+      });
     });
     tx(); // all-or-nothing: a mid-file failure rolls the whole import back
-    res.json({ imported, columns: usable });
+    res.json({ imported: outcome.stats.imported, columns: usable, duplicates: outcome.summary });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message });
   }
@@ -263,61 +356,68 @@ function importWithFieldCreation({ req, res, mod, header, rows }) {
 
   const nameFill = displayNamePlan({ existingColumns, mapped: plan.mapped, create: plan.create });
 
-  if (req.body.dry_run) {
-    return res.json({ dry_run: true, would_import: dataRows.length, ...plan, display_name: nameFill });
-  }
-
   // Column -> index in the CSV row, for everything being written.
   const targets = [
     ...plan.mapped.map((m) => ({ column: m.column, idx: header.indexOf(m.header) })),
     ...plan.create.map((c) => ({ column: c.column, idx: header.indexOf(c.header) })),
   ];
+  const cols = targets.map((t) => t.column);
+  if (nameFill) cols.push(nameFill.target);
+  const nameIdx = nameFill
+    ? nameFill.from.map((c) => (targets.find((t) => t.column === c) || {}).idx).filter((i) => i !== undefined)
+    : [];
+
+  // One CSV row -> the values that will be written, in the order of `cols`.
+  const valuesOf = (r) => {
+    const values = targets.map((t) => {
+      const v = r[t.idx];
+      const s = v === undefined || v === null ? '' : String(v).trim();
+      // "http://" on its own is a placeholder, not a website — several
+      // CRM exports emit it for every blank URL cell.
+      if (s === '' || s === 'http://' || s === 'https://') return null;
+      return s;
+    });
+    if (nameFill) {
+      const composed = nameIdx.map((i) => String(r[i] ?? '').trim()).filter(Boolean).join(' ');
+      values.push(composed || null);
+    }
+    return values;
+  };
+  const toObject = (r) => { const v = valuesOf(r); return Object.fromEntries(cols.map((c, i) => [c, v[i]])); };
+  const dup = duplicateOptions(req.body);
+
+  if (req.body.dry_run) {
+    const { stats, summary } = importRows({ mod, dataRows, toObject, dup, user: req.user, write: false });
+    return res.json({ dry_run: true, would_import: stats.imported, ...plan, display_name: nameFill, duplicates: summary });
+  }
 
   let created = [];
-  let imported = 0;
+  let outcome;
 
   const tx = db.transaction(() => {
     // Schema first, so the INSERT below can reference the new columns.
     created = createFields(db, { tableName: mod.table_name, moduleId: mod.id, create: plan.create });
 
-    const cols = targets.map((t) => t.column);
-    if (nameFill) cols.push(nameFill.target);
-
     const insert = db.prepare(
       `INSERT INTO ${mod.table_name} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`,
     );
-
-    const nameIdx = nameFill
-      ? nameFill.from.map((c) => (targets.find((t) => t.column === c) || {}).idx).filter((i) => i !== undefined)
-      : [];
-
-    for (const r of dataRows) {
-      const values = targets.map((t) => {
-        const v = r[t.idx];
-        const s = v === undefined || v === null ? '' : String(v).trim();
-        // "http://" on its own is a placeholder, not a website — several
-        // CRM exports emit it for every blank URL cell.
-        if (s === '' || s === 'http://' || s === 'https://') return null;
-        return s;
-      });
-
-      if (nameFill) {
-        const composed = nameIdx.map((i) => String(r[i] ?? '').trim()).filter(Boolean).join(' ');
-        values.push(composed || null);
-      }
-      insert.run(values);
-      imported++;
-    }
+    outcome = importRows({
+      mod, dataRows, toObject, dup, user: req.user, write: true,
+      insertRow: (r) => insert.run(valuesOf(r)).lastInsertRowid,
+    });
   });
 
   try {
     tx();   // all-or-nothing: rows AND new fields roll back together
   } catch (e) {
+    duplicates.forgetColumns(mod.table_name);   // the new columns were rolled back too
     return res.status(400).json({ error: `Import failed, nothing was written: ${e.message}` });
   }
+  duplicates.forgetColumns(mod.table_name);
 
   res.json({
-    imported,
+    imported: outcome.stats.imported,
+    duplicates: outcome.summary,
     fields_created: created,
     mapped_to_existing: plan.mapped.map((m) => ({ header: m.header, field: m.column, via: m.via })),
     skipped: plan.skipped,

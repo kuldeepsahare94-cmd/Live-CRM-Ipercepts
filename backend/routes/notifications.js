@@ -25,6 +25,27 @@ function buildNotifications(userId, options = {}) {
     items.push({ key, type: 'new_lead_assigned', title: 'New Lead Assigned', message: `${l.student_name} → ${l.assigned_counselor}`, link: `/leads/${l.id}`, date: l.created_at, read: false });
   }
 
+  // The same lead came in again (website form, lead ad, API, added by hand)
+  // in the last 3 days. No second lead was made, so this is how the team
+  // hears about it. Imports are left out — one file can merge hundreds.
+  if (options.canViewLeads !== false) {
+    try {
+      const again = db.prepare(`
+        SELECT e.id, e.record_id, e.source, e.channel, e.created_at, l.student_name, l.assigned_counselor
+        FROM duplicate_events e JOIN leads l ON l.id = e.record_id
+        WHERE e.module = 'leads' AND e.action = 'merged' AND COALESCE(e.channel, '') <> 'import'
+          AND e.created_at >= datetime('now', '-3 days')
+        ORDER BY e.id DESC LIMIT 30`).all();
+      for (const e of again) {
+        items.push({
+          key: `lead-again-${e.id}`, type: 'lead_reenquiry', title: 'Lead Came In Again',
+          message: `${e.student_name}${e.source ? ` · ${e.source}` : ''}${e.assigned_counselor ? ` → ${e.assigned_counselor}` : ''}`,
+          link: `/leads/${e.record_id}`, date: e.created_at, read: false,
+        });
+      }
+    } catch { /* the duplicate tables are not there on an older database */ }
+  }
+
   // Follow-ups: only the signed-in user's own (the person each follow-up is
   // for), due today or already overdue — not every lead's follow-up for
   // everyone. Times are shown; the key changes when a follow-up is moved or
@@ -129,7 +150,10 @@ function buildNotifications(userId, options = {}) {
 }
 
 router.get('/', (req, res) => {
-  const items = buildNotifications(req.user.id, { canReadEmail: !!req.user.permissions?.emails?.view });
+  const items = buildNotifications(req.user.id, {
+    canReadEmail: !!req.user.permissions?.emails?.view,
+    canViewLeads: !!req.user.permissions?.leads?.view,
+  });
   res.json({ items, unread: items.filter((i) => !i.read).length });
 });
 

@@ -6,6 +6,7 @@ const { fireEvent } = require('../services/whatsapp/workflowEngine');
 const { fireWorkflows } = require('../services/workflowAutomation');
 const { computeLeadScore } = require('../services/leadScore');
 const followUps = require('../services/followUps');
+const duplicates = require('../services/duplicates');
 
 router.get('/', requirePermission('leads', 'view'), (req, res) => {
   const { status, source, counselor, q } = req.query;
@@ -30,12 +31,24 @@ router.get('/:id', requirePermission('leads', 'view'), (req, res) => {
   // the date, which is what lists and reports read).
   let nextFollowUp = null;
   try { nextFollowUp = followUps.present(followUps.openFor('leads', lead.id)); } catch { nextFollowUp = null; }
-  res.json({ ...lead, activities, lead_score: score, lead_score_label: label, next_follow_up: nextFollowUp });
+  // Every time this lead came in (created, came in again, a duplicate merged
+  // into it), and any other lead with the same mobile or email.
+  let enquiries = [];
+  let similar = [];
+  try { enquiries = duplicates.history('leads', lead); similar = duplicates.similarTo('leads', lead); } catch { /* optional */ }
+  res.json({
+    ...lead, activities, lead_score: score, lead_score_label: label, next_follow_up: nextFollowUp,
+    enquiries, enquiry_count: Number(lead.enquiry_count) || 1, similar_leads: similar,
+  });
 });
 
 router.post('/', requirePermission('leads', 'create'), (req, res) => {
   const b = req.body;
   if (!b.student_name) return res.status(400).json({ error: 'student_name is required' });
+  // Same mobile or email as a lead that is already here? Then no second lead
+  // is made: the person adding it is shown the existing lead and chooses
+  // (merge / create anyway); a script calling this API follows the setting.
+  if (duplicates.guard('leads', req, res)) return;
   const info = db.prepare(`
     INSERT INTO leads (student_name, account_name, mobile, alternate_mobile, email, gender, date_of_birth, address, city,
       qualification, source, interested_course_id, status, follow_up_date, assigned_counselor, remarks,
@@ -48,6 +61,8 @@ router.post('/', requirePermission('leads', 'create'), (req, res) => {
     b.lead_rating || null, b.lead_score ?? null, b.campaign || null, b.product_interest || null, b.service_interest || null
   );
   const lead = db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid);
+  duplicates.noteCreated('leads', lead.id, { channel: req.createdVia || 'manual', source: lead.source, user: req.user });
+  duplicates.noteCreatedAnyway('leads', req, lead);
   const leadFields = { student_name: lead.student_name, mobile: lead.mobile, source: lead.source, city: lead.city, assigned_counselor: lead.assigned_counselor, status: lead.status, follow_up_date: lead.follow_up_date };
   fireEvent('lead_created', { entityType: 'lead', entityId: lead.id, mobile: lead.mobile, fields: leadFields });
   if (lead.assigned_counselor) fireEvent('lead_assigned', { entityType: 'lead', entityId: lead.id, mobile: lead.mobile, fields: leadFields });
@@ -198,12 +213,32 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
       lastName = parts.slice(1).join(' ');
     }
 
-    const contactInfo = db.prepare(`
-      INSERT INTO contacts (first_name, last_name, account_id, email, mobile, city, lead_source, contact_status)
-      VALUES (?,?,?,?,?,?,?,'Active')
-    `).run(firstName, lastName || null, accountId,
-      lead.email || null, lead.mobile || null, lead.city || null, lead.source || null);
-    const contactId = contactInfo.lastInsertRowid;
+    // The person may already be a contact (added by hand, or from an earlier
+    // lead): the same mobile or email, on this account or on no account yet.
+    // Then that contact is used instead of making a second one.
+    let contactId = null;
+    let contactReused = false;
+    try {
+      const contactRule = duplicates.getRule('contacts');
+      const hit = contactRule.enabled
+        ? duplicates.findMatches('contacts', { mobile: lead.mobile, email: lead.email }, { rule: contactRule })
+          .find((x) => !x.record.account_id || Number(x.record.account_id) === Number(accountId))
+        : null;
+      if (hit) {
+        contactId = hit.record.id;
+        contactReused = true;
+        if (!hit.record.account_id) db.prepare(`UPDATE contacts SET account_id=?, updated_at=datetime('now') WHERE id=?`).run(accountId, contactId);
+      }
+    } catch (e) { console.warn('[duplicates] contact check skipped on convert:', e.message); }
+
+    if (!contactId) {
+      const contactInfo = db.prepare(`
+        INSERT INTO contacts (first_name, last_name, account_id, email, mobile, city, lead_source, contact_status)
+        VALUES (?,?,?,?,?,?,?,'Active')
+      `).run(firstName, lastName || null, accountId,
+        lead.email || null, lead.mobile || null, lead.city || null, lead.source || null);
+      contactId = contactInfo.lastInsertRowid;
+    }
 
     const pipeline = db.prepare(`
       SELECT p.* FROM module_pipelines p JOIN modules m ON m.id=p.module_id WHERE m.api_name='opportunities' AND p.is_default=1
@@ -222,22 +257,26 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
     db.prepare('INSERT INTO lead_activities (lead_id, type, note) VALUES (?,?,?)')
       .run(lead.id, 'status_change', `Converted to Contact #${contactId} / Account #${accountId} / Opportunity #${opportunityId}`);
 
-    return { contactId, accountId, opportunityId, accountReused };
+    return { contactId, accountId, opportunityId, accountReused, contactReused };
   });
 
-  const { contactId, accountId, opportunityId, accountReused } = tx();
+  const { contactId, accountId, opportunityId, accountReused, contactReused } = tx();
   const contact = db.prepare('SELECT * FROM contacts WHERE id=?').get(contactId);
   const account = db.prepare('SELECT * FROM accounts WHERE id=?').get(accountId);
   const opportunity = db.prepare('SELECT * FROM opportunities WHERE id=?').get(opportunityId);
 
-  fireEvent('welcome_message', { entityType: 'contact', entityId: contactId, mobile: contact.mobile, fields: { student_name: contact.first_name + ' ' + (contact.last_name || ''), mobile: contact.mobile, email: contact.email } });
-  fireWorkflows('contacts', 'record_created', contact, null, req.user.id);
+  // A contact that was already there is not welcomed (or "created") again.
+  if (!contactReused) {
+    fireEvent('welcome_message', { entityType: 'contact', entityId: contactId, mobile: contact.mobile, fields: { student_name: contact.first_name + ' ' + (contact.last_name || ''), mobile: contact.mobile, email: contact.email } });
+    fireWorkflows('contacts', 'record_created', contact, null, req.user.id);
+  }
   if (!accountReused) fireWorkflows('accounts', 'record_created', account, null, req.user.id);
   fireWorkflows('opportunities', 'record_created', opportunity, null, req.user.id);
 
   res.status(201).json({
     contact_id: contactId, account_id: accountId, opportunity_id: opportunityId,
     account_reused: accountReused,   // true when an account of this name already existed
+    contact_reused: contactReused,   // true when this person was already a contact
     contact, account, opportunity,
   });
 });

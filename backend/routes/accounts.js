@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const { fireWorkflows } = require('../services/workflowAutomation');
+const duplicates = require('../services/duplicates');
 
 router.get('/', requirePermission('accounts', 'view'), (req, res) => {
   const { status, owner_id, q } = req.query;
@@ -84,6 +85,9 @@ router.get('/:id', requirePermission('accounts', 'view'), (req, res) => {
 router.post('/', requirePermission('accounts', 'create'), (req, res) => {
   const b = req.body;
   if (!b.account_name) return res.status(400).json({ error: 'account_name is required' });
+  // Same company name, phone or email as an account that is already here →
+  // shown to the person adding it instead of quietly creating a second one.
+  if (duplicates.guard('accounts', req, res)) return;
   const info = db.prepare(`
     INSERT INTO accounts (
       account_name, account_type, industry, website, email, phone, whatsapp, tax_number, registration_number,
@@ -100,6 +104,7 @@ router.post('/', requirePermission('accounts', 'create'), (req, res) => {
     ...b,
   });
   const created = db.prepare('SELECT * FROM accounts WHERE id=?').get(info.lastInsertRowid);
+  duplicates.noteCreatedAnyway('accounts', req, created);
   fireWorkflows('accounts', 'record_created', created, null, req.user.id);
   res.status(201).json(db.prepare('SELECT * FROM accounts WHERE id=?').get(created.id));
 });

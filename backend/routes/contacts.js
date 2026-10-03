@@ -5,6 +5,7 @@ const { relatedActivity } = require('../services/relatedActivity');
 const { requirePermission } = require('../middleware/auth');
 const { fireWorkflows } = require('../services/workflowAutomation');
 const followUps = require('../services/followUps');
+const duplicates = require('../services/duplicates');
 
 // The contact's Next Follow-up date and the scheduled follow-up (with its
 // reminder) move together, whichever side is changed.
@@ -40,6 +41,9 @@ router.get('/:id', requirePermission('contacts', 'view'), (req, res) => {
 router.post('/', requirePermission('contacts', 'create'), (req, res) => {
   const b = req.body;
   if (!b.first_name) return res.status(400).json({ error: 'first_name is required' });
+  // Same mobile or email as a contact that is already here → shown to the
+  // person adding it instead of quietly creating a second one.
+  if (duplicates.guard('contacts', req, res)) return;
   const info = db.prepare(`
     INSERT INTO contacts (
       salutation, first_name, middle_name, last_name, job_title, department, account_id, email, secondary_email, phone, mobile,
@@ -57,6 +61,7 @@ router.post('/', requirePermission('contacts', 'create'), (req, res) => {
     ...b,
   });
   const created = db.prepare('SELECT * FROM contacts WHERE id=?').get(info.lastInsertRowid);
+  duplicates.noteCreatedAnyway('contacts', req, created);
   syncFollowUp(created, null, req.user.id);
   fireWorkflows('contacts', 'record_created', created, null, req.user.id);
   res.status(201).json(db.prepare('SELECT * FROM contacts WHERE id=?').get(created.id));

@@ -38,6 +38,13 @@ router.post('/:apiKey', (req, res) => {
       logCapture(source.id, req.body, 'success', result.lead.id, null, ip);
       return res.status(201).json({ ok: true, message: 'Thank you! We will be in touch shortly.' });
     }
+    if (result.status === 'merged') {
+      // The same person again: no second lead — the one already here now
+      // shows that they came in again today, from this source.
+      db.prepare(`UPDATE lead_sources SET last_received_at=datetime('now') WHERE id=?`).run(source.id);
+      logCapture(source.id, req.body, 'merged', result.lead.id, null, ip);
+      return res.status(200).json({ ok: true, message: 'Thank you! We already have your details and will be in touch.' });
+    }
     if (result.status === 'duplicate') {
       logCapture(source.id, req.body, 'duplicate', result.duplicateOf.id, null, ip);
       return res.status(200).json({ ok: true, message: 'Thank you! We already have your details and will be in touch.' });

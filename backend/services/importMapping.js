@@ -32,6 +32,16 @@ const SYSTEM_COLS = new Set(['id', 'created_at', 'updated_at']);
 // field's label first — this list is only for the cases where the words
 // genuinely differ.
 const SYNONYMS = {
+  // A lead's name column is `student_name`; a file just says "Name". Without
+  // these the import made a second "Name" field and then failed, because the
+  // real name column was left empty. (Only used where that column exists.)
+  name: 'student_name',
+  full_name: 'student_name',
+  lead_name: 'student_name',
+  customer_name: 'student_name',
+  contact_name: 'student_name',
+  contact_person: 'student_name',
+
   email_address: 'email',
   email_id: 'email',
   e_mail: 'email',
