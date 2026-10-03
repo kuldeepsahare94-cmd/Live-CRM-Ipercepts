@@ -45,6 +45,7 @@ const Customer360 = lazy(() => import('./pages/Customer360'));
 const SettingsEmail = lazy(() => import('./pages/SettingsEmail'));
 const SettingsOptions = lazy(() => import('./pages/SettingsOptions'));
 const SettingsNotifications = lazy(() => import('./pages/SettingsNotifications'));
+const Duplicates = lazy(() => import('./pages/Duplicates'));
 const Inbox = lazy(() => import('./pages/Inbox'));
 const EmailCampaigns = lazy(() => import('./pages/EmailCampaigns'));
 const Appearance = lazy(() => import('./pages/Appearance'));
@@ -176,6 +177,7 @@ export default function App() {
               <Route path="/settings/email" element={<SettingsEmail />} />
               <Route path="/settings/options" element={<SettingsOptions />} />
               <Route path="/settings/notifications" element={<SettingsNotifications />} />
+              <Route path="/duplicates" element={<Duplicates />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/email-campaigns" element={<EmailCampaigns />} />
               <Route path="/appearance" element={<Appearance />} />

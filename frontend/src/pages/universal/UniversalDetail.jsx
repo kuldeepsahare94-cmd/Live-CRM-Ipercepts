@@ -29,6 +29,7 @@ import DetailSkeleton from '../../components/DetailSkeleton';
 import { remember, recall } from '../../screenMemory';
 import { openCompose } from '../../components/EmailCompose';
 import RecordEmails from '../../components/RecordEmails';
+import { SimilarBanner } from '../../components/DuplicateDialog';
 
 // Records that email is exchanged about. They get an Emails tab even before
 // the first message; any other record gets one once it has an address.
@@ -744,6 +745,13 @@ export default function UniversalDetail() {
       <button onClick={() => navigate(`/records/${module.api_name}`)} className="text-slate-500 hover:text-ink text-sm inline-flex items-center gap-1 mb-4">
         <ArrowLeft className="w-4 h-4" /> {module.plural_label}
       </button>
+
+      {/* Another contact / account with the same mobile, email or name,
+          with a way to merge the two. Nothing is shown when there is none. */}
+      {(module.api_name === 'contacts' || module.api_name === 'accounts') && record?.id && (
+        <SimilarBanner key={`${module.api_name}:${record.id}`} module={module.api_name} recordId={record.id}
+          what={module.singular_label ? module.singular_label.toLowerCase() : 'record'} />
+      )}
 
       {/* Record header as a card with an avatar, matching Lead detail —
           it was a bare <h1> on the page background with nothing to anchor

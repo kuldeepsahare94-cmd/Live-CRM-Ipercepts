@@ -21,6 +21,7 @@ import ErrorBoundary from './ErrorBoundary';
 import ReminderCenter from './followup/ReminderCenter';
 import TopProgress from './TopProgress';
 import ComposeHost from './EmailCompose';
+import DuplicateHost from './DuplicateDialog';
 
 // Hand-written links for the modules that have bespoke pages. Everything
 // else is generated from the module registry below, so a module created
@@ -400,6 +401,11 @@ export default function Layout() {
       {/* The one compose pop-up: opens for any email address clicked. */}
       <ErrorBoundary fallback={null}>
         <ComposeHost />
+      </ErrorBoundary>
+      {/* "This is already in the CRM": shown when a new lead, contact or
+          account matches one that exists (merge / create anyway / open). */}
+      <ErrorBoundary fallback={null}>
+        <DuplicateHost />
       </ErrorBoundary>
     </div>
   );

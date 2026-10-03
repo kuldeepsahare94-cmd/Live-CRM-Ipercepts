@@ -14,6 +14,7 @@ import DrillBanner, { useDrill, applyDrill } from '../components/DrillBanner';
 import AssignPicker from '../components/AssignPicker';
 import { remember, recall } from '../screenMemory';
 import StatusCards, { statusBreakdown, matchesStatus, BLANK } from '../components/StatusCards';
+import { DuplicateHint, RepeatBadge } from '../components/DuplicateDialog';
 import {
   FilterButton, FilterPanel, ActiveFilterChips, SavedFiltersMenu, applyFilters, isComplete, useMe,
   useSelection, RowCheckbox, BulkBar, BulkUpdateModal, BulkAssignModal, BulkDeleteModal, runBulk,
@@ -144,7 +145,11 @@ function LeadCardBody({ lead, statuses, sourceLabel, canEdit, moving, moveError,
       <div className="flex items-start gap-2.5">
         <Avatar name={lead.student_name} size="sm" />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-ink truncate leading-tight">{lead.student_name}</div>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-sm font-semibold text-ink truncate leading-tight">{lead.student_name}</span>
+            {/* this lead came in more than once */}
+            <RepeatBadge count={lead.enquiry_count} lastAt={lead.last_enquiry_at} />
+          </div>
           {lead.lead_rating && <div className="mt-1"><Badge size="xs" status={lead.lead_rating}>{lead.lead_rating}</Badge></div>}
         </div>
       </div>
@@ -361,7 +366,11 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
         await api.scheduleFollowUp({ module: 'leads', record_id: created.id, due_at: dueAt, has_time: true, time_zone: browserTimeZone() });
       }
       onSaved();
-    } catch (err) { setError(err.message); } finally { setSaving(false); }
+    } catch (err) {
+      // "Open existing" / closing the duplicate pop-up: nothing was saved and
+      // the form stays as it is.
+      setError(err.cancelled ? '' : err.message);
+    } finally { setSaving(false); }
   };
 
   const field = (label, key, props = {}) => (
@@ -407,6 +416,9 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
               {field('Mobile', 'mobile', { type: 'tel' })}
               {field('Email', 'email', { type: 'email' })}
             </div>
+            {/* Same mobile or email as a lead that is already here: shown
+                straight away, before the rest of the form is filled in. */}
+            <DuplicateHint module="leads" what="lead" values={{ mobile: form.mobile, email: form.email }} />
           </section>
 
           <section>
@@ -750,6 +762,8 @@ export default function Leads() {
                         <span className="font-medium text-ink group-hover:text-[var(--color-brand)] truncate">
                           {l.student_name}
                         </span>
+                        {/* this lead came in more than once */}
+                        <RepeatBadge count={l.enquiry_count} lastAt={l.last_enquiry_at} />
                       </Link>
                     </td>
                     <td className="py-3 px-4">

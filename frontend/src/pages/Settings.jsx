@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import {
   CalendarDays, Settings as SettingsIcon, Sparkles, Database, ShieldCheck, Boxes, Zap, GitBranch, Users2, History,
   Percent, Mail, LayoutList, Check, AlertTriangle, Building2, LayoutTemplate, ListChecks, Bell, Search, Palette,
-  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench,
+  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge,
 } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -82,6 +82,10 @@ function sections(can) {
           keywords: 'options master lists lead source qualification payment mode status priority' },
         { to: '/settings/pipelines', icon: GitBranch, tint: '#2563EB', title: 'Pipelines', show: can('settings', 'edit'),
           desc: 'The stages deals move through — names, colours and win probability.' },
+        { to: '/duplicates', icon: GitMerge, tint: '#D97706', title: 'Duplicate Check & Merge',
+          show: can('leads', 'view') || can('contacts', 'view') || can('accounts', 'view') || can('settings', 'view'),
+          desc: 'Stop the same lead, contact or account being created twice (same mobile or email), and merge the duplicates already here.',
+          keywords: 'duplicate merge dedupe same mobile email repeat enquiry' },
       ],
     },
     {

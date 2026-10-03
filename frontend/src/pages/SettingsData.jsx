@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Database, History, Download, Upload, FileText } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Database, History, Download, Upload, FileText, GitMerge } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
 import { PageHeader } from '../components/ui';
@@ -16,6 +17,30 @@ function ImportExportSection({ modules }) {
   // of rejecting the file. On by default because that is almost always what
   // someone importing an export from another CRM wants.
   const [autoCreate, setAutoCreate] = useState(true);
+  // Duplicate check. What this module can be compared on (mobile, email,
+  // company name) and the starting choice come from its duplicate rule.
+  const [dupInfo, setDupInfo] = useState(null);
+  const [dup, setDup] = useState({ mobile: true, email: true, name: false, action: 'skip' });
+
+  useEffect(() => {
+    setDupInfo(null);
+    if (!selected) return undefined;
+    let live = true;
+    api.importDuplicateOptions(selected).then((info) => {
+      if (!live) return;
+      setDupInfo(info);
+      setDup({
+        mobile: info.mobile.length > 0 && info.default_by.mobile !== false,
+        email: info.email.length > 0 && info.default_by.email !== false,
+        name: !!info.name && !!info.default_by.name,
+        action: info.default_action || 'skip',
+      });
+    }).catch(() => { if (live) setDupInfo({ available: false }); });
+    return () => { live = false; };
+  }, [selected]);
+
+  const changeDup = (patch) => { setDup((d) => ({ ...d, ...patch })); setResult(null); setError(null); };
+  const dupChecked = dupInfo?.available && dup.action !== 'allow' && (dup.mobile || dup.email || dup.name);
 
   const onFile = (e) => {
     const file = e.target.files?.[0];
@@ -30,12 +55,13 @@ function ImportExportSection({ modules }) {
     if (!selected || !csv.trim()) return;
     setBusy(true); setResult(null); setError(null);
     try {
-      const r = await api.importCsv(selected, csv, dryRun, autoCreate);
+      const r = await api.importCsv(selected, csv, dryRun, autoCreate,
+        dupChecked ? { mobile: dup.mobile, email: dup.email, name: dup.name, action: dup.action } : undefined);
       setResult(r);
     } catch (err) {
-      // The backend returns structured validation detail — surface it rather
-      // than collapsing everything into one opaque message.
-      try { setError(JSON.parse(err.message)); } catch { setError({ error: err.message }); }
+      // The backend returns structured validation detail (which lines failed,
+      // which columns are valid) — show it rather than one opaque message.
+      setError(err.data && typeof err.data === 'object' && err.data.error ? err.data : { error: err.message });
     } finally { setBusy(false); }
   };
 
@@ -82,6 +108,63 @@ function ImportExportSection({ modules }) {
             </span>
           </label>
 
+          {dupInfo?.available && (
+            <div className="mt-4 rounded-xl border border-line p-3.5" data-import-duplicates>
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+                <GitMerge className="w-3.5 h-3.5 text-amber" /> Duplicate check
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                A row is a duplicate when a record with the same value is already in the CRM, or when it is repeated in
+                this file. Mobile numbers are compared on their last 10 digits, so +91, 0, spaces and dashes do not matter.
+              </p>
+
+              <div className="flex items-center gap-x-5 gap-y-1.5 flex-wrap mt-3 text-xs text-slate-600">
+                <span className="font-medium text-ink">Check by</span>
+                {dupInfo.mobile.length > 0 && (
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" className="w-3.5 h-3.5" checked={dup.mobile} disabled={dup.action === 'allow'}
+                      onChange={(e) => changeDup({ mobile: e.target.checked })} /> Mobile
+                  </label>
+                )}
+                {dupInfo.email.length > 0 && (
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" className="w-3.5 h-3.5" checked={dup.email} disabled={dup.action === 'allow'}
+                      onChange={(e) => changeDup({ email: e.target.checked })} /> Email
+                  </label>
+                )}
+                {dupInfo.name && (
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" className="w-3.5 h-3.5" checked={dup.name} disabled={dup.action === 'allow'}
+                      onChange={(e) => changeDup({ name: e.target.checked })} /> Company name
+                  </label>
+                )}
+              </div>
+
+              <div className="mt-3 text-xs text-slate-600 space-y-1.5">
+                <div className="font-medium text-ink">When a row is a duplicate</div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" name="dup-action" className="mt-0.5 w-3.5 h-3.5" checked={dup.action === 'skip'} onChange={() => changeDup({ action: 'skip' })} />
+                  <span><strong className="text-ink">Do not import it</strong> — the row is left out; the record already there is not touched.</span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" name="dup-action" className="mt-0.5 w-3.5 h-3.5" checked={dup.action === 'merge'} onChange={() => changeDup({ action: 'merge' })} />
+                  <span>
+                    <strong className="text-ink">Merge into the existing record</strong> — no new record; its empty fields are filled from the row
+                    (nothing is overwritten){selected === 'leads' ? ', and the lead shows that it came in again today.' : '.'}
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="radio" name="dup-action" className="mt-0.5 w-3.5 h-3.5" checked={dup.action === 'allow'} onChange={() => changeDup({ action: 'allow' })} />
+                  <span><strong className="text-ink">Import it anyway</strong> — no check; duplicates are created.</span>
+                </label>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2.5">
+                Tip: press <strong>Validate only</strong> first — it lists the duplicate rows without importing anything.
+                {' '}<Link to="/duplicates?tab=rules" className="underline">Duplicate rules</Link>
+              </p>
+            </div>
+          )}
+
           <div className="flex gap-2 mt-3">
             <button onClick={() => run(true)} disabled={busy || !csv.trim()}
               className="border border-line text-sm font-medium px-4 py-2 rounded-lg hover:bg-canvas disabled:opacity-50">
@@ -95,11 +178,54 @@ function ImportExportSection({ modules }) {
 
           {result && (
             <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 mt-3 space-y-2">
-              <div className="font-medium">
+              <div className="font-medium" data-import-result>
                 {result.dry_run
                   ? `Looks good — ${result.would_import} row(s) would be imported.`
                   : `Imported ${result.imported} row(s).`}
               </div>
+
+              {result.duplicates && (
+                <div data-import-duplicate-result>
+                  {result.duplicates.found === 0 ? (
+                    <div>No duplicates found (checked by {[result.duplicates.checked.mobile && 'mobile', result.duplicates.checked.email && 'email', result.duplicates.checked.name && 'company name'].filter(Boolean).join(', ') || 'nothing — the file has no mobile or email column'}).</div>
+                  ) : (
+                    <>
+                      <div className="font-medium text-amber">
+                        {result.duplicates.found} duplicate row(s): {result.duplicates.already_in_crm} already in the CRM,
+                        {' '}{result.duplicates.repeated_in_file} repeated in this file —
+                        {' '}{result.duplicates.action === 'merge'
+                          ? (result.dry_run ? 'would be merged into the existing records.' : 'merged into the existing records.')
+                          : (result.dry_run ? 'would not be imported.' : 'not imported.')}
+                      </div>
+                      <div className="mt-1.5 max-h-56 overflow-auto rounded-lg border border-emerald-200 bg-white">
+                        <table className="w-full text-[11px] text-slate-600">
+                          <thead>
+                            <tr className="text-left text-slate-400 border-b border-line">
+                              <th className="py-1.5 px-2 font-medium">Row</th>
+                              <th className="py-1.5 px-2 font-medium">Same</th>
+                              <th className="py-1.5 px-2 font-medium">Value</th>
+                              <th className="py-1.5 px-2 font-medium">Same as</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {result.duplicates.rows.map((d) => (
+                              <tr key={d.row} className="border-b border-line/60">
+                                <td className="py-1 px-2">{d.row}</td>
+                                <td className="py-1 px-2">{d.matched_on.join(' + ')}</td>
+                                <td className="py-1 px-2">{d.value}</td>
+                                <td className="py-1 px-2">{d.same_as}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {result.duplicates.found > result.duplicates.rows.length && (
+                        <div className="opacity-70 mt-1">…and {result.duplicates.found - result.duplicates.rows.length} more.</div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               {(result.fields_created?.length > 0 || result.create?.length > 0) && (
                 <div>

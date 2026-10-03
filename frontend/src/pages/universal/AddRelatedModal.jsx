@@ -112,7 +112,8 @@ export default function AddRelatedModal({ relationKey, parentModule, parentId, p
       await api.universalCreate(module, body);
       onCreated();
     } catch (err) {
-      setError(friendlyError(err, 'Could not create the record.').message);
+      // Closing the "already in the CRM" pop-up is a choice, not a failure.
+      setError(err.cancelled ? '' : friendlyError(err, 'Could not create the record.').message);
     } finally { setSaving(false); }
   };
 

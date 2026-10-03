@@ -106,7 +106,7 @@ const META = [
   /^\/finance\/(currencies|taxes)$/, /^\/settings\/master-options(\?.*)?$/, /^\/company-profile$/, /^\/support\/meta$/,
 ];
 // Requests that must always go to the server (live counters, polling, auth).
-const NEVER_SHARED = /^\/(auth\/|chat\/|notifications|follow-ups\/reminders|health)/;
+const NEVER_SHARED = /^\/(auth\/|chat\/|notifications|follow-ups\/reminders|health|duplicates\/check)/;
 const getCache = new Map();          // path -> { at, data, meta, prefetched, promise }
 let cacheOwner = null;
 
@@ -131,7 +131,7 @@ function setBusy(delta) {
   busyCount = Math.max(0, busyCount + delta);
   busyListeners.forEach((fn) => { try { fn(busyCount); } catch { /* ignore */ } });
 }
-const BACKGROUND = /^\/(chat\/|notifications|follow-ups\/(reminders|preferences|push)|calendar\/agenda|health)/;
+const BACKGROUND = /^\/(chat\/|notifications|follow-ups\/(reminders|preferences|push)|calendar\/agenda|health|duplicates\/check)/;
 
 // ---- Learning what each screen loads -------------------------------------
 // For a screen like /leads/132 the requests are remembered with the number
@@ -292,6 +292,9 @@ async function sendRequest(method, path, body, token) {
     const err = new Error(data?.error || res.statusText);
     err.status = res.status;
     err.code = data?.code;
+    // The whole answer, for callers that need more than the message (a
+    // "this already exists" answer carries the record that is already there).
+    err.data = data;
     err.requestId = data?.request_id;
     err.rawError = data?.raw_error;
     // Per-item validation messages (the dropdown option editor shows them
@@ -311,6 +314,54 @@ const qs = (params) => {
   return q ? `?${q}` : '';
 };
 
+// ---------------------------------------------------------------------------
+// Creating a record that may already exist.
+//
+// The create is sent with "ask". If the server answers "this already exists"
+// (409, code DUPLICATE) the pop-up in components/DuplicateDialog.jsx shows
+// the record that is already there, and the person chooses:
+//   merge   no second record; the existing one shows it came in again
+//   create  make a second record anyway (if the rule allows it)
+//   cancel  nothing is saved
+// The call then resolves with the saved (or the existing, merged) record.
+// ---------------------------------------------------------------------------
+const DUPLICATE_CHECKED = new Set(['leads', 'contacts', 'accounts']);
+
+function askAboutDuplicate(info) {
+  return new Promise((resolve) => {
+    const detail = { info, resolve, claimed: false };
+    window.dispatchEvent(new CustomEvent('icrm:duplicate', { detail }));
+    if (!detail.claimed) {
+      // No pop-up on this screen: fall back to a plain question.
+      const first = info.matches?.[0];
+      const ok = info.can_create
+        && window.confirm(`${first?.title || 'This record'} already exists in the CRM. Create a second one anyway?`);
+      resolve({ choice: ok ? 'create' : 'cancel' });
+    }
+  });
+}
+
+async function createChecked(path, body) {
+  try {
+    return await req('POST', path, { ...body, _duplicate: 'ask' });
+  } catch (err) {
+    const info = err.data?.duplicate;
+    if (err.code !== 'DUPLICATE' || !info) throw err;
+    const answer = await askAboutDuplicate(info);
+    if (answer.choice === 'merge' || answer.choice === 'create') {
+      const saved = await req('POST', path, { ...body, _duplicate: answer.choice, _duplicate_id: answer.id });
+      if (answer.choice === 'merge' && saved?._duplicate) {
+        window.dispatchEvent(new CustomEvent('icrm:duplicate-merged', { detail: { ...saved._duplicate, singular: info.singular } }));
+      }
+      return saved;
+    }
+    const stop = new Error('Not saved — this record is already in the CRM.');
+    stop.code = 'DUPLICATE_CANCELLED';
+    stop.cancelled = true;
+    throw stop;
+  }
+}
+
 // Base path for a module's records: modules with a real physical table
 // (table_name set) use their dedicated REST route (/api/accounts, ...);
 // modules with no table yet (admin-created custom modules) use the generic
@@ -325,7 +376,7 @@ export const api = {
   // leads
   listLeads: (params) => req('GET', '/leads' + qs(params)),
   getLead: (id) => req('GET', `/leads/${id}`),
-  createLead: (body) => req('POST', '/leads', body),
+  createLead: (body) => createChecked('/leads', body),
   updateLead: (id, body) => req('PUT', `/leads/${id}`, body),
   deleteLead: (id) => req('DELETE', `/leads/${id}`),
   addLeadActivity: (id, body) => req('POST', `/leads/${id}/activities`, body),
@@ -658,7 +709,9 @@ export const api = {
   createSubscription: (body) => req('POST', '/subscriptions', body),
   renewSubscription: (id, body) => req('POST', `/subscriptions/${id}/renew`, body),
   universalGet: (module, id) => req('GET', `${recordsBase(module)}/${id}`),
-  universalCreate: (module, body) => req('POST', recordsBase(module), body),
+  universalCreate: (module, body) => (DUPLICATE_CHECKED.has(module.api_name)
+    ? createChecked(recordsBase(module), body)
+    : req('POST', recordsBase(module), body)),
   universalUpdate: (module, id, body) => req('PUT', `${recordsBase(module)}/${id}`, body),
   universalDelete: (module, id) => req('DELETE', `${recordsBase(module)}/${id}`),
 
@@ -704,10 +757,22 @@ export const api = {
   listAudit: (params) => req('GET', '/admin/audit' + qs(params)),
   exportUrl: (moduleApiName) => `${BASE}/admin/export/${moduleApiName}`,
   importTemplateUrl: (moduleApiName) => `${BASE}/admin/import-template/${moduleApiName}`,
-  importCsv: (moduleApiName, csv, dryRun, createMissingFields) =>
+  // duplicates: { mobile, email, name, action: 'skip' | 'merge' | 'allow' }
+  importCsv: (moduleApiName, csv, dryRun, createMissingFields, duplicates) =>
     req('POST', `/admin/import/${moduleApiName}`, {
       csv, dry_run: !!dryRun, create_missing_fields: !!createMissingFields,
+      ...(duplicates ? { duplicates } : {}),
     }),
+  importDuplicateOptions: (moduleApiName) => req('GET', `/admin/import-duplicate-options/${moduleApiName}`),
+
+  // Duplicate check & merge
+  duplicateRules: () => req('GET', '/duplicates/rules'),
+  saveDuplicateRule: (module, body) => req('PUT', `/duplicates/rules/${module}`, body),
+  checkDuplicate: (module, params) => req('GET', `/duplicates/check${qs({ module, ...params })}`),
+  duplicateGroups: (module, params) => req('GET', `/duplicates/groups${qs({ module, ...params })}`),
+  mergeDuplicates: (module, keepId, removeIds) => req('POST', '/duplicates/merge', { module, keep_id: keepId, remove_ids: removeIds }),
+  duplicateHistory: (module, id) => req('GET', `/duplicates/history/${module}/${id}`),
+  duplicateLog: (params) => req('GET', `/duplicates/log${qs(params)}`),
   importAnalyze: (moduleApiName, csv) => req('POST', `/admin/import-analyze/${moduleApiName}`, { csv }),
 
   // Customer 360 + scoring

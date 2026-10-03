@@ -12,6 +12,7 @@ import { usePermissions } from '../context/usePermissions';
 import StatusBadge from '../components/StatusBadge';
 import { openCompose, EmailLink } from '../components/EmailCompose';
 import RecordEmails from '../components/RecordEmails';
+import { EnquiryHistory, SimilarBanner, RepeatBadge, localWhen } from '../components/DuplicateDialog';
 import OutcomeModal from '../components/followup/OutcomeModal';
 import FollowUpCard from '../components/followup/FollowUpCard';
 import { useModuleOptions, selectableOptions, labelFor } from '../components/fieldOptions';
@@ -449,6 +450,11 @@ export default function LeadDetail() {
         )}
       </div>
 
+      {/* Other leads with the same mobile or email, with a way to merge them. */}
+      {lead.similar_leads?.length > 0 && (
+        <SimilarBanner module="leads" recordId={lead.id} items={lead.similar_leads} what="lead" />
+      )}
+
       {/* ===== Header — white card, matching the full reference image
           precisely (I had this backwards in the previous two rounds,
           going by a cropped view that read as solid purple; the complete
@@ -474,6 +480,8 @@ export default function LeadDetail() {
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-xl font-bold text-ink">{lead.student_name}</h1>
                 <StatusBadge status={lead.status} label={statusLabel(lead.status)} />
+                {/* came in more than once — the Enquiry history card has the dates */}
+                <RepeatBadge count={lead.enquiries?.length || lead.enquiry_count} lastAt={lead.last_enquiry_at} />
               </div>
               <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1.5 text-sm text-slate-500">
                 {lead.mobile && (
@@ -666,6 +674,9 @@ export default function LeadDetail() {
                   <Row label="Source" value={labelFor(leadOptions?.source, lead.source)} />
                   <Row label="Owner" value={lead.assigned_counselor} />
                   <Row label="Created On" value={lead.created_at?.slice(0, 10)} />
+                  {lead.enquiries?.length > 1 && (
+                    <Row label="Came In Again" value={`${lead.enquiries.length - 1} more time${lead.enquiries.length > 2 ? 's' : ''} · last ${localWhen(lead.enquiries[lead.enquiries.length - 1].at)}`} />
+                  )}
                   <Row label="Last Activity" value={lead.activities?.[0]
                     ? `${lead.activities[0].type} on ${String(lead.activities[0].created_at).slice(0, 10)}` : null} />
                   <Row label="Lead ID" value={`L-${String(lead.id).padStart(4, '0')}`} />
@@ -767,6 +778,10 @@ export default function LeadDetail() {
           {/* SIDEBAR */}
           <div className="space-y-4">
             <ScoreInsightsCard scoring={scoring} />
+
+            {/* Every time this lead came in: first created, came in again
+                (with the date and source), a duplicate merged into it. */}
+            <EnquiryHistory enquiries={lead.enquiries} sourceLabel={(v) => labelFor(leadOptions?.source, v) || v} />
 
             <SuggestedNextSteps scoring={scoring} onAction={(key) => {
               if (key === 'edit') return setEditing(true);

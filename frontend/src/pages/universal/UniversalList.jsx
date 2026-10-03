@@ -421,7 +421,8 @@ export default function UniversalList() {
       setShowForm(false);
       load();
     } catch (err) {
-      alert('Could not save: ' + err.message);
+      // Closing the "already in the CRM" pop-up is a choice, not a failure.
+      if (!err.cancelled) alert('Could not save: ' + err.message);
     } finally {
       setSaving(false);
     }
