@@ -85,6 +85,12 @@ app.use('/api/whatsapp/webhook', express.raw({ type: '*/*', limit: '2mb' }), req
 // registered before the global JSON parser.
 app.use('/api/social-leads', express.raw({ type: '*/*', limit: '1mb' }), require('./routes/leadSourcesSocial'));
 
+// A CSV import carries the whole file in the request. The normal 100 KB limit
+// refused any file beyond roughly a thousand rows ("request entity too
+// large"), so the two import routes get room for a real file.
+app.use('/api/admin/import', express.json({ limit: '30mb' }));
+app.use('/api/admin/import-analyze', express.json({ limit: '30mb' }));
+
 app.use(express.json());
 
 // Public routes
