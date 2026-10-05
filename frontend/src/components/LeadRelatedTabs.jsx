@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Paperclip, Download, PhoneCall, CheckSquare, TrendingUp } from 'lucide-react';
+import { Paperclip, Download, PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, CheckSquare, TrendingUp } from 'lucide-react';
 import { api } from '../api';
 import { MeetingList } from './MeetingCard';
 
@@ -24,28 +24,65 @@ function tableModule(apiName) {
   return { api_name: apiName, table_name: apiName };
 }
 
-export function CallsTab({ leadId }) {
+const mmss = (total) => {
+  const s = Math.max(0, Math.round(total || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+// "2026-10-05 07:20:04" (the server's clock, UTC) or an ISO instant → local date and time.
+function when(c) {
+  const raw = c.provider ? (c.start_time || c.created_at) : c.created_at;
+  if (!raw) return '';
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : `${String(raw).replace(' ', 'T')}Z`);
+  if (Number.isNaN(d.getTime())) return String(raw).slice(0, 16);
+  return d.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+// The lead's calls. A call made or received through the IVR (MCube) shows its
+// direction, real talk time and recording; a call logged by hand with the
+// Dispose button looks as it always did.
+export function CallsTab({ leadId, refreshKey = 0 }) {
   const [rows, setRows] = useState(null);
   useEffect(() => {
+    let cancelled = false;
     api.universalList(tableModule('calls'), { related_module: 'leads', related_record_id: leadId })
-      .then(setRows).catch(() => setRows([]));
-  }, [leadId]);
+      .then((r) => { if (!cancelled) setRows(r); })
+      .catch(() => { if (!cancelled) setRows((cur) => cur || []); });
+    return () => { cancelled = true; };
+  }, [leadId, refreshKey]);
   if (rows === null) return <p className="t-meta">Loading…</p>;
-  if (rows.length === 0) return <p className="t-meta py-3">No calls logged yet. Use "Dispose Call" to log one.</p>;
+  if (rows.length === 0) return <p className="t-meta py-3">No calls logged yet. Use "Dispose" to log one.</p>;
   return (
     <div className="space-y-2">
-      {rows.map((c) => (
-        <div key={c.id} className="flex items-start gap-3 text-sm border-l-2 border-line pl-3 py-1">
-          <PhoneCall className="w-3.5 h-3.5 text-[var(--color-brand)] mt-0.5 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <div className="text-ink font-medium">{c.call_subject || c.call_outcome || 'Call'}</div>
-            <div className="t-meta">
-              {c.connected ? 'Connected' : 'Not connected'}{c.duration_seconds ? ` · ${Math.round(c.duration_seconds / 60)}m` : ''} · {String(c.created_at || '').slice(0, 16)}
+      {rows.map((c) => {
+        const ivr = !!c.provider;
+        const inbound = c.direction === 'Inbound';
+        const missed = ivr && inbound && !c.connected;
+        const Icon = !ivr ? PhoneCall : (missed ? PhoneMissed : (inbound ? PhoneIncoming : PhoneOutgoing));
+        const secure = c.call_recording_url && /^https:\/\//i.test(c.call_recording_url);
+        return (
+          <div key={c.id} className="flex items-start gap-3 text-sm border-l-2 border-line pl-3 py-1">
+            <Icon className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: missed ? 'var(--color-danger)' : 'var(--color-brand)' }} />
+            <div className="min-w-0 flex-1">
+              <div className="text-ink font-medium flex items-center gap-2 flex-wrap">
+                {c.call_subject || c.call_outcome || 'Call'}
+                {ivr && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand)' }}>IVR</span>}
+                {ivr && !c.call_outcome && !missed && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-danger-soft)', color: 'var(--color-danger)' }}>Not disposed</span>}
+              </div>
+              <div className="t-meta">
+                {c.connected ? 'Connected' : (missed ? 'Missed' : 'Not connected')}
+                {c.duration_seconds ? ` · ${ivr ? mmss(c.duration_seconds) : `${Math.round(c.duration_seconds / 60)}m`}` : ''} · {when(c)}
+                {ivr && c.did_number ? ` · on ${c.did_number}` : ''}
+              </div>
+              {c.notes && <div className="text-xs text-[var(--color-muted)] mt-0.5">{c.notes}</div>}
+              {c.call_recording_url && (secure ? (
+                <audio controls preload="none" src={c.call_recording_url} className="mt-1.5 h-8 w-full max-w-sm" aria-label="Call recording" />
+              ) : (
+                <a href={c.call_recording_url} target="_blank" rel="noreferrer" className="text-xs font-medium mt-1 inline-block" style={{ color: 'var(--color-brand)' }}>Open the recording</a>
+              ))}
             </div>
-            {c.notes && <div className="text-xs text-[var(--color-muted)] mt-0.5">{c.notes}</div>}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

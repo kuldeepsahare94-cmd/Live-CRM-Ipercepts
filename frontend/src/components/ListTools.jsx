@@ -807,7 +807,7 @@ export async function runBulk(ids, worker, onProgress, concurrency = 4) {
   return { ok: ids.length - failed.length, failed };
 }
 
-export function BulkBar({ count, pageCount, matchingCount, allPageSelected, onSelectAllMatching, onClear, canEdit, canDelete, canExport, onUpdate, onAssign, onExport, onDelete, hasUserField }) {
+export function BulkBar({ count, pageCount, matchingCount, allPageSelected, onSelectAllMatching, onClear, canEdit, canDelete, canExport, onUpdate, onAssign, onExport, onDelete, hasUserField, extra = null }) {
   if (!count) return null;
   const btn = 'inline-flex items-center gap-1.5 text-[13px] font-semibold px-3 py-1.5 rounded-lg transition-colors';
   return (
@@ -825,6 +825,8 @@ export function BulkBar({ count, pageCount, matchingCount, allPageSelected, onSe
         <button type="button" onClick={onClear} className="underline underline-offset-2 text-white/80 hover:text-white">Clear selection</button>
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">
+        {/* an action of the screen's own (the Leads list: "Auto-dial") */}
+        {extra}
         {canEdit && <button type="button" onClick={onUpdate} className={`${btn} bg-white/15 hover:bg-white/25`}><Pencil className="w-4 h-4" /> Mass update</button>}
         {canEdit && hasUserField && <button type="button" onClick={onAssign} className={`${btn} bg-white/15 hover:bg-white/25`}><UserRoundCog className="w-4 h-4" /> Assign to</button>}
         {canExport && <button type="button" onClick={onExport} className={`${btn} bg-white/15 hover:bg-white/25`}><Download className="w-4 h-4" /> Export</button>}

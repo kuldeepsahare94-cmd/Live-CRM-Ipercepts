@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
-  UserPlus, List, Columns3, Search, Mail, Phone, Clock, Download, X,
+  UserPlus, List, Columns3, Search, Mail, Phone, PhoneCall, Clock, Download, X,
   Users as UsersIcon, Sparkles, MoreVertical, Plus, Pencil, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { api } from '../api';
@@ -15,6 +15,8 @@ import AssignPicker from '../components/AssignPicker';
 import { remember, recall } from '../screenMemory';
 import StatusCards, { breakdownFromServer, BLANK } from '../components/StatusCards';
 import { DuplicateHint, RepeatBadge } from '../components/DuplicateDialog';
+import DialListModal from '../components/telephony/DialListModal';
+import { useTelephony } from '../components/telephony/telephony';
 import {
   FilterButton, FilterPanel, ActiveFilterChips, SavedFiltersMenu, isComplete, kindOf,
   useSelection, RowCheckbox, BulkBar, BulkUpdateModal, BulkAssignModal, BulkDeleteModal, runBulk,
@@ -579,6 +581,7 @@ export default function Leads() {
   const [activeSaved, setActiveSaved] = useState(null);
   const [savedRefresh, setSavedRefresh] = useState(0);
   const [bulk, setBulk] = useState(null);
+  const tel = useTelephony();        // is this person an agent who can call (MCube IVR)?
   const selection = useSelection('leads');
 
   // ---- What is on screen ----------------------------------------------------
@@ -950,7 +953,13 @@ export default function Leads() {
           onSelectAllMatching={selectAllMatching} onClear={selection.clear}
           canEdit={can('leads', 'edit')} canDelete={can('leads', 'delete')} canExport={can('leads', 'export')} hasUserField
           onUpdate={() => setBulk('update')} onAssign={() => setBulk('assign')} onDelete={() => setBulk('delete')}
-          onExport={exportSelected} />
+          onExport={exportSelected}
+          extra={(tel.status?.can_call || tel.status?.dial_manage) ? (
+            <button type="button" onClick={() => setBulk('dial')} data-bulk-dial
+              className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3 py-1.5 rounded-lg transition-colors bg-white/15 hover:bg-white/25">
+              <PhoneCall className="w-4 h-4" /> Auto-dial
+            </button>
+          ) : null} />
         {capped > 0 && selection.ids.size > 0 && (
           <p className="t-meta mt-1.5" data-selection-capped>
             {num(capped)} is the most that can be selected at once, so the newest {num(capped)} of the {num(total)} matching leads are selected.
@@ -1088,6 +1097,8 @@ export default function Leads() {
           onRun={runUpdate} onClose={() => setBulk(null)} />
       )}
       {bulk === 'delete' && <BulkDeleteModal count={selection.ids.size} noun="lead" onRun={runDelete} onClose={() => setBulk(null)} />}
+      {/* Call the ticked leads one after the other (MCube IVR). */}
+      {bulk === 'dial' && <DialListModal module="leads" ids={selectedIds} noun="lead" onClose={() => setBulk(null)} />}
 
       {editingId && (
         <LeadEditModal leadId={editingId}

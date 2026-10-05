@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
-import { ArrowLeft, Trash2, Pencil, Send, MessageCircle, Sparkles, CheckSquare, FileText, Download, Paperclip, Upload, PhoneCall, CalendarPlus, StickyNote, Building2, Mail } from 'lucide-react';
+import { ArrowLeft, Trash2, Pencil, Send, MessageCircle, Sparkles, CheckSquare, FileText, Download, Paperclip, Upload, PhoneCall, Phone, CalendarPlus, StickyNote, Building2, Mail } from 'lucide-react';
 import { api } from '../../api';
 import NoAccess from '../../components/NoAccess';
 import { usePermissions } from '../../context/usePermissions';
@@ -31,6 +31,7 @@ import { remember, recall } from '../../screenMemory';
 import { openCompose } from '../../components/EmailCompose';
 import RecordEmails from '../../components/RecordEmails';
 import { SimilarBanner } from '../../components/DuplicateDialog';
+import { useCallAction } from '../../components/telephony/CallButton';
 
 // Records that email is exchanged about. They get an Emails tab even before
 // the first message; any other record gets one once it has an address.
@@ -664,6 +665,27 @@ export default function UniversalDetail() {
   };
   useEffect(() => { setDenied(null); load(); }, [moduleApiName, id]);
 
+  // Call through the IVR (MCube) from a contact or an account; and when a call
+  // of this record ends, or is disposed from the call card, show it here.
+  const ivrCall = useCallAction(moduleApiName, id);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const ownDisposeOpen = useRef(false);
+  ownDisposeOpen.current = loggingOutcome;
+  useEffect(() => {
+    const onCall = (e) => {
+      const d = e.detail || {};
+      const rec = d.record || d;
+      if (`${rec.module}/${rec.id}` !== pageKeyRef.current || ownDisposeOpen.current) return;
+      setFollowUpVersion((v) => v + 1);
+      loadRef.current();
+    };
+    window.addEventListener('icrm:disposed', onCall);
+    window.addEventListener('icrm:call-ended', onCall);
+    window.addEventListener('icrm:call-gone', onCall);        // ended and only logged (no Dispose box)
+    return () => { window.removeEventListener('icrm:disposed', onCall); window.removeEventListener('icrm:call-ended', onCall); window.removeEventListener('icrm:call-gone', onCall); };
+  }, []);
+
   const detailFields = useMemo(() => fields.filter((f) => f.show_in_detail), [fields]);
   const editFields = useMemo(() => fields.filter((f) => f.show_in_edit), [fields]);
   const statusField = useMemo(() => fields.find((f) => ['status', 'contact_status', 'priority'].includes(f.api_name)), [fields]);
@@ -1063,6 +1085,9 @@ export default function UniversalDetail() {
         const actions = [
           { key: 'whatsapp', label: 'WhatsApp', icon: MessageCircle, from: '#4ADE80', to: '#15803D',
             run: () => setWaOpen(true) },
+          // Call through the IVR (MCube): contacts and accounts, agents only.
+          ivrCall.can && ['contacts', 'accounts'].includes(module.api_name) && (record.phone || record.mobile || record.whatsapp)
+            && { key: 'ivr-call', label: ivrCall.busy ? 'On call…' : 'Call', icon: Phone, from: '#60A5FA', to: '#3B5BFF', run: ivrCall.run, disabled: ivrCall.busy },
           can('calls', 'create') && { key: 'call', label: 'Log Call', icon: PhoneCall, from: '#818CF8', to: '#4338CA',
             run: () => setLoggingOutcome(true) },
           // The CRM's own compose pop-up; it says so if email is not set up.
@@ -1086,8 +1111,8 @@ export default function UniversalDetail() {
             <div className="flex items-center gap-2 overflow-x-auto thin-scroll">
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide shrink-0 pl-1 pr-2">Quick Actions</span>
               {actions.map((a) => (
-                <button key={a.key} onClick={a.run}
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl border border-line hover:shadow-md hover:-translate-y-0.5 transition-all shrink-0">
+                <button key={a.key} onClick={a.run} disabled={!!a.disabled}
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl border border-line hover:shadow-md hover:-translate-y-0.5 transition-all shrink-0 disabled:opacity-60">
                   <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white shadow-sm"
                     style={{ background: `linear-gradient(135deg, ${a.from}, ${a.to})` }}>
                     <a.icon className="w-3.5 h-3.5" />

@@ -46,6 +46,9 @@ const SettingsEmail = lazy(() => import('./pages/SettingsEmail'));
 const SettingsOptions = lazy(() => import('./pages/SettingsOptions'));
 const SettingsNotifications = lazy(() => import('./pages/SettingsNotifications'));
 const Duplicates = lazy(() => import('./pages/Duplicates'));
+const SettingsTelephony = lazy(() => import('./pages/SettingsTelephony'));
+const Dialer = lazy(() => import('./pages/Dialer'));
+const LiveCalls = lazy(() => import('./pages/LiveCalls'));
 const Inbox = lazy(() => import('./pages/Inbox'));
 const EmailCampaigns = lazy(() => import('./pages/EmailCampaigns'));
 const Appearance = lazy(() => import('./pages/Appearance'));
@@ -178,6 +181,10 @@ export default function App() {
               <Route path="/settings/options" element={<SettingsOptions />} />
               <Route path="/settings/notifications" element={<SettingsNotifications />} />
               <Route path="/duplicates" element={<Duplicates />} />
+              <Route path="/settings/telephony" element={<SettingsTelephony />} />
+              <Route path="/dialer" element={<Dialer />} />
+              <Route path="/dialer/:id" element={<Dialer />} />
+              <Route path="/live-calls" element={<LiveCalls />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/email-campaigns" element={<EmailCampaigns />} />
               <Route path="/appearance" element={<Appearance />} />

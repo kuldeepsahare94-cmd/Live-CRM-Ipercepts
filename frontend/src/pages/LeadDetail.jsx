@@ -26,6 +26,7 @@ import { formatFieldValue } from './universal/fieldUtils';
 import { accentFor } from '../theme/moduleAccents';
 import { avatarGradientFor } from '../theme/avatarColors';
 import { CallsTab, MeetingsTab, TasksTab, DocumentsTab, DealsTab, NotesTab } from '../components/LeadRelatedTabs';
+import CallButton from '../components/telephony/CallButton';
 
 // The funnel tracker's stages (stored values). Their labels, and every other
 // status, come from Settings → Dropdown Options (Leads › Status).
@@ -395,6 +396,29 @@ export default function LeadDetail() {
   };
   useEffect(() => { setLoadError(null); load(); setPageTab('overview'); }, [id]);
 
+  // A call of this lead ended (MCube), or was disposed from the call card at
+  // the bottom of the screen: show it here without a reload.
+  const [callsVersion, setCallsVersion] = useState(0);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const ownDisposeOpen = useRef(false);
+  ownDisposeOpen.current = loggingOutcome;
+  useEffect(() => {
+    const onCall = (e) => {
+      const d = e.detail || {};
+      const rec = d.record || d;
+      if (rec.module !== 'leads' || String(rec.id) !== String(idRef.current)) return;
+      setCallsVersion((v) => v + 1);
+      if (ownDisposeOpen.current) return;          // this page's own Dispose box reloads when it closes
+      setFollowUpVersion((v) => v + 1);
+      loadRef.current();
+    };
+    window.addEventListener('icrm:disposed', onCall);
+    window.addEventListener('icrm:call-ended', onCall);
+    window.addEventListener('icrm:call-gone', onCall);        // ended and only logged (no Dispose box)
+    return () => { window.removeEventListener('icrm:disposed', onCall); window.removeEventListener('icrm:call-ended', onCall); window.removeEventListener('icrm:call-gone', onCall); };
+  }, []);
+
   if (loadError && !lead) {
     return <NoAccess error={loadError} backTo="/leads" backLabel="Back to Leads" onRetry={() => { setLoadError(null); load(); }} />;
   }
@@ -577,6 +601,8 @@ export default function LeadDetail() {
                   <UserCheck className="w-4 h-4" /> Convert Lead
                 </button>
               )}
+              {/* Call through the IVR (MCube) — only for agents, only when telephony is on. */}
+              {can('calls', 'create') && !lead.converted_contact_id && <CallButton module="leads" recordId={lead.id} />}
               {can('calls', 'create') && !lead.converted_contact_id && (
                 <button onClick={() => setLoggingOutcome(true)} title="Starts the call timer. Record connected / not connected, the disposition, then schedule the next follow-up or close"
                   className="flex items-center gap-1.5 text-white text-sm font-semibold px-4 py-2.5 rounded-xl h-fit" style={{ background: '#DC2626' }}>
@@ -874,7 +900,7 @@ export default function LeadDetail() {
               <button onClick={() => setAddingRelation('calls')} className="btn btn-primary text-xs">+ Log Call</button>
             </div>
           )}
-          <CallsTab leadId={id} />
+          <CallsTab leadId={id} refreshKey={callsVersion} />
         </div>
       )}
       {pageTab === 'emails' && (

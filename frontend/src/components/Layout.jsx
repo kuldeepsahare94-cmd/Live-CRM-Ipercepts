@@ -4,7 +4,7 @@ import {
   CalendarDays,
   LayoutDashboard, Users as UsersIcon, Wallet, BarChart3, Settings as SettingsIcon,
   LogOut, UserCog, ShieldCheck, Palette, Menu, X, MessageCircle, Radio, ChevronRight,
-  ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy,
+  ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy, ListOrdered, Headphones,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api, noteNavigation, prefetchRoute } from '../api';
@@ -22,6 +22,8 @@ import ReminderCenter from './followup/ReminderCenter';
 import TopProgress from './TopProgress';
 import ComposeHost from './EmailCompose';
 import DuplicateHost from './DuplicateDialog';
+import TelephonyHost, { TelephonyMenu } from './telephony/TelephonyHost';
+import { useTelephony } from './telephony/telephony';
 
 // Hand-written links for the modules that have bespoke pages. Everything
 // else is generated from the module registry below, so a module created
@@ -110,6 +112,12 @@ function SidebarContent({ onNavigate, showClose, onClose }) {
   const navigate = useNavigate();
   const moduleGroups = useUniversalModules();
   const handleLogout = () => { logout(); navigate('/login'); };
+  // Calls (MCube IVR): shown to agents and supervisors only, when telephony is on.
+  const tel = useTelephony();
+  const callLinks = [
+    (tel.status?.can_call || tel.status?.dial_manage) && { to: '/dialer', label: 'Auto-dialer', icon: ListOrdered, accent: 'calls' },
+    tel.status?.supervisor && { to: '/live-calls', label: 'Live Calls', icon: Headphones, accent: 'calls' },
+  ].filter(Boolean);
 
   return (
     <div className="flex flex-col h-full" style={{ background: '#111A3A' }}>
@@ -136,6 +144,14 @@ function SidebarContent({ onNavigate, showClose, onClose }) {
           <NavLink key={l.to} to={l.to} end={l.end} onClick={onNavigate} className={navItem}>
             {({ isActive }) => (
               <><NavIcon Icon={l.icon} accentKey={l.accent || 'tasks'} active={isActive} />{l.label}</>
+            )}
+          </NavLink>
+        ))}
+
+        {callLinks.map((l) => (
+          <NavLink key={l.to} to={l.to} onClick={onNavigate} className={navItem}>
+            {({ isActive }) => (
+              <><NavIcon Icon={l.icon} accentKey={l.accent} active={isActive} />{l.label}</>
             )}
           </NavLink>
         ))}
@@ -341,6 +357,8 @@ export default function Layout() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Calls (MCube IVR): softphone, auto-dialer, live calls. Agents and supervisors only. */}
+              <ErrorBoundary fallback={null}><TelephonyMenu /></ErrorBoundary>
               <ChatWidget />
               <CalendarWidget />
               <NotificationBell />
@@ -406,6 +424,11 @@ export default function Layout() {
           account matches one that exists (merge / create anyway / open). */}
       <ErrorBoundary fallback={null}>
         <DuplicateHost />
+      </ErrorBoundary>
+      {/* Calls through the IVR (MCube): the call card, the incoming-call
+          pop-up and the Dispose box of a call. Nothing for non-agents. */}
+      <ErrorBoundary fallback={null}>
+        <TelephonyHost />
       </ErrorBoundary>
     </div>
   );

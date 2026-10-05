@@ -14,6 +14,12 @@
  *
  * mode="schedule" skips the call and only schedules (or reschedules) the
  * follow-up — used by the follow-up card's "Schedule" / "Reschedule".
+ *
+ * A call that went through the IVR (MCube): the box fills in THAT call instead
+ * of logging a second one. Once the call has ended, "connected" and the talk
+ * time are MCube's and are shown, not asked. The box finds the call by itself
+ * (the one on the agent's screen, or the last one MCube reported for this
+ * record that nobody disposed); `call` names it when the caller already knows.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Phone, PhoneOff, X, Check, CalendarClock, CircleSlash, Info } from 'lucide-react';
@@ -22,6 +28,7 @@ import { friendlyError } from '../ui';
 import { useModuleOptions, useSharedOptions, selectableOptions } from '../fieldOptions';
 import FollowUpScheduleFields, { validateSchedule } from './FollowUpScheduleFields';
 import { quickPicks, isoToLocalParts, browserTimeZone, formatDue } from './time';
+import { useTelephony, getTelephony, sessionOf, callDisposed } from '../telephony/telephony';
 
 const hhmmss = (s) => [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
   .map((n) => String(n).padStart(2, '0')).join(':');
@@ -64,7 +71,7 @@ function Step({ n, title, children, done }) {
   );
 }
 
-export default function OutcomeModal({ subject, mode = 'outcome', followUp = null, ownerName, onClose, onSaved }) {
+export default function OutcomeModal({ subject, mode = 'outcome', followUp = null, ownerName, call = null, onClose, onSaved }) {
   const scheduleOnly = mode === 'schedule';
   const isLead = subject.module === 'leads';
 
@@ -105,6 +112,66 @@ export default function OutcomeModal({ subject, mode = 'outcome', followUp = nul
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  // ---- A call that went through the IVR (MCube) -----------------------------
+  const tel = useTelephony();
+  const [ivr, setIvr] = useState(() => {
+    if (scheduleOnly) return null;
+    if (call) return call;
+    const s = sessionOf(subject.module, subject.id, getTelephony().sessions);
+    return s ? { session_id: s.id } : null;
+  });
+  // Nothing on screen: is there a call MCube reported that nobody disposed?
+  useEffect(() => {
+    if (scheduleOnly || ivr || !getTelephony().status?.enabled) return undefined;
+    let gone = false;
+    api.telephonyPending(subject.module, subject.id).then((d) => {
+      if (gone || !d || !d.call) return;
+      setIvr((cur) => cur || { call_id: d.call.call_id, ended: true, connected: d.call.connected, duration_seconds: d.call.duration_seconds, direction: d.call.direction });
+    }).catch(() => { /* the box works as before */ });
+    return () => { gone = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const ivrSession = ivr && ivr.session_id ? tel.sessions.find((s) => s.id === ivr.session_id) || null : null;
+  // What MCube knows once the call has ended. Not the agent's to change.
+  const facts = ivrSession && ivrSession.status === 'ended' && ivrSession.connected !== null
+    ? { connected: ivrSession.connected, seconds: ivrSession.duration_seconds, call_id: ivrSession.call_id }
+    : (ivr && ivr.ended ? { connected: !!ivr.connected, seconds: ivr.duration_seconds || 0, call_id: ivr.call_id } : null);
+  const ivrLive = !!(ivrSession && ivrSession.live);
+  // an incoming call nobody answered: the box is for noting it and setting the call-back
+  const missedIn = !!facts && !facts.connected && ((ivrSession && ivrSession.direction) || (ivr && ivr.direction)) === 'Inbound';
+  const factsKey = facts ? `${facts.connected}:${facts.seconds}` : '';
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
+  useEffect(() => {
+    if (!facts) return;
+    setRunning(false);
+    setSeconds(facts.seconds || 0);
+    if (!formStart.current) formStart.current = Date.now();
+    if (connectedRef.current !== facts.connected) {
+      // the other list of dispositions applies now
+      setConnected(facts.connected);
+      setDisposition('');
+      if (!followUp) setSchedule((s) => ({ ...s, ...defaultWhen(facts.connected) }));
+    }
+  }, [factsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "Log a different call": not the IVR call after all — an ordinary Dispose.
+  const otherCall = () => {
+    setIvr(null);
+    setConnected(null);
+    setDisposition('');
+    setSeconds(0);
+    setRunning(true);
+    formStart.current = null;
+  };
+
+  // …with its own outcome already picked, when the list has it
+  // (Settings → Dropdown Options → Call disposition, not connected).
+  useEffect(() => {
+    if (!missedIn || disposition || !Array.isArray(no)) return;
+    const o = no.find((x) => x.active !== false && /missed/i.test(`${x.value} ${x.label}`));
+    if (o) setDisposition(o.value);
+  }, [missedIn, no]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const answerConnected = (val) => {
     setConnected(val);
@@ -155,6 +222,9 @@ export default function OutcomeModal({ subject, mode = 'outcome', followUp = nul
           lead_status: isLead ? (leadStatus || undefined) : undefined,
           notes: notes || undefined,
           next_action: nextAction,
+          // the IVR call this belongs to (the server fills that call in)
+          call_id: (facts && facts.call_id) || (ivr && ivr.call_id) || undefined,
+          telephony_session_id: (ivr && ivr.session_id) || undefined,
           ...(nextAction === 'schedule' ? {
             follow_up_at: iso,
             follow_up_has_time: true,
@@ -164,6 +234,8 @@ export default function OutcomeModal({ subject, mode = 'outcome', followUp = nul
           } : {}),
         });
       }
+      // the call leaves the call card; screens that show this record reload
+      if (!scheduleOnly) callDisposed(subject.module, subject.id, ivr && ivr.session_id);
       onSaved?.(res);
     } catch (err) {
       setError(friendlyError(err, 'Could not save.').message);
@@ -223,10 +295,25 @@ export default function OutcomeModal({ subject, mode = 'outcome', followUp = nul
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-ink flex items-center gap-2">
+                <p className="text-sm text-ink flex items-center gap-2 flex-wrap">
                   {connected ? <Phone className="w-4 h-4" style={{ color: 'var(--color-success)' }} /> : <PhoneOff className="w-4 h-4" style={{ color: 'var(--color-danger)' }} />}
-                  {connected ? 'Connected' : 'Not connected'} · {hhmmss(seconds)}
-                  <button type="button" onClick={() => { setConnected(null); setRunning(true); }} className="text-xs font-medium ml-1" style={{ color: 'var(--color-brand)' }}>Change</button>
+                  {missedIn ? 'Missed incoming call' : `${connected ? 'Connected' : 'Not connected'} · ${hhmmss(seconds)}`}
+                  {facts ? (
+                    <>
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-full" title="Whether the call connected and how long it lasted come from MCube"
+                        style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand)' }}>from MCube</span>
+                      {/* the agent means another call (one made from their own phone, say): the box goes back to asking */}
+                      <button type="button" onClick={otherCall} className="text-xs font-medium ml-1" style={{ color: 'var(--color-brand)' }}>Log a different call</button>
+                    </>
+                  ) : (
+                    <button type="button" onClick={() => { setConnected(null); setRunning(true); }} className="text-xs font-medium ml-1" style={{ color: 'var(--color-brand)' }}>Change</button>
+                  )}
+                </p>
+              )}
+              {ivrLive && !facts && (
+                <p className="t-meta mt-2 flex items-start gap-1.5">
+                  <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  This call is going through MCube. You can dispose it now; the real talk time and the recording are added when the call ends.
                 </p>
               )}
             </Step>

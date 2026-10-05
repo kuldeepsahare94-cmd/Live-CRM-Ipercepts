@@ -106,7 +106,7 @@ const META = [
   /^\/finance\/(currencies|taxes)$/, /^\/settings\/master-options(\?.*)?$/, /^\/company-profile$/, /^\/support\/meta$/,
 ];
 // Requests that must always go to the server (live counters, polling, auth).
-const NEVER_SHARED = /^\/(auth\/|chat\/|notifications|follow-ups\/reminders|health|duplicates\/check)/;
+const NEVER_SHARED = /^\/(auth\/|chat\/|notifications|follow-ups\/reminders|health|duplicates\/check|telephony\/)/;
 const getCache = new Map();          // path -> { at, data, meta, prefetched, promise }
 let cacheOwner = null;
 
@@ -131,7 +131,7 @@ function setBusy(delta) {
   busyCount = Math.max(0, busyCount + delta);
   busyListeners.forEach((fn) => { try { fn(busyCount); } catch { /* ignore */ } });
 }
-const BACKGROUND = /^\/(chat\/|notifications|follow-ups\/(reminders|preferences|push)|calendar\/agenda|health|duplicates\/check)/;
+const BACKGROUND = /^\/(chat\/|notifications|follow-ups\/(reminders|preferences|push)|calendar\/agenda|health|duplicates\/check|telephony\/(live|status|pending|dialer\/\d+$))/;
 
 // ---- Learning what each screen loads -------------------------------------
 // For a screen like /leads/132 the requests are remembered with the number
@@ -894,6 +894,38 @@ export const api = {
 
   // Dispose (call response + disposition + next action) and call analytics
   disposeCall: (body) => req('POST', '/calls/dispose', body),
+
+  // ---- Telephony (MCube IVR) ------------------------------------------------
+  // (the "ask" ones start or steer a call; they change no record, so they do
+  // not make the screens forget what they have loaded)
+  telephonyStatus: () => req('GET', '/telephony/status'),
+  telephonyLive: () => req('GET', '/telephony/live'),
+  telephonyCall: (body) => ask('/telephony/call', body),
+  telephonyNumbersOf: (module, id) => req('GET', `/telephony/numbers-of${qs({ module, record_id: id })}`),
+  telephonyDismiss: (id) => ask(`/telephony/sessions/${id}/dismiss`, {}),
+  telephonyPending: (module, id) => req('GET', `/telephony/pending${qs({ module, record_id: id })}`),
+  telephonyAgentsDirectory: () => req('GET', '/telephony/agents-directory'),
+  telephonySettings: () => req('GET', '/telephony/settings'),
+  saveTelephonySettings: (body) => req('PUT', '/telephony/settings', body),
+  saveTelephonyAgents: (agents) => req('PUT', '/telephony/agents', { agents }),
+  saveTelephonyNumber: (body, id) => req(id ? 'PUT' : 'POST', id ? `/telephony/numbers/${id}` : '/telephony/numbers', body),
+  deleteTelephonyNumber: (id) => req('DELETE', `/telephony/numbers/${id}`),
+  newTelephonyHookKey: () => req('POST', '/telephony/hook-key', {}),
+  telephonyTestCall: (number) => ask('/telephony/test-call', { number }),
+  telephonyTestHook: (body) => ask('/telephony/test-hook', body),
+  telephonyEvents: () => req('GET', '/telephony/events'),
+  replayTelephonyEvent: (id) => req('POST', `/telephony/events/${id}/replay`, {}),
+  dialLists: () => req('GET', '/telephony/dialer'),
+  createDialList: (body) => req('POST', '/telephony/dialer', body),
+  dialList: (id) => req('GET', `/telephony/dialer/${id}`),
+  dialNext: (id, force = false) => ask(`/telephony/dialer/${id}/next`, force ? { force: true } : {}),
+  dialSkip: (id, itemId) => ask(`/telephony/dialer/${id}/skip`, { item_id: itemId }),
+  dialPause: (id) => ask(`/telephony/dialer/${id}/pause`, {}),
+  dialResume: (id) => ask(`/telephony/dialer/${id}/resume`, {}),
+  dialRetry: (id) => ask(`/telephony/dialer/${id}/retry`, {}),
+  deleteDialList: (id) => req('DELETE', `/telephony/dialer/${id}`),
+  liveCalls: () => req('GET', '/telephony/live-calls'),
+  liveCallAction: (id, body) => ask(`/telephony/live-calls/${id}/action`, body),
 
   // Follow-ups: exact date + time, lifecycle, reminders
   followUpsFor: (module, recordId) => req('GET', `/follow-ups${qs({ module, record_id: recordId })}`),
