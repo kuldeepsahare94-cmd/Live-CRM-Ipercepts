@@ -277,12 +277,15 @@ function coerceOut(row) {
 // Custom module records — for admin-created modules with no physical table.
 // ---------------------------------------------------------------------------
 
-function listCustomRecords(moduleId, { q, status, ownerId, limit = 200, offset = 0 } = {}) {
+// scope: { sql, params } from services/recordAccess — the records the person
+// asking may see (nothing to add for people who see them all).
+function listCustomRecords(moduleId, { q, status, ownerId, limit = 200, offset = 0, scope = null } = {}) {
   let sql = 'SELECT * FROM custom_module_records WHERE module_id=?';
   const params = [moduleId];
   if (q) { sql += ' AND record_name LIKE ?'; params.push(`%${q}%`); }
   if (status) { sql += ' AND status=?'; params.push(status); }
   if (ownerId) { sql += ' AND owner_id=?'; params.push(ownerId); }
+  if (scope && scope.sql) { sql += scope.sql; params.push(...scope.params); }
   sql += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?';
   params.push(limit, offset);
   return db.prepare(sql).all(...params).map(parseRecord);

@@ -31,6 +31,12 @@ function loadOwned(req, res) {
     res.status(403).json({ error: 'Only the person this follow-up is for, or someone who can edit the record, can change it.' });
     return null;
   }
+  // …and, unless it is their own follow-up, only on a record they may see
+  const access = require('../services/recordAccess');
+  if (Number(f.assigned_user_id) !== Number(req.user.id) && !access.parentVisible(req.user, f.related_module, f.related_record_id)) {
+    res.status(403).json(access.denial(req.user, f.related_module));
+    return null;
+  }
   return f;
 }
 
@@ -41,6 +47,9 @@ router.get('/', (req, res) => {
   const { module, record_id: recordId } = req.query;
   if (!module || !recordId) return res.status(400).json({ error: 'module and record_id are required' });
   if (!can(req, module, 'view')) return res.status(403).json({ error: `You don't have view access to ${module}` });
+  // …and only for a record this user may open
+  const access = require('../services/recordAccess');
+  if (!access.parentVisible(req.user, module, recordId)) return res.status(403).json(access.denial(req.user, module));
   return send(res, () => svc.forRecord(module, Number(recordId)));
 });
 
@@ -55,6 +64,10 @@ router.post('/', (req, res) => {
   if (!b.module || !b.record_id) return res.status(400).json({ error: 'module and record_id are required' });
   if (!can(req, b.module, 'edit') && !can(req, 'calls', 'create')) {
     return res.status(403).json({ error: `You don't have access to schedule follow-ups on ${b.module}` });
+  }
+  {
+    const access = require('../services/recordAccess');
+    if (!access.parentVisible(req.user, b.module, b.record_id)) return res.status(403).json(access.denial(req.user, b.module));
   }
   return send(res, () => svc.schedule({
     module: b.module, recordId: Number(b.record_id), dueAt: b.due_at, hasTime: b.has_time !== false, date: b.date,

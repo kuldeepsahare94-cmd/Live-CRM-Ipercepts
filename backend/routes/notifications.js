@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const access = require('../services/recordAccess');
 
 // Read state for every item in one query (it used to be one query per item).
 function applyReadState(items) {
@@ -19,7 +20,9 @@ function buildNotifications(userId, options = {}) {
   const today = new Date().toISOString().slice(0, 10);
 
   // New Lead Assigned (today)
-  const newLeads = db.prepare(`SELECT id, student_name, assigned_counselor, created_at FROM leads WHERE date(created_at) = date(?) AND assigned_counselor IS NOT NULL`).all(today);
+  // (only the leads this person may see — Settings → Roles → Can see)
+  const mine = options.user ? access.where(options.user, 'leads', 'l') : { sql: '', params: [] };
+  const newLeads = options.canViewLeads === false ? [] : db.prepare(`SELECT l.id, l.student_name, l.assigned_counselor, l.created_at FROM leads l WHERE date(l.created_at) = date(?) AND l.assigned_counselor IS NOT NULL${mine.sql}`).all(today, ...mine.params);
   for (const l of newLeads) {
     const key = `lead-new-${l.id}`;
     items.push({ key, type: 'new_lead_assigned', title: 'New Lead Assigned', message: `${l.student_name} → ${l.assigned_counselor}`, link: `/leads/${l.id}`, date: l.created_at, read: false });
@@ -34,8 +37,8 @@ function buildNotifications(userId, options = {}) {
         SELECT e.id, e.record_id, e.source, e.channel, e.created_at, l.student_name, l.assigned_counselor
         FROM duplicate_events e JOIN leads l ON l.id = e.record_id
         WHERE e.module = 'leads' AND e.action = 'merged' AND COALESCE(e.channel, '') <> 'import'
-          AND e.created_at >= datetime('now', '-3 days')
-        ORDER BY e.id DESC LIMIT 30`).all();
+          AND e.created_at >= datetime('now', '-3 days')${mine.sql}
+        ORDER BY e.id DESC LIMIT 30`).all(...mine.params);
       for (const e of again) {
         items.push({
           key: `lead-again-${e.id}`, type: 'lead_reenquiry', title: 'Lead Came In Again',
@@ -153,6 +156,7 @@ router.get('/', (req, res) => {
   const items = buildNotifications(req.user.id, {
     canReadEmail: !!req.user.permissions?.emails?.view,
     canViewLeads: !!req.user.permissions?.leads?.view,
+    user: req.user,
   });
   res.json({ items, unread: items.filter((i) => !i.read).length });
 });
@@ -168,7 +172,11 @@ router.post('/:key/unread', (req, res) => {
 });
 
 router.post('/read-all', (req, res) => {
-  const items = buildNotifications(req.user.id, { canReadEmail: !!req.user.permissions?.emails?.view });
+  const items = buildNotifications(req.user.id, {
+    canReadEmail: !!req.user.permissions?.emails?.view,
+    canViewLeads: !!req.user.permissions?.leads?.view,
+    user: req.user,
+  });
   const insert = db.prepare('INSERT OR IGNORE INTO notification_reads (notification_key) VALUES (?)');
   const tx = db.transaction((keys) => { for (const k of keys) insert.run(k); });
   tx(items.filter((i) => !i.read).map((i) => i.key));

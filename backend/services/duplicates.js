@@ -328,6 +328,21 @@ function present(module, r, on) {
   };
 }
 
+// A match this person is not allowed to open (their role only sees their own
+// or their team's records): the check must still say "it is already in the
+// CRM, with <owner>" — that is the whole point of it — but nothing more.
+function veil(module, shown, user) {
+  if (!user || !shown) return shown;
+  const access = require('./recordAccess');
+  if (access.canOpen(user, module, shown.id)) return shown;
+  return {
+    id: shown.id, module, title: shown.title, owner: shown.owner, status: shown.status, created_at: shown.created_at,
+    mobile: null, email: null, company: null, city: null, source: null,
+    matched_on: shown.matched_on, link: null, hidden: true,
+  };
+}
+const hiddenFrom = (module, id, user) => !!user && !require('./recordAccess').canOpen(user, module, id);
+
 const KEY_WORDS = { mobile: 'mobile number', email: 'email', name: 'name' };
 function describeMatch(on, module) {
   const words = (on || []).map((k) => (k === 'mobile' && module === 'accounts' ? 'phone number' : KEY_WORDS[k] || k));
@@ -570,8 +585,8 @@ function screen(module, values, { decision, targetId, channel, source, user } = 
       code: 'DUPLICATE',
       duplicate: {
         module, singular: m.singular,
-        matches: matches.map((x) => present(module, x.record, x.matched_on)),
-        can_merge: true,
+        matches: matches.map((x) => veil(module, present(module, x.record, x.matched_on), user)),
+        can_merge: matches.some((x) => !hiddenFrom(module, x.record.id, user)),
         can_create: !!rule.allow_manual,
         ...extra,
       },
@@ -580,6 +595,9 @@ function screen(module, values, { decision, targetId, channel, source, user } = 
 
   if (decision === 'merge') {
     const hit = pick();
+    if (hiddenFrom(module, hit.record.id, user)) {
+      throw httpError(403, `This ${m.singular.toLowerCase()} belongs to someone else, so you cannot merge into it. Ask its owner${hit.record.assigned_counselor ? ` (${hit.record.assigned_counselor})` : ''} or your manager.`);
+    }
     const merged = mergeIncoming(module, hit.record.id, values, ctxFor(hit));
     return { action: 'merged', record: merged.record, filled: merged.filled, matched_on: hit.matched_on };
   }
@@ -621,6 +639,7 @@ function guard(module, req, res, { channel = 'manual', sourceField } = {}) {
     });
   } catch (e) {
     if (e.status === 404) { res.status(404).json({ error: e.message }); return true; }
+    if (e.status === 403) { res.status(403).json({ error: e.message, code: 'NOT_YOURS' }); return true; }
     console.warn('[duplicates] check failed, saving without it:', e.message);
     return false;
   }
@@ -631,6 +650,18 @@ function guard(module, req, res, { channel = 'manual', sourceField } = {}) {
     return false;
   }
   if (result.action === 'ask') { res.status(409).json(result.body); return true; }
+  // merged into (or skipped for) a record this person may not see: say so,
+  // without handing the record over
+  if (hiddenFrom(module, result.record.id, req.user)) {
+    res.status(200).json({
+      id: result.record.id,
+      _duplicate: {
+        action: result.action, id: result.record.id, title: MODULES[module].title(result.record),
+        matched_on: result.matched_on, filled: [], link: null, hidden: true,
+      },
+    });
+    return true;
+  }
   res.status(200).json({
     ...result.record,
     _duplicate: {
@@ -875,14 +906,14 @@ function findGroups(module, { limit = 50, offset = 0, focusId = null, q = '' } =
 }
 
 // Other records that look like this one (shown on the record's own page).
-function similarTo(module, record) {
+function similarTo(module, record, user = null) {
   const m = MODULES[module];
   if (!m || !record) return [];
   try {
     const rule = getRule(module);
     const use = rule.enabled ? rule : { ...rule, match_mobile: true, match_email: true };
     return findMatches(module, record, { rule: use, excludeId: record.id, limit: 5 })
-      .map((x) => present(module, x.record, x.matched_on));
+      .map((x) => veil(module, present(module, x.record, x.matched_on), user));
   } catch { return []; }
 }
 
@@ -1134,7 +1165,7 @@ module.exports = {
   MODULES, DEFAULT_RULES, CHANNEL_LABEL,
   ensureSchema, forgetColumns, phoneKey, emailKey, nameKey,
   getRules, getRule, saveRule,
-  findMatches, present, describeMatch,
+  findMatches, present, veil, describeMatch,
   screen, guard, noteCreated, noteCreatedAnyway, mergeIncoming, isDoubleSubmit,
   history, similarTo,
   importMatcher, mergeImportRow,

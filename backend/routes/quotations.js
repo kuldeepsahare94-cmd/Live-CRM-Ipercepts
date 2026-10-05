@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { relatedActivity } = require('../services/relatedActivity');
 const { requirePermission } = require('../middleware/auth');
+const access = require('../services/recordAccess');
 const { fireEvent } = require('../services/whatsapp/workflowEngine');
 const { fireWorkflows } = require('../services/workflowAutomation');
 const { buildDocumentPdf, renderDocumentPdfBuffer } = require('../services/documentPdf');
@@ -68,6 +69,9 @@ function nextQuoteNumber() {
   return nextNumber('quotation');
 }
 
+// Who sees which quotations (Settings → Roles & Permissions → "Can see").
+router.param('id', access.param('quotations'));
+
 router.get('/', requirePermission('quotations', 'view'), (req, res) => {
   const { account_id, opportunity_id, status, q } = req.query;
   let sql = `SELECT q.*, a.account_name FROM quotations q LEFT JOIN accounts a ON a.id = q.account_id WHERE 1=1`;
@@ -76,6 +80,8 @@ router.get('/', requirePermission('quotations', 'view'), (req, res) => {
   if (opportunity_id) { sql += ' AND q.opportunity_id = ?'; params.push(opportunity_id); }
   if (status) { sql += ' AND q.status = ?'; params.push(status); }
   if (q) { sql += ' AND q.quote_number LIKE ?'; params.push(`%${q}%`); }
+  const scope = access.where(req.user, 'quotations', 'q');
+  sql += scope.sql; params.push(...scope.params);
   sql += ' ORDER BY q.quote_date DESC';
   res.json(db.prepare(sql).all(...params));
 });
@@ -102,6 +108,8 @@ router.post('/', requirePermission('quotations', 'create'), (req, res) => {
   // for it (it previously didn't, which is why quotations could only be made
   // from inside an Account).
   if (!b.account_id) return res.status(400).json({ error: 'Choose a customer for this quotation.' });
+  access.ownerDefault(req.user, 'quotations', b);
+  { const no = access.linkDenied(req.user, b); if (no) return res.status(403).json(no); }
   const account = db.prepare('SELECT id FROM accounts WHERE id=?').get(b.account_id);
   if (!account) return res.status(400).json({ error: 'That customer no longer exists.' });
   const tx = db.transaction(() => {
@@ -148,6 +156,7 @@ router.post('/', requirePermission('quotations', 'create'), (req, res) => {
 router.put('/:id', requirePermission('quotations', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM quotations WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  { const no = access.linkDenied(req.user, req.body, existing); if (no) return res.status(403).json(no); }
   const b = req.body;
   const m = { ...existing, ...b };
 

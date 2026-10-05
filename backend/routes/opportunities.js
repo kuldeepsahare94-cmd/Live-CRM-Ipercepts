@@ -5,6 +5,10 @@ const { relatedActivity } = require('../services/relatedActivity');
 const { requirePermission } = require('../middleware/auth');
 const { fireEvent } = require('../services/whatsapp/workflowEngine');
 const { fireWorkflows } = require('../services/workflowAutomation');
+const access = require('../services/recordAccess');
+
+// Who sees which opportunities (Settings → Roles & Permissions → "Can see").
+router.param('id', access.param('opportunities'));
 
 // Best-effort contact number for WhatsApp workflow events — prefer the
 // linked Contact's number, fall back to the Account's.
@@ -65,6 +69,8 @@ router.get('/', requirePermission('opportunities', 'view'), (req, res) => {
   if (stage_id) { sql += ' AND o.stage_id = ?'; params.push(stage_id); }
   if (owner_id) { sql += ' AND o.owner_id = ?'; params.push(owner_id); }
   if (q) { sql += ' AND o.opportunity_name LIKE ?'; params.push(`%${q}%`); }
+  const scope = access.where(req.user, 'opportunities', 'o');
+  sql += scope.sql; params.push(...scope.params);
   sql += ' ORDER BY o.created_at DESC';
   res.json(db.prepare(sql).all(...params));
 });
@@ -76,15 +82,16 @@ router.get('/kanban', requirePermission('opportunities', 'view'), (req, res) => 
   const pipeline = defaultPipeline();
   if (!pipeline) return res.json({ stages: [] });
   const stages = db.prepare('SELECT * FROM module_pipeline_stages WHERE pipeline_id=? AND active=1 ORDER BY sort_order').all(pipeline.id);
+  const scope = access.where(req.user, 'opportunities', 'o');
   const cardsByStage = db.prepare(`
     SELECT o.*, a.account_name, c.first_name || ' ' || COALESCE(c.last_name,'') AS contact_name
     FROM opportunities o
     LEFT JOIN accounts a ON a.id = o.account_id
     LEFT JOIN contacts c ON c.id = o.primary_contact_id
-    WHERE o.stage_id = ? ORDER BY o.updated_at DESC
+    WHERE o.stage_id = ?${scope.sql} ORDER BY o.updated_at DESC
   `);
   const result = stages.map((stage) => {
-    const cards = cardsByStage.all(stage.id);
+    const cards = cardsByStage.all(stage.id, ...scope.params);
     const total = cards.reduce((sum, c) => sum + (c.amount || 0), 0);
     const weighted = cards.reduce((sum, c) => sum + (c.amount || 0) * ((c.probability ?? stage.probability ?? 0) / 100), 0);
     return { stage, cards, total, weighted };
@@ -116,7 +123,8 @@ router.get('/:id', requirePermission('opportunities', 'view'), (req, res) => {
     WHERE o.id=?
   `).get(req.params.id);
   if (!opp) return res.status(404).json({ error: 'Not found' });
-  const quotations = db.prepare('SELECT * FROM quotations WHERE opportunity_id=? ORDER BY quote_date DESC').all(req.params.id);
+  const sq = access.where(req.user, 'quotations');
+  const quotations = db.prepare(`SELECT * FROM quotations WHERE opportunity_id=?${sq.sql} ORDER BY quote_date DESC`).all(req.params.id, ...sq.params);
   const stageHistory = db.prepare(`
     SELECT h.*, fs.name AS from_stage_name, ts.name AS to_stage_name FROM opportunity_stage_history h
     LEFT JOIN module_pipeline_stages fs ON fs.id = h.from_stage_id
@@ -129,6 +137,8 @@ router.get('/:id', requirePermission('opportunities', 'view'), (req, res) => {
 router.post('/', requirePermission('opportunities', 'create'), (req, res) => {
   const b = req.body;
   if (!b.opportunity_name) return res.status(400).json({ error: 'opportunity_name is required' });
+  access.ownerDefault(req.user, 'opportunities', b);
+  { const no = access.linkDenied(req.user, b); if (no) return res.status(403).json(no); }
 
   let stageId = b.stage_id || null;
   let pipelineId = b.pipeline_id || null;
@@ -170,6 +180,7 @@ router.post('/', requirePermission('opportunities', 'create'), (req, res) => {
 router.put('/:id', requirePermission('opportunities', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM opportunities WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  { const no = access.linkDenied(req.user, req.body, existing); if (no) return res.status(403).json(no); }
   const m = { ...existing, ...req.body };
   const stageChanged = req.body.stage_id != null && req.body.stage_id !== existing.stage_id;
 

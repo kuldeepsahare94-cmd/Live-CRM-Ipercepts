@@ -16,6 +16,8 @@ const docs = require('../services/documentService');
 const payments = require('../services/documentPayments');
 const { buildDocumentPdf, renderDocumentPdfBuffer } = require('../services/documentPdf');
 const { sendEmail, isConfigured: emailConfigured } = require('../services/email');
+const access = require('../services/recordAccess');
+const db = require('../db');
 
 function handle(res, fn) {
   try {
@@ -33,14 +35,18 @@ module.exports = function documentRouter({ docType, permission }) {
     try { require('../services/workflowAutomation').fireWorkflows(...args); } catch { /* non-fatal */ }
   };
 
+  // Who sees which documents (Settings → Roles & Permissions → "Can see"):
+  // every route with an id is refused for one that is not this user's to see.
+  router.param('id', access.param(permission));
+
   router.get('/', requirePermission(permission, 'view'), (req, res) => {
-    handle(res, () => docs.list(docType, req.query));
+    handle(res, () => docs.list(docType, req.query, access.where(req.user, permission, 'd')));
   });
 
   // Anything with a fixed path has to be declared before '/:id', or Express
   // matches it as an id and the route never runs.
   router.get('/summary/stats', requirePermission(permission, 'view'), (req, res) => {
-    handle(res, () => docs.summary(docType));
+    handle(res, () => docs.summary(docType, access.where(req.user, permission)));
   });
 
   router.get('/:id', requirePermission(permission, 'view'), (req, res) => {
@@ -53,6 +59,8 @@ module.exports = function documentRouter({ docType, permission }) {
 
   router.post('/', requirePermission(permission, 'create'), (req, res) => {
     try {
+      access.ownerDefault(req.user, permission, req.body);
+      { const no = access.linkDenied(req.user, req.body); if (no) return res.status(403).json(no); }
       const id = docs.create(docType, req.body, req.user.id);
       const created = docs.get(docType, id);
       fireWorkflows(permission, 'record_created', created, null, req.user.id);
@@ -66,6 +74,7 @@ module.exports = function documentRouter({ docType, permission }) {
     try {
       const before = docs.get(docType, req.params.id);
       if (!before) return res.status(404).json({ error: 'Not found' });
+      { const no = access.linkDenied(req.user, req.body, before); if (no) return res.status(403).json(no); }
       const updated = docs.update(docType, req.params.id, req.body, req.user.id);
       fireWorkflows(permission, 'record_updated', updated, before, req.user.id);
       fireWorkflows(permission, 'field_changed', updated, before, req.user.id);
@@ -111,8 +120,17 @@ module.exports = function documentRouter({ docType, permission }) {
       }
     });
 
+    // A payment is changed or removed through ITS invoice (which this person
+    // may open — see router.param above), never through somebody else's.
+    const ownPayment = (req) => {
+      const row = /^\d{1,15}$/.test(String(req.params.paymentId))
+        ? db.prepare('SELECT id, document_id FROM payments WHERE id = ?').get(req.params.paymentId) : null;
+      if (!row || Number(row.document_id) !== Number(req.params.id)) throw Object.assign(new Error('Payment not found on this invoice'), { status: 404 });
+    };
+
     router.put('/:id/payments/:paymentId', requirePermission('payments', 'edit'), (req, res) => {
       try {
+        ownPayment(req);
         const payment = payments.update(req.params.paymentId, req.body || {}, req.user.id);
         res.json({ payment, document: docs.get(docType, req.params.id) });
       } catch (e) {
@@ -122,6 +140,7 @@ module.exports = function documentRouter({ docType, permission }) {
 
     router.delete('/:id/payments/:paymentId', requirePermission('payments', 'delete'), (req, res) => {
       try {
+        ownPayment(req);
         payments.remove(req.params.paymentId, req.user.id);
         res.json({ document: docs.get(docType, req.params.id) });
       } catch (e) {

@@ -19,6 +19,7 @@
 // ============================================================================
 
 const db = require('../db');
+const access = require('./recordAccess');
 
 // ---------------------------------------------------------------------------
 // Time: "today" is a date in the CRM's timezone, not the server's. A task due
@@ -147,12 +148,33 @@ const OWNER_EXPR = {
     (SELECT owner_id FROM opportunities WHERE id=${a}.opportunity_id),
     (SELECT owner_id FROM accounts WHERE id=${a}.account_id))` }),
 };
+// The CRM module each kind belongs to, for "who sees which records"
+// (Settings → Roles → Can see). Tickets have their own rules (support desk).
+const KIND_MODULE = {
+  lead: 'leads', opp: 'opportunities', task: 'tasks', meeting: 'meetings', call: 'calls', note: 'notes',
+  quote: 'quotations', doc: 'invoices', sub: 'subscriptions', payment: 'payments',
+};
+// A scope does two things, both optional:
+//   label / userIds / names   the Owner or Team picked at the top of the dashboard
+//   access                    the person looking, when their role does not
+//                             show them every record
 function scopeClause(kind, alias, scope) {
   if (!scope) return { sql: '', args: [] };
-  const { col, byName } = OWNER_EXPR[kind](alias);
-  const values = byName ? scope.names : scope.userIds;
-  if (!values.length) return { sql: ' AND 0', args: [] };
-  return { sql: ` AND ${col} IN (${values.map(() => '?').join(',')})`, args: values };
+  let sql = '';
+  const args = [];
+  if (scope.label) {
+    const { col, byName } = OWNER_EXPR[kind](alias);
+    const values = byName ? scope.names : scope.userIds;
+    if (!values.length) return { sql: ' AND 1 = 0', args: [] };
+    sql += ` AND ${col} IN (${values.map(() => '?').join(',')})`;
+    args.push(...values);
+  }
+  if (scope.access && KIND_MODULE[kind]) {
+    const mine = access.where(scope.access, KIND_MODULE[kind], alias);
+    sql += mine.sql;
+    args.push(...mine.params);
+  }
+  return { sql, args };
 }
 
 // ---------------------------------------------------------------------------
@@ -442,10 +464,18 @@ function closedMetric(kind) {
 // Evaluation
 // ---------------------------------------------------------------------------
 function context(params = {}, user = null) {
-  return { today: crmToday(), scope: resolveScope(params), user };
+  let scope = resolveScope(params);
+  // someone whose role limits what they see: every figure, chart and list
+  // behind a figure is narrowed to their records
+  if (user && access.anyRestricted(user)) scope = { ...(scope || { userIds: [], names: [], label: null }), access: user };
+  return { today: crmToday(), scope, user };
 }
 
-function evaluate(key, params = {}, ctx = context(params)) {
+// The metric as a query ({ sql, args } selecting `id`), after its parameters
+// have been checked. evaluate() runs it; the Leads list uses it as a
+// sub-query, so a figure with tens of thousands of leads behind it is opened
+// without their ids travelling to the browser and back.
+function build(key, params = {}, ctx = context(params)) {
   const m = METRICS[key];
   if (!m) throw Object.assign(new Error(`Unknown metric "${key}"`), { status: 400 });
   for (const name of m.optionalParams ? [] : (m.params || [])) {
@@ -457,7 +487,11 @@ function evaluate(key, params = {}, ctx = context(params)) {
     throw Object.assign(new Error('from/to must be YYYY-MM-DD'), { status: 400 });
   }
   if (params.period && !PERIODS[params.period]) throw Object.assign(new Error('Unknown period'), { status: 400 });
-  const { sql, args } = m.query(params, ctx);
+  return { metric: m, ...m.query(params, ctx) };
+}
+
+function evaluate(key, params = {}, ctx = context(params)) {
+  const { metric: m, sql, args } = build(key, params, ctx);
   const rows = db.prepare(sql).all(...args);
   const ids = [...new Set(rows.map((r) => r.id))];
   const sum = m.amount ? Math.round(rows.reduce((s, r) => s + (Number(r.amt) || 0), 0) * 100) / 100 : null;
@@ -467,7 +501,7 @@ function evaluate(key, params = {}, ctx = context(params)) {
 function describe(key, params = {}, ctx = context(params)) {
   const m = METRICS[key];
   const filters = m.filters(params, ctx).map(([label, value]) => ({ label, value }));
-  if (ctx.scope && !m.optionalParams) filters.push({ label: ctx.scope.label[0], value: ctx.scope.label[1] });
+  if (ctx.scope && ctx.scope.label && !m.optionalParams) filters.push({ label: ctx.scope.label[0], value: ctx.scope.label[1] });
   return { metric: key, module: m.module, path: m.path, title: typeof m.title === 'function' ? m.title(params, ctx) : m.title, amount_label: m.amount || null, filters, today: ctx.today, timezone: CRM_TIMEZONE };
 }
 
@@ -482,6 +516,6 @@ Object.assign(METRICS, require('./supportMetrics').METRICS);
 module.exports = {
   METRICS, PERIODS, CRM_TIMEZONE, RENEWAL_WINDOW_DAYS, STALLED_DAYS, QUOTE_WINDOW_DAYS, PRIORITIES,
   crmToday, tzOffsetMinutes, localDate, addDays, monthBounds, shiftMonth, fmtDate, fmtMonth,
-  periodRange, periodLabel, resolveScope, scopeClause, context, evaluate, describe, canView,
+  periodRange, periodLabel, resolveScope, scopeClause, context, build, evaluate, describe, canView,
   CLOSE_DATE, OPEN_OPP,
 };

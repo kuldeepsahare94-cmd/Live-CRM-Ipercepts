@@ -6,10 +6,26 @@
 // doing anything. Write tools are flagged isWrite:true and the /assistant
 // route requires an explicit user confirmation before calling their handler.
 // ============================================================================
-const db = require('../db');
+const rawDb = require('../db');
+const { AsyncLocalStorage } = require('async_hooks');
+const access = require('./recordAccess');
 const { getAdapter } = require('./whatsapp/registry');
 const { decryptJSON } = require('./whatsapp/crypto');
 const { sendEmail, isConfigured: emailConfigured } = require('./email');
+
+// Who sees which records (Settings → Roles → Can see) holds for the assistant
+// too. While a tool runs, `db` is the database as the person asking may read
+// it: every SELECT below meets only the leads, accounts, deals… they are
+// allowed to see, so a record of somebody else's is "not found" — to look at
+// and to change. For people who see everything it is the database itself.
+const viewer = new AsyncLocalStorage();
+const db = new Proxy(rawDb, {
+  get(target, prop) {
+    const source = viewer.getStore() || target;
+    const v = source[prop];
+    return typeof v === 'function' ? v.bind(source) : v;
+  },
+});
 
 const inr = (n) => `Rs. ${Number(n || 0).toLocaleString('en-IN')}`;
 const admissionNumber = (id) => `ADM-${String(id).padStart(5, '0')}`;
@@ -265,6 +281,10 @@ register({
     // duplicate setting instead of making a second lead.
     try {
       const checked = require('./duplicates').screen('leads', i, { channel: 'assistant', source: i.source || null, user });
+      // it exists, but it is somebody else's: say so, show nothing of it
+      if ((checked.action === 'merged' || checked.action === 'skipped') && !access.canOpen(user, 'leads', checked.record.id)) {
+        return { already_existed: true, note: `A lead with the same ${checked.matched_on.join(' and ')} is already in the CRM${checked.record.assigned_counselor ? `, with ${checked.record.assigned_counselor}` : ''}. It belongs to someone else, so no new lead was created.` };
+      }
       if (checked.action === 'merged') {
         return { ...checked.record, already_existed: true, note: `This lead already existed (same ${checked.matched_on.join(' and ')}). No second lead was created; the existing lead now shows it came in again today.` };
       }
@@ -272,6 +292,7 @@ register({
         return { ...checked.record, already_existed: true, note: `This lead already exists (same ${checked.matched_on.join(' and ')}), so no new lead was created.` };
       }
     } catch (e) { console.warn('[assistant] duplicate check skipped:', e.message); }
+    access.ownerDefault(user, 'leads', i);      // someone who sees only their own leads owns what they add
     const info = db.prepare(`
       INSERT INTO leads (student_name, mobile, email, source, city, assigned_counselor, follow_up_date, remarks, status)
       VALUES (?,?,?,?,?,?,?,?, 'New')
@@ -596,9 +617,10 @@ register({
     const stage = i.stage_name ? defaultOpportunityStage(i.stage_name)
       : (pipeline && db.prepare('SELECT * FROM module_pipeline_stages WHERE pipeline_id=? ORDER BY sort_order LIMIT 1').get(pipeline.id));
     const info = db.prepare(`
-      INSERT INTO opportunities (opportunity_name, account_id, primary_contact_id, pipeline_id, stage_id, amount, currency, probability)
-      VALUES (?,?,?,?,?,?, 'INR', ?)
-    `).run(i.opportunity_name, i.account_id, i.primary_contact_id || null, pipeline?.id || null, stage?.id || null, i.amount || 0, stage?.probability ?? null);
+      INSERT INTO opportunities (opportunity_name, account_id, primary_contact_id, pipeline_id, stage_id, amount, currency, probability, owner_id)
+      VALUES (?,?,?,?,?,?, 'INR', ?, ?)
+    `).run(i.opportunity_name, i.account_id, i.primary_contact_id || null, pipeline?.id || null, stage?.id || null, i.amount || 0, stage?.probability ?? null,
+      access.restricted(user, 'opportunities') ? user.id : null);
     if (stage) db.prepare('INSERT INTO opportunity_stage_history (opportunity_id, from_stage_id, to_stage_id, changed_by) VALUES (?,?,?,?)').run(info.lastInsertRowid, null, stage.id, user.id);
     return { id: info.lastInsertRowid, opportunity_name: i.opportunity_name, stage: stage?.name || null };
   },
@@ -744,5 +766,11 @@ register({
     return { id: info.lastInsertRowid, ticket_number: ticket.ticket_number };
   },
 });
+
+// Every tool runs with the database narrowed to its user (see `viewer` above).
+for (const tool of tools) {
+  const run = tool.handler;
+  tool.handler = (user, input) => viewer.run(access.scopedDb(user), () => run(user, input));
+}
 
 module.exports = { tools, PermissionError, requirePerm, can };

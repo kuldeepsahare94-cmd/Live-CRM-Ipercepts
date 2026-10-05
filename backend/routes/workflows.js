@@ -42,9 +42,12 @@ const safe = (fn) => async (req, res) => {
 
 // Lists of records (Test, the matching list, its download) are for people who
 // may see that module — or who may build workflows, and so reach it anyway.
+// Someone whose role shows them only their own / their team's records of the
+// module does not get these lists, which go through every record.
 function canSee(req, moduleApi) {
   const p = (req.user && req.user.permissions) || {};
-  return !!((p.workflows && p.workflows.edit) || (moduleApi && p[moduleApi] && p[moduleApi].view));
+  if (p.workflows && p.workflows.edit) return true;
+  return !!(moduleApi && p[moduleApi] && p[moduleApi].view && !require('../services/recordAccess').restricted(req.user, moduleApi));
 }
 const noAccess = (res, moduleApi) => res.status(403).json({ error: `You don't have access to ${moduleApi || 'this module'}, so its records cannot be listed here.` });
 // A whole number above zero, or null.

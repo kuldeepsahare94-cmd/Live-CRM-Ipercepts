@@ -90,7 +90,9 @@ router.get('/export/:module', requirePermission('settings', 'view'), (req, res) 
     if (!perm?.export && !perm?.view) return res.status(403).json({ error: `You don't have export access to ${mod.plural_label}` });
 
     const cols = db.prepare(`PRAGMA table_info(${mod.table_name})`).all().map((c) => c.name);
-    const rows = db.prepare(`SELECT * FROM ${mod.table_name}`).all();
+    // only the records this person may see (Settings → Roles → Can see)
+    const mine = require('../services/recordAccess').where(req.user, mod.api_name, '');
+    const rows = db.prepare(`SELECT * FROM ${mod.table_name} WHERE 1 = 1${mine.sql}`).all(...mine.params);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename=${mod.api_name}.csv`);
     res.send(toCsv(rows, cols));

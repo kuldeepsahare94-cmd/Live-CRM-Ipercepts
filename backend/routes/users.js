@@ -114,6 +114,22 @@ router.put('/:id', requirePermission('users', 'edit'), (req, res) => {
     if (/UNIQUE|duplicate key/i.test(e.message)) return res.status(409).json({ error: 'Username already taken' });
     return res.status(500).json({ error: e.message });
   }
+  // A lead keeps its owner as a NAME. When a person is renamed their leads
+  // follow them — otherwise someone who sees only their own leads would lose
+  // every one of them. (Not done when another user carries the old name.)
+  try {
+    const shown = (u) => String((u && (u.full_name || u.username)) || '').trim();
+    const after = db.prepare('SELECT username, full_name FROM users WHERE id=?').get(req.params.id);
+    const was = shown(existing);
+    const now = shown(after);
+    if (was && now && was.toLowerCase() !== now.toLowerCase()) {
+      const shared = db.prepare(`SELECT COUNT(*) AS n FROM users WHERE id <> ?
+        AND (LOWER(TRIM(COALESCE(full_name, ''))) = ? OR LOWER(TRIM(username)) = ?)`).get(req.params.id, was.toLowerCase(), was.toLowerCase());
+      if (!shared || !Number(shared.n)) {
+        db.prepare("UPDATE leads SET assigned_counselor = ? WHERE LOWER(TRIM(COALESCE(assigned_counselor, ''))) = ?").run(now, was.toLowerCase());
+      }
+    }
+  } catch (e) { console.warn('[users] could not move the leads to the new name:', e.message); }
   if (extra) {
     db.prepare('UPDATE users SET email=?, mobile=?, reports_to_id=? WHERE id=?').run(
       has('email') ? clean(req.body.email) : existing.email ?? null,

@@ -119,9 +119,12 @@ const SELECT_WITH_NAMES = `
     LEFT JOIN sales_documents src    ON src.id = d.source_document_id
 `;
 
-function list(docType, query = {}) {
+// scope: what the signed-in user may see ({ sql: ' AND …', params }), from
+// services/recordAccess.js — nothing for someone who sees every record.
+function list(docType, query = {}, scope = null) {
   let sql = `${SELECT_WITH_NAMES} WHERE d.doc_type = ?`;
   const params = [docType];
+  if (scope && scope.sql) { sql += scope.sql; params.push(...scope.params); }
   if (query.account_id) { sql += ' AND d.account_id = ?'; params.push(query.account_id); }
   if (query.opportunity_id) { sql += ' AND d.opportunity_id = ?'; params.push(query.opportunity_id); }
   if (query.quotation_id) { sql += ' AND d.quotation_id = ?'; params.push(query.quotation_id); }
@@ -446,21 +449,23 @@ function markOverdue() {
 // neither represents anything owed or earned, and including them makes the
 // outstanding figure meaningless.
 
-function summary(docType) {
+// scope: what the signed-in user may see (see list()).
+function summary(docType, scope = null) {
   const live = "status NOT IN ('Cancelled', 'Draft', 'Written Off')";
+  const sc = scope && scope.sql ? scope : { sql: '', params: [] };
   const base = db.prepare(`
     SELECT COUNT(*) count, COALESCE(SUM(grand_total), 0) value
-      FROM sales_documents WHERE doc_type = ?
-  `).get(docType);
+      FROM sales_documents WHERE doc_type = ?${sc.sql}
+  `).get(docType, ...sc.params);
 
   if (docType !== 'invoice') {
     const accepted = db.prepare(`
-      SELECT COUNT(*) count FROM sales_documents WHERE doc_type=? AND status IN ('Accepted', 'Converted')
-    `).get(docType);
+      SELECT COUNT(*) count FROM sales_documents WHERE doc_type=? AND status IN ('Accepted', 'Converted')${sc.sql}
+    `).get(docType, ...sc.params);
     const open = db.prepare(`
       SELECT COUNT(*) count, COALESCE(SUM(grand_total), 0) value
-        FROM sales_documents WHERE doc_type=? AND ${live} AND status NOT IN ('Accepted', 'Converted', 'Expired')
-    `).get(docType);
+        FROM sales_documents WHERE doc_type=? AND ${live} AND status NOT IN ('Accepted', 'Converted', 'Expired')${sc.sql}
+    `).get(docType, ...sc.params);
     return {
       total_count: base.count, total_value: base.value,
       open_count: open.count, open_value: open.value,
@@ -472,18 +477,18 @@ function summary(docType) {
     SELECT COALESCE(SUM(grand_total), 0) invoiced,
            COALESCE(SUM(amount_paid), 0) collected,
            COALESCE(SUM(balance_due), 0) outstanding
-      FROM sales_documents WHERE doc_type='invoice' AND ${live}
-  `).get();
+      FROM sales_documents WHERE doc_type='invoice' AND ${live}${sc.sql}
+  `).get(...sc.params);
   const overdue = db.prepare(`
     SELECT COUNT(*) count, COALESCE(SUM(balance_due), 0) value
       FROM sales_documents
      WHERE doc_type='invoice' AND ${live}
-       AND due_date IS NOT NULL AND date(due_date) < date('now') AND payment_status != 'Paid'
-  `).get();
+       AND due_date IS NOT NULL AND date(due_date) < date('now') AND payment_status != 'Paid'${sc.sql}
+  `).get(...sc.params);
   const unpaid = db.prepare(`
     SELECT COUNT(*) count FROM sales_documents
-     WHERE doc_type='invoice' AND ${live} AND payment_status != 'Paid'
-  `).get();
+     WHERE doc_type='invoice' AND ${live} AND payment_status != 'Paid'${sc.sql}
+  `).get(...sc.params);
 
   return {
     total_count: base.count,
@@ -495,7 +500,7 @@ function summary(docType) {
     unpaid_count: unpaid.count,
     // Ageing is the question every business actually asks of its receivables:
     // not "how much is late" but "how late".
-    ageing: ageingBuckets(),
+    ageing: ageingBuckets(sc),
   };
 }
 
@@ -507,15 +512,15 @@ const AGEING_BUCKETS = [
   { label: '90+ days', min: 91, max: 1000000 },
 ];
 
-function ageingBuckets() {
+function ageingBuckets(sc = { sql: '', params: [] }) {
   const rows = db.prepare(`
     SELECT balance_due, due_date,
            CAST(julianday('now') - julianday(due_date) AS REAL) days_late
       FROM sales_documents
      WHERE doc_type='invoice' AND payment_status != 'Paid'
        AND status NOT IN ('Cancelled', 'Draft', 'Written Off')
-       AND balance_due > 0
-  `).all();
+       AND balance_due > 0${sc.sql}
+  `).all(...sc.params);
 
   const buckets = AGEING_BUCKETS.map((b) => ({ label: b.label, count: 0, value: 0 }));
   rows.forEach((r) => {

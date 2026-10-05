@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
+const access = require('../services/recordAccess');
 const { fireWorkflows } = require('../services/workflowAutomation');
 
 const { UPLOAD_DIR } = require('../dataDir');
@@ -37,10 +38,22 @@ const SELECT_DOCS = `
   FROM documents d LEFT JOIN users u ON u.id = d.uploaded_by
 `;
 
+// Who sees which files (Settings → Roles & Permissions → "Can see"): the
+// person who uploaded it, and whoever may open the record it is attached to.
+router.param('id', (req, res, next, id) => {
+  if (!access.restricted(req.user, 'documents')) return next();
+  if (!access.plainId(id)) return res.status(404).json({ error: 'Not found' });
+  const row = db.prepare('SELECT * FROM documents WHERE id=?').get(id);
+  if (row && !access.allowsActivity(req.user, 'documents', row)) return res.status(403).json(access.denial(req.user, 'documents'));
+  return next();
+});
+
 router.get('/', requirePermission('documents', 'view'), (req, res) => {
   const { related_module, related_record_id, q } = req.query;
   let sql = SELECT_DOCS + ' WHERE 1=1';
   const params = [];
+  const scope = access.whereActivity(req.user, 'documents', 'd', related_module, related_record_id);
+  sql += scope.sql; params.push(...scope.params);
   if (related_module) { sql += ' AND d.related_module = ?'; params.push(related_module); }
   if (related_record_id) { sql += ' AND d.related_record_id = ?'; params.push(related_record_id); }
   if (q) { sql += ' AND (d.title LIKE ? OR d.file_name LIKE ?)'; params.push(`%${q}%`, `%${q}%`); }
@@ -81,6 +94,11 @@ router.put('/:id', requirePermission('documents', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM documents WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const m = { ...existing, ...req.body };
+  // moved onto another record: only onto one this person may see
+  if ((String(m.related_module ?? '') !== String(existing.related_module ?? '') || String(m.related_record_id ?? '') !== String(existing.related_record_id ?? ''))
+    && !access.parentVisible(req.user, m.related_module, m.related_record_id)) {
+    return res.status(403).json(access.denial(req.user, m.related_module));
+  }
   db.prepare(`
     UPDATE documents SET title=?, external_url=?, related_module=?, related_record_id=?, description=?, updated_at=datetime('now')
     WHERE id=?

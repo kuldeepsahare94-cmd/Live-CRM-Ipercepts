@@ -67,25 +67,61 @@ const RELATED_TITLE = {
   products: { table: 'products', column: 'product_name' },
 };
 
+// Labels are kept between requests and dropped as soon as their table
+// changes (db.versionOf), so a renamed account never shows its old name.
 const labelCache = new Map();
+const tableVersion = (table) => (typeof db.versionOf === 'function' ? db.versionOf([table]) : null);
+
+function cachedLabel(module, recordId) {
+  const spec = RELATED_TITLE[module];
+  const hit = labelCache.get(`${module}:${recordId}`);
+  if (!spec || !hit) return undefined;
+  const version = tableVersion(spec.table);
+  return version !== null && hit.version === version ? hit.label : undefined;
+}
+
+// Looks up the labels for many records in one query per module.
+function prefetchLabels(rows) {
+  const wanted = new Map();
+  for (const r of rows) {
+    const module = r.related_module;
+    const id = Number(r.related_record_id);
+    if (!module || !id || !RELATED_TITLE[module] || cachedLabel(module, id) !== undefined) continue;
+    if (!wanted.has(module)) wanted.set(module, new Set());
+    wanted.get(module).add(id);
+  }
+  if (labelCache.size > 5000) labelCache.clear();
+  for (const [module, idSet] of wanted) {
+    const spec = RELATED_TITLE[module];
+    const ids = [...idSet];
+    const version = tableVersion(spec.table);
+    try {
+      const found = new Map();
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        db.prepare(`SELECT id, ${spec.column} AS label FROM ${spec.table} WHERE id IN (${chunk.map(() => '?').join(',')})`)
+          .all(...chunk).forEach((row) => found.set(Number(row.id), row.label || null));
+      }
+      ids.forEach((id) => labelCache.set(`${module}:${id}`, { label: found.get(id) ?? null, version }));
+    } catch { /* fall back to one-by-one lookups */ }
+  }
+}
+
 function relatedLabel(module, recordId) {
   if (!module || !recordId) return null;
-  const key = `${module}:${recordId}`;
-  if (labelCache.has(key)) return labelCache.get(key);
   const spec = RELATED_TITLE[module];
   if (!spec) return null;
+  const hit = cachedLabel(module, Number(recordId));
+  if (hit !== undefined) return hit;
   let label = null;
+  const version = tableVersion(spec.table);
   try {
     const row = db.prepare(`SELECT ${spec.column} AS label FROM ${spec.table} WHERE id = ?`).get(recordId);
     label = (row && row.label) || null;
   } catch { label = null; }
-  labelCache.set(key, label);
-  // The cache is per-request in practice (the process is short-lived and the
-  // map is small), but it is cleared on write so a renamed account does not
-  // keep its old name on the calendar for the life of the process.
+  labelCache.set(`${module}:${Number(recordId)}`, { label, version });
   return label;
 }
-function clearLabelCache() { labelCache.clear(); }
 
 // ---------------------------------------------------------------------------
 // Sources
@@ -103,6 +139,7 @@ function meetings({ from, to, userIds }) {
       AND datetime(COALESCE(m.end_datetime, m.start_datetime)) >= datetime(?)
       ${userIds.length ? `AND COALESCE(m.assigned_user_id, m.organizer_id, m.created_by) IN (${placeholders})` : ''}
   `).all(toSqlite(widen(to, OFFSET_SAFETY_HOURS)), toSqlite(widen(from, -OFFSET_SAFETY_HOURS)), ...userIds);
+  prefetchLabels(rows);
 
   return rows.map((m) => shape.neutral({
     source: 'meeting',
@@ -145,6 +182,7 @@ function tasks({ from, to, userIds }) {
       AND date(t.due_date) BETWEEN date(?) AND date(?)
       ${userIds.length ? `AND COALESCE(t.assigned_to_id, t.created_by) IN (${placeholders})` : ''}
   `).all(String(from).slice(0, 10), String(to).slice(0, 10), ...userIds);
+  prefetchLabels(rows);
 
   return rows.map((t) => {
     const done = ['completed', 'done', 'closed'].includes(String(t.status || '').toLowerCase());
@@ -195,6 +233,7 @@ function calls({ from, to, userIds }) {
   // Calls whose follow-up is on the follow-up schedule are drawn from there
   // (at their exact time, see followUpItems) rather than as an all-day item.
   const scheduled = new Set(db.prepare('SELECT DISTINCT call_id FROM follow_ups WHERE call_id IS NOT NULL').all().map((r) => Number(r.call_id)));
+  prefetchLabels(rows);
 
   const out = [];
   for (const c of rows) {
@@ -362,15 +401,22 @@ const ALL_SOURCES = ['meeting', 'task', 'call', 'external'];
  *   sources       - subset of ALL_SOURCES
  *   teamUserIds   - users visible in team scope
  */
-function build({ from, to, userId, scope = 'mine', sources = ALL_SOURCES, teamUserIds = [] }) {
-  clearLabelCache();
+function build({ from, to, userId, scope = 'mine', sources = ALL_SOURCES, teamUserIds = [], teamBy = null }) {
+  // (Record labels are no longer cleared here: they stay cached until their
+  // table changes — see cachedLabel.)
   const wanted = new Set(sources && sources.length ? sources : ALL_SOURCES);
-  const userIds = scope === 'team' ? teamUserIds : [userId];
+  // teamBy: who "team" means for each kind, when the person asking does not
+  // see everybody's meetings / tasks / calls
+  const idsFor = (kind) => {
+    if (scope !== 'team') return [userId];
+    const ids = (teamBy && teamBy[kind]) || teamUserIds;
+    return ids.length ? ids : [userId];      // an empty list would mean "everyone"
+  };
 
   let events = [];
-  if (wanted.has('meeting')) events = events.concat(meetings({ from, to, userIds }));
-  if (wanted.has('task')) events = events.concat(tasks({ from, to, userIds }));
-  if (wanted.has('call')) events = events.concat(calls({ from, to, userIds }), followUpItems({ from, to, userIds }));
+  if (wanted.has('meeting')) events = events.concat(meetings({ from, to, userIds: idsFor('meeting') }));
+  if (wanted.has('task')) events = events.concat(tasks({ from, to, userIds: idsFor('task') }));
+  if (wanted.has('call')) events = events.concat(calls({ from, to, userIds: idsFor('call') }), followUpItems({ from, to, userIds: idsFor('call') }));
   if (wanted.has('external')) {
     events = events.concat(external({ from, to, userId, includeTeam: scope === 'team' }));
   }

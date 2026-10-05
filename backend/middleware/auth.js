@@ -28,9 +28,36 @@ function loadPermissions(roleId) {
       edit: !!r.can_edit,
       delete: !!r.can_delete,
       export: !!r.can_export,
+      // which records of the module: all / team / own (services/recordAccess.js)
+      scope: ['team', 'own'].includes(r.record_scope) ? r.record_scope : 'all',
     };
   }
   return map;
+}
+
+// The signed-in user and their permissions, kept for a minute between
+// requests. Every API call needs them, and loading them took several database
+// round trips per call. The entry is dropped the moment the users, roles or
+// permissions tables change through this server (db.versionOf), so a role
+// change or a deactivation still applies on the very next request.
+const USER_TABLES = ['users', 'roles', 'role_permissions'];
+const USER_TTL_MS = 60 * 1000;
+const userCache = new Map();
+const usersVersion = () => (typeof db.versionOf === 'function' ? db.versionOf(USER_TABLES) : null);
+
+function loadUser(id) {
+  const version = usersVersion();
+  const hit = userCache.get(id);
+  if (hit && version !== null && hit.version === version && Date.now() - hit.at < USER_TTL_MS) return hit.user;
+  const user = db.prepare(`
+      SELECT u.id, u.username, u.full_name, u.active, u.role_id, r.name AS role_name
+      FROM users u LEFT JOIN roles r ON r.id = u.role_id
+      WHERE u.id=?
+    `).get(id) || null;
+  if (user) user.permissions = loadPermissions(user.role_id);
+  if (userCache.size > 500) userCache.clear();
+  userCache.set(id, { user, version, at: Date.now() });
+  return user;
 }
 
 function requireAuth(req, res, next) {
@@ -55,13 +82,11 @@ function requireAuth(req, res, next) {
   }
 
   try {
-    const user = db.prepare(`
-      SELECT u.id, u.username, u.full_name, u.active, u.role_id, r.name AS role_name
-      FROM users u LEFT JOIN roles r ON r.id = u.role_id
-      WHERE u.id=?
-    `).get(payload.id);
-    if (!user || !user.active) return res.status(401).json({ error: 'Account is inactive or no longer exists' });
-    user.permissions = loadPermissions(user.role_id);
+    const cached = loadUser(payload.id);
+    if (!cached || !cached.active) return res.status(401).json({ error: 'Account is inactive or no longer exists' });
+    // Each request gets its own copy, so nothing one handler does to req.user
+    // can leak into another request.
+    const user = { ...cached };
 
     // IP & time-based access control (Settings → Security → IP & Access
     // Restrictions). Checked on EVERY authenticated request, not only at

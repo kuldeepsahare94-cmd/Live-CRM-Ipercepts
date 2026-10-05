@@ -33,6 +33,7 @@ const sync = require('../services/calendar/syncService');
 const feed = require('../services/calendar/feed');
 const shape = require('../services/calendar/shape');
 const people = require('../services/calendar/people');
+const access = require('../services/recordAccess');
 
 function fail(res, err) {
   const status = err.status || 500;
@@ -303,8 +304,23 @@ router.get('/connections/:id/log', requirePermission('calendar', 'view'), (req, 
 // The feed
 // ---------------------------------------------------------------------------
 
-function teamUserIds() {
-  return db.prepare('SELECT id FROM users WHERE active = 1').all().map((u) => u.id);
+// Whose entries "Team" shows. Everyone's — unless this person's role limits
+// which meetings / tasks / calls they see (Settings → Roles → Can see): then
+// their own team's, or only their own.
+function teamUserIds(user, module) {
+  const all = db.prepare('SELECT id FROM users WHERE active = 1').all().map((u) => Number(u.id));
+  const mine = user && module ? access.userIds(user, module) : null;
+  if (!mine) return all;
+  const allowed = new Set(mine.map(Number));
+  return all.filter((id) => allowed.has(id));
+}
+const teamBy = (user) => ({
+  meeting: teamUserIds(user, 'meetings'), task: teamUserIds(user, 'tasks'), call: teamUserIds(user, 'calls'),
+});
+// A meeting somebody else owns, for a person who only sees their own.
+function mayTouch(req, meeting) {
+  if (access.allows(req.user, 'meetings', meeting)) return;
+  throw Object.assign(new Error(access.denial(req.user, 'meetings').error), { status: 403 });
 }
 
 // §12, §39–§44 — ONE search behind both the attendee picker and the
@@ -318,6 +334,7 @@ router.get('/people', requirePermission('calendar', 'view'), (req, res) => {
       q: req.query.q,
       modules: modules.length ? modules : undefined,
       limit: Math.min(Number(req.query.limit) || 20, 50),
+      user: req.user,
     }));
   } catch (err) { fail(res, err); }
 });
@@ -341,6 +358,7 @@ router.get('/events', requirePermission('calendar', 'view'), async (req, res) =>
       scope: req.query.scope === 'team' ? 'team' : 'mine',
       sources,
       teamUserIds: teamUserIds(),
+      teamBy: teamBy(req.user),
     });
 
     res.json({
@@ -368,7 +386,7 @@ const MEETING_COLUMNS = ['meeting_title', 'related_module', 'related_record_id',
   'meeting_notes', 'outcome', 'next_action', 'time_zone', 'all_day', 'reminder_minutes', 'attendees_json',
   'online_platform'];
 
-function meetingPayload(body, userId) {
+function meetingPayload(body, userId, user = null) {
   const v = {};
   for (const c of MEETING_COLUMNS) v[c] = body[c] === undefined ? null : body[c];
 
@@ -377,7 +395,7 @@ function meetingPayload(body, userId) {
   // record's own address, validates, and de-duplicates on a normalised email,
   // so the same person picked twice by two different routes is invited once.
   if (body.attendees !== undefined) {
-    const { attendees, problems } = people.resolveAttendees(body.attendees);
+    const { attendees, problems } = people.resolveAttendees(body.attendees, user);
     if (problems.length) {
       const err = new Error(problems[0].reason);
       err.status = 400;
@@ -426,7 +444,10 @@ function meetingPayload(body, userId) {
 
 router.post('/events', requirePermission('calendar', 'create'), async (req, res) => {
   try {
-    const v = meetingPayload(req.body || {}, req.user.id);
+    const v = meetingPayload(req.body || {}, req.user.id, req.user);
+    if (!access.parentVisible(req.user, v.related_module, v.related_record_id)) {
+      throw Object.assign(new Error(access.denial(req.user, v.related_module).error), { status: 403 });
+    }
     const cols = [...MEETING_COLUMNS, 'created_by', 'source'];
     const info = db.prepare(`INSERT INTO meetings (${cols.join(', ')})
       VALUES (${cols.map(() => '?').join(', ')})`)
@@ -454,8 +475,14 @@ router.patch('/events/:meetingId', requirePermission('calendar', 'edit'), (req, 
   try {
     const existing = db.prepare('SELECT * FROM meetings WHERE id = ?').get(req.params.meetingId);
     if (!existing) throw Object.assign(new Error('Meeting not found.'), { status: 404 });
+    mayTouch(req, existing);
     const merged = { ...existing, ...(req.body || {}) };
-    const v = meetingPayload(merged, req.user.id);
+    // moved onto another record: only onto one this person may see
+    if ((String(merged.related_module ?? '') !== String(existing.related_module ?? '') || String(merged.related_record_id ?? '') !== String(existing.related_record_id ?? ''))
+      && !access.parentVisible(req.user, merged.related_module, merged.related_record_id)) {
+      throw Object.assign(new Error(access.denial(req.user, merged.related_module).error), { status: 403 });
+    }
+    const v = meetingPayload(merged, req.user.id, req.user);
     db.prepare(`UPDATE meetings SET ${MEETING_COLUMNS.map((c) => `${c} = ?`).join(', ')},
       updated_at = datetime('now') WHERE id = ?`)
       .run(...MEETING_COLUMNS.map((c) => v[c]), existing.id);
@@ -473,6 +500,7 @@ router.delete('/events/:meetingId', requirePermission('calendar', 'delete'), asy
   try {
     const existing = db.prepare('SELECT * FROM meetings WHERE id = ?').get(req.params.meetingId);
     if (!existing) throw Object.assign(new Error('Meeting not found.'), { status: 404 });
+    mayTouch(req, existing);
     // Remove it from the external calendars BEFORE dropping the row: the links
     // that say where it lives are keyed on the meeting, and deleting the
     // meeting first would strand the event in everyone's calendar forever.

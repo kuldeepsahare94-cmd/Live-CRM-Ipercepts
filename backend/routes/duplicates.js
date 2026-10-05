@@ -14,6 +14,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const duplicates = require('../services/duplicates');
+const access = require('../services/recordAccess');
 
 const can = (req, module, action) => !!req.user?.permissions?.[module]?.[action];
 const fail = (res, e) => res.status(e.status || 500).json({ error: e.message });
@@ -66,7 +67,8 @@ router.get('/check', (req, res) => {
       : [];
     res.json({
       enabled: rule.enabled, can_create: rule.allow_manual,
-      matches: matches.map((x) => duplicates.present(module, x.record, x.matched_on)),
+      // a match this person may not open is named (title, owner) but not shown
+      matches: matches.map((x) => duplicates.veil(module, duplicates.present(module, x.record, x.matched_on), req.user)),
     });
   } catch (e) { fail(res, e); }
 });
@@ -74,6 +76,10 @@ router.get('/check', (req, res) => {
 router.get('/groups', (req, res) => {
   const module = moduleParam(req, res);
   if (!module) return;
+  // Looking for duplicates means reading every record of the module.
+  if (access.restricted(req.user, module)) {
+    return res.status(403).json({ error: `Finding duplicates looks through every ${duplicates.MODULES[module].singular.toLowerCase()} in the CRM, and your role sees only some of them. Ask your manager or an administrator.`, code: 'NOT_YOURS' });
+  }
   try {
     res.json({
       ...duplicates.findGroups(module, { limit: req.query.limit, offset: req.query.offset, focusId: req.query.focus, q: req.query.q }),
@@ -88,6 +94,8 @@ router.post('/merge', (req, res) => {
   if (!can(req, module, 'delete')) {
     return res.status(403).json({ error: 'Merging removes the duplicate records, so it needs delete access to this module.' });
   }
+  const involved = [req.body.keep_id, ...(Array.isArray(req.body.remove_ids) ? req.body.remove_ids : [])];
+  if (involved.some((id) => !access.canOpen(req.user, module, id))) return res.status(403).json(access.denial(req.user, module));
   try {
     res.json(duplicates.mergeRecords(module, req.body.keep_id, req.body.remove_ids, { user: req.user }));
   } catch (e) { fail(res, e); }
@@ -99,7 +107,8 @@ router.get('/history/:module/:id', (req, res) => {
   try {
     const record = db.prepare(`SELECT * FROM ${duplicates.MODULES[module].table} WHERE id = ?`).get(req.params.id);
     if (!record) return res.status(404).json({ error: 'Not found' });
-    res.json({ history: duplicates.history(module, record), similar: duplicates.similarTo(module, record) });
+    if (!access.allows(req.user, module, record)) return res.status(403).json(access.denial(req.user, module));
+    res.json({ history: duplicates.history(module, record), similar: duplicates.similarTo(module, record, req.user) });
   } catch (e) { fail(res, e); }
 });
 
@@ -109,8 +118,16 @@ router.get('/log', (req, res) => {
   }
   try {
     const module = duplicates.MODULES[req.query.module] ? req.query.module : null;
+    // someone who sees only their own / their team's records gets the log
+    // of those records
+    const seen = new Map();
+    const mine = (e) => {
+      if (!access.restricted(req.user, e.module)) return true;
+      if (!seen.has(e.module)) seen.set(e.module, access.visibleIds(req.user, e.module));
+      return !!e.record_id && seen.get(e.module).has(Number(e.record_id));
+    };
     res.json(duplicates.listEvents({ module, limit: req.query.limit })
-      .filter((e) => can(req, e.module, 'view') || can(req, 'settings', 'view')));
+      .filter((e) => (can(req, e.module, 'view') || can(req, 'settings', 'view')) && mine(e)));
   } catch (e) { fail(res, e); }
 });
 

@@ -30,6 +30,9 @@ router.get('/', (req, res) => {
   if (!related_module || !related_record_id) {
     return res.status(400).json({ error: 'related_module and related_record_id are required' });
   }
+  // the timeline of a record is for whoever may open that record
+  const access = require('../services/recordAccess');
+  if (!access.parentVisible(req.user, related_module, related_record_id)) return res.json([]);
   const rows = [];
   for (const s of SOURCES) {
     const statusExpr = s.hasStatus ? 'status' : 'NULL AS status';

@@ -17,7 +17,10 @@ const CONVERTED = '(l.converted_opportunity_id IS NOT NULL OR l.converted_accoun
 // they mean in a workflow: Settings → Workflows → Settings decides which
 // statuses are won / dead and which activities count as a touch. A lead that
 // was never touched counts from the day it was created.
-function activeLeads() {
+function activeLeads(db) {
+  const access = require('../recordAccess');
+  // the person the report is for, when they do not see every lead
+  const viewer = (db && db.accessUser) || null;
   const F = require('../workflows/fields');
   const E = require('../workflows/engine');
   const d = F.describe('leads');
@@ -26,7 +29,7 @@ function activeLeads() {
     { trigger_type: 'record_created', conditions: { match: 'all', rules: [{ field: '_is_open', op: 'yes' }] } },
     d, { limit: 20000, scan: 20000, also: ['_has_followup'] },
   );
-  return found.records.map(({ record, get }) => {
+  return found.records.filter(({ record }) => !viewer || access.allows(viewer, 'leads', record)).map(({ record, get }) => {
     const last = get('_last_activity_at');
     return {
       name: record.student_name,
@@ -80,9 +83,9 @@ module.exports = [
       { key: 'never', label: 'Never Contacted', format: 'number' },
       { key: 'untouched_share', label: 'Untouched 3+ days %', format: 'percent' },
     ],
-    run() {
+    run(db) {
       const byOwner = new Map();
-      for (const l of activeLeads()) {
+      for (const l of activeLeads(db)) {
         if (!byOwner.has(l.owner)) byOwner.set(l.owner, { owner: l.owner, open: 0, d0: 0, d3: 0, d7: 0, d15: 0, d31: 0, never: 0 });
         const row = byOwner.get(l.owner);
         row.open += 1;
@@ -133,7 +136,7 @@ module.exports = [
     ],
     run(db, { filters = {} }) {
       const min = Math.max(0, Number(filters.days) || 3);
-      return activeLeads()
+      return activeLeads(db)
         .filter((l) => l.days_untouched >= min
           && (!filters.owner || l.owner === filters.owner)
           && (!filters.status || l.status === filters.status))

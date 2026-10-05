@@ -26,6 +26,12 @@ const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const catalogue = require('../services/reports');
 const builder = require('../services/reportBuilder');
+const access = require('../services/recordAccess');
+
+// Reports read the database as the person asking is allowed to see it: for
+// someone limited to their own or their team's records, every table a report
+// touches holds only those records (Settings → Roles → Can see).
+const dbFor = (req) => access.scopedDb(req.user);
 
 // Report definitions run arbitrary read-only SQL against the live schema. If
 // one throws — a renamed column, a table a custom module dropped — the honest
@@ -46,13 +52,13 @@ function guard(res, fn) {
 // ---------------------------------------------------------------------------
 
 router.get('/catalogue', requirePermission('reports', 'view'), (req, res) =>
-  guard(res, () => catalogue.catalogue(db)));
+  guard(res, () => catalogue.catalogue(dbFor(req))));
 
 router.get('/run/:key', requirePermission('reports', 'view'), (req, res) => {
   const { from, to, ...rest } = req.query;
   // Anything beyond from/to is a report-specific filter. Reports validate
   // their own filters; unknown keys are simply ignored by the report.
-  return guard(res, () => catalogue.run(db, req.params.key, { from, to, filters: rest }));
+  return guard(res, () => catalogue.run(dbFor(req), req.params.key, { from, to, filters: rest }));
 });
 
 // ---------------------------------------------------------------------------
@@ -72,10 +78,10 @@ router.get('/builder/modules', requirePermission('reports', 'view'), (req, res) 
 
 // Distinct values for one field, for filter dropdowns.
 router.get('/builder/values', requirePermission('reports', 'view'), (req, res) =>
-  guard(res, () => builder.fieldValues(db, req.query.module, req.query.field)));
+  guard(res, () => builder.fieldValues(dbFor(req), req.query.module, req.query.field)));
 
 router.post('/custom/run', requirePermission('reports', 'view'), (req, res) =>
-  guard(res, () => builder.runCustom(db, req.body || {})));
+  guard(res, () => builder.runCustom(dbFor(req), req.body || {})));
 
 // ---------------------------------------------------------------------------
 // Saved reports
@@ -114,7 +120,7 @@ router.get('/saved/:id/run', requirePermission('reports', 'view'), (req, res) =>
   // serves "this month" and "last quarter" without being duplicated.
   if (req.query.from !== undefined) config.from = req.query.from || null;
   if (req.query.to !== undefined) config.to = req.query.to || null;
-  const result = builder.runCustom(db, { ...config, module: saved.module });
+  const result = builder.runCustom(dbFor(req), { ...config, module: saved.module });
   db.prepare("UPDATE saved_reports SET last_run_at = datetime('now') WHERE id = ?").run(saved.id);
   return {
     ...result,

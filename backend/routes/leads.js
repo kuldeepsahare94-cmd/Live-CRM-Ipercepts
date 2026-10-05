@@ -7,6 +7,25 @@ const { fireWorkflows } = require('../services/workflowAutomation');
 const { computeLeadScore } = require('../services/leadScore');
 const followUps = require('../services/followUps');
 const duplicates = require('../services/duplicates');
+const access = require('../services/recordAccess');
+const leadList = require('../services/leadList');
+
+// Who sees which leads (Settings → Roles & Permissions → "Can see"): every
+// route below that takes an id is refused for a lead that is not this user's
+// to see.
+router.param('id', access.param('leads'));
+
+// The Leads screen: one page of leads, with the totals for the status cards.
+// Search, the status / source / owner choices and the filter panel are all
+// applied by the database (services/leadList.js).
+router.post('/query', requirePermission('leads', 'view'), (req, res) => {
+  try {
+    res.json(leadList.query(req.user, req.body || {}));
+  } catch (e) {
+    console.warn('[leads] list query failed:', e.message);
+    res.status(500).json({ error: 'Could not load the leads.' });
+  }
+});
 
 router.get('/', requirePermission('leads', 'view'), (req, res) => {
   const { status, source, counselor, q } = req.query;
@@ -17,7 +36,15 @@ router.get('/', requirePermission('leads', 'view'), (req, res) => {
   if (source) { sql += ' AND l.source = ?'; params.push(source); }
   if (counselor) { sql += ' AND l.assigned_counselor = ?'; params.push(counselor); }
   if (q) { sql += ' AND (l.student_name LIKE ? OR l.mobile LIKE ? OR l.email LIKE ?)'; params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
-  sql += ' ORDER BY l.created_at DESC';
+  const scope = access.where(req.user, 'leads', 'l');
+  sql += scope.sql; params.push(...scope.params);
+  sql += ' ORDER BY l.created_at DESC, l.id DESC';
+  // ?limit= / ?offset= for callers that want a part of the list
+  const limit = Number(req.query.limit);
+  if (Number.isInteger(limit) && limit > 0) {
+    sql += ' LIMIT ? OFFSET ?';
+    params.push(Math.min(limit, 5000), Math.max(0, Number(req.query.offset) || 0));
+  }
   res.json(db.prepare(sql).all(...params));
 });
 
@@ -35,7 +62,7 @@ router.get('/:id', requirePermission('leads', 'view'), (req, res) => {
   // into it), and any other lead with the same mobile or email.
   let enquiries = [];
   let similar = [];
-  try { enquiries = duplicates.history('leads', lead); similar = duplicates.similarTo('leads', lead); } catch { /* optional */ }
+  try { enquiries = duplicates.history('leads', lead); similar = duplicates.similarTo('leads', lead, req.user); } catch { /* optional */ }
   res.json({
     ...lead, activities, lead_score: score, lead_score_label: label, next_follow_up: nextFollowUp,
     enquiries, enquiry_count: Number(lead.enquiry_count) || 1, similar_leads: similar,
@@ -45,6 +72,8 @@ router.get('/:id', requirePermission('leads', 'view'), (req, res) => {
 router.post('/', requirePermission('leads', 'create'), (req, res) => {
   const b = req.body;
   if (!b.student_name) return res.status(400).json({ error: 'student_name is required' });
+  // someone who only sees their own leads becomes the owner of what they add
+  access.ownerDefault(req.user, 'leads', b);
   // Same mobile or email as a lead that is already here? Then no second lead
   // is made: the person adding it is shown the existing lead and chooses
   // (merge / create anyway); a script calling this API follows the setting.
@@ -175,11 +204,21 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
     });
   }
 
+  // The account, contact and opportunity that come out of the lead belong to
+  // the lead's owner (or, when it has none, to whoever converts it) — so the
+  // person who worked the lead still sees what became of it.
+  const ownerId = access.userIdByName(lead.assigned_counselor) || req.user.id;
+
   const tx = db.transaction(() => {
     // Two leads from the same company should join one Account, not create
     // two identical ones.
-    const existingAccount = db.prepare('SELECT id FROM accounts WHERE LOWER(TRIM(account_name)) = LOWER(TRIM(?))')
-      .get(accountName);
+    // (Only an account the person converting may see is joined: somebody
+    // else's account of the same name is not theirs to add to — or to be
+    // shown. A second account is made instead; whoever sees all accounts can
+    // merge the two under Duplicates.)
+    const sameName = db.prepare('SELECT * FROM accounts WHERE LOWER(TRIM(account_name)) = LOWER(TRIM(?)) ORDER BY id')
+      .all(accountName);
+    const existingAccount = sameName.find((a) => access.allows(req.user, 'accounts', a)) || null;
 
     let accountId;
     let accountReused = false;
@@ -187,8 +226,8 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
       accountId = existingAccount.id;
       accountReused = true;
     } else {
-      accountId = db.prepare(`INSERT INTO accounts (account_name, city, lead_source, status) VALUES (?,?,?,'Active')`)
-        .run(accountName, lead.city || null, lead.source || null).lastInsertRowid;
+      accountId = db.prepare(`INSERT INTO accounts (account_name, city, lead_source, status, owner_id) VALUES (?,?,?,'Active',?)`)
+        .run(accountName, lead.city || null, lead.source || null, ownerId).lastInsertRowid;
     }
 
     // Person name. The two sources (the first_name/last_name columns, and
@@ -239,10 +278,10 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
 
     if (!contactId) {
       const contactInfo = db.prepare(`
-        INSERT INTO contacts (first_name, last_name, account_id, email, mobile, city, lead_source, contact_status)
-        VALUES (?,?,?,?,?,?,?,'Active')
+        INSERT INTO contacts (first_name, last_name, account_id, email, mobile, city, lead_source, contact_status, owner_id)
+        VALUES (?,?,?,?,?,?,?,'Active',?)
       `).run(firstName, lastName || null, accountId,
-        lead.email || null, lead.mobile || null, lead.city || null, lead.source || null);
+        lead.email || null, lead.mobile || null, lead.city || null, lead.source || null, ownerId);
       contactId = contactInfo.lastInsertRowid;
     }
 
@@ -252,9 +291,9 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
     const firstStage = pipeline && db.prepare('SELECT * FROM module_pipeline_stages WHERE pipeline_id=? ORDER BY sort_order LIMIT 1').get(pipeline.id);
     const oppName = lead.product_interest ? `${accountName} — ${lead.product_interest}` : `${accountName} — New Opportunity`;
     const oppInfo = db.prepare(`
-      INSERT INTO opportunities (opportunity_name, account_id, primary_contact_id, pipeline_id, stage_id, lead_source, probability)
-      VALUES (?,?,?,?,?,?,?)
-    `).run(oppName, accountId, contactId, pipeline?.id || null, firstStage?.id || null, lead.source || null, firstStage?.probability ?? null);
+      INSERT INTO opportunities (opportunity_name, account_id, primary_contact_id, pipeline_id, stage_id, lead_source, probability, owner_id)
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(oppName, accountId, contactId, pipeline?.id || null, firstStage?.id || null, lead.source || null, firstStage?.probability ?? null, ownerId);
     const opportunityId = oppInfo.lastInsertRowid;
     if (firstStage) db.prepare('INSERT INTO opportunity_stage_history (opportunity_id, from_stage_id, to_stage_id) VALUES (?,?,?)').run(opportunityId, null, firstStage.id);
 

@@ -7,9 +7,24 @@
 
 const express = require('express');
 const router = express.Router();
-const db = require('../db');
+const rawDb = require('../db');
+const { AsyncLocalStorage } = require('async_hooks');
+const access = require('../services/recordAccess');
 const { requirePermission } = require('../middleware/auth');
 const { anthropic, MODEL } = require('../services/aiClient');
+
+// Who sees which records (Settings → Roles → Can see) holds here too: for the
+// length of a request `db` is the database as the person asking may read it,
+// so a record of somebody else's is "not found" and totals count only theirs.
+const viewer = new AsyncLocalStorage();
+const db = new Proxy(rawDb, {
+  get(target, prop) {
+    const source = viewer.getStore() || target;
+    const v = source[prop];
+    return typeof v === 'function' ? v.bind(source) : v;
+  },
+});
+router.use((req, res, next) => viewer.run(access.scopedDb(req.user), next));
 
 function unavailable(res) {
   return res.status(503).json({ error: "AI actions aren't configured yet — ask your admin to set the ANTHROPIC_API_KEY environment variable on the backend." });

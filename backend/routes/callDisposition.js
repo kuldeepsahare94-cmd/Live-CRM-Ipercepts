@@ -15,6 +15,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const access = require('../services/recordAccess');
 const { requirePermission } = require('../middleware/auth');
 const { fireWorkflows } = require('../services/workflowAutomation');
 const followUps = require('../services/followUps');
@@ -53,6 +54,8 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
 
   const module = b.related_module || 'leads';
   const recordId = b.related_record_id ? Number(b.related_record_id) : null;
+  // a call cannot be logged on a record this person is not allowed to see
+  if (!access.parentVisible(req.user, module, recordId)) return res.status(403).json(access.denial(req.user, module));
 
   // Validate the follow-up BEFORE anything is written, so a bad time never
   // leaves a half-logged call behind.
@@ -175,7 +178,10 @@ router.get('/report', requirePermission('calls', 'view'), (req, res) => {
   if (userId) { where.push('c.assigned_user_id = ?'); params.push(userId); }
   const W = where.join(' AND ');
 
-  const one = (sql, ...p) => db.prepare(sql).get(...p) || {};
+  // The figures cover the calls and leads this person may see (Settings →
+  // Roles → Can see); for people who see everything this is the database.
+  const sdb = access.scopedDb(req.user);
+  const one = (sql, ...p) => sdb.prepare(sql).get(...p) || {};
 
   const overview = one(`
     SELECT
@@ -196,7 +202,7 @@ router.get('/report', requirePermission('calls', 'view'), (req, res) => {
     SELECT COALESCE(AVG(c.duration_seconds),0) AS v FROM calls c WHERE ${W} AND c.connected=1
   `, ...params).v || 0;
 
-  const dispositions = db.prepare(`
+  const dispositions = sdb.prepare(`
     SELECT c.call_outcome AS disposition,
            COUNT(*) AS count,
            COALESCE(SUM(c.duration_seconds),0) AS total_seconds,
@@ -205,7 +211,7 @@ router.get('/report', requirePermission('calls', 'view'), (req, res) => {
     GROUP BY c.call_outcome ORDER BY count DESC
   `).all(...params);
 
-  const byAgent = canSeeAll ? db.prepare(`
+  const byAgent = canSeeAll ? sdb.prepare(`
     SELECT COALESCE(u.full_name, u.username, 'Unassigned') AS agent,
            COUNT(*) AS total_calls,
            COALESCE(SUM(CASE WHEN c.connected=1 THEN 1 ELSE 0 END),0) AS connected_calls,
@@ -214,7 +220,7 @@ router.get('/report', requirePermission('calls', 'view'), (req, res) => {
     WHERE ${W} GROUP BY c.assigned_user_id ORDER BY total_calls DESC
   `).all(...params) : [];
 
-  const byDay = db.prepare(`
+  const byDay = sdb.prepare(`
     SELECT date(COALESCE(c.disposed_at, c.created_at)) AS day,
            COUNT(*) AS total_calls,
            COALESCE(SUM(CASE WHEN c.connected=1 THEN 1 ELSE 0 END),0) AS connected_calls,

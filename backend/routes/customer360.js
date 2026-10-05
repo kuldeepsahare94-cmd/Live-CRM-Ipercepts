@@ -10,6 +10,13 @@ const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const { scoreAccount, scoreLead } = require('../services/scoring');
 const { anthropic, MODEL } = require('../services/aiClient');
+const access = require('../services/recordAccess');
+
+// Who sees which accounts and leads (Settings → Roles & Permissions → "Can
+// see"): the 360° view of a record is for whoever may open that record.
+router.param('id', access.param((req) => (/^\/leads\//.test(req.path) ? 'leads' : 'accounts')));
+// What is listed inside it follows each module's own "Can see".
+const mine = (user, module, rows) => (access.restricted(user, module) ? rows.filter((r) => access.allows(user, module, r)) : rows);
 
 
 // Next Best Action (brief §19) — derived from real records only, ranked by
@@ -99,27 +106,27 @@ router.get('/accounts/:id', requirePermission('accounts', 'view'), (req, res) =>
   const all = (sql, ...p) => db.prepare(sql).all(id, ...p);
   const one = (sql, ...p) => db.prepare(sql).get(id, ...p) || {};
 
-  const contacts = all(`SELECT id, first_name, last_name, job_title, email, mobile, contact_status
-                        FROM contacts WHERE account_id=? ORDER BY first_name`);
-  const opportunities = all(`
-    SELECT o.id, o.opportunity_name, o.amount, o.currency, o.probability, o.expected_close_date,
+  const contacts = mine(req.user, 'contacts', all(`SELECT id, first_name, last_name, job_title, email, mobile, contact_status, owner_id
+                        FROM contacts WHERE account_id=? ORDER BY first_name`));
+  const opportunities = mine(req.user, 'opportunities', all(`
+    SELECT o.id, o.opportunity_name, o.amount, o.currency, o.probability, o.expected_close_date, o.owner_id,
            s.name AS stage, s.color AS stage_color, s.is_won, s.is_lost
     FROM opportunities o LEFT JOIN module_pipeline_stages s ON s.id=o.stage_id
-    WHERE o.account_id=? ORDER BY o.updated_at DESC`);
-  const quotations = all(`SELECT id, quote_number, status, grand_total, currency, quote_date, valid_until,
-                                 converted_to_document_id
-                          FROM quotations WHERE account_id=? ORDER BY quote_date DESC`);
+    WHERE o.account_id=? ORDER BY o.updated_at DESC`));
+  const quotations = mine(req.user, 'quotations', all(`SELECT id, quote_number, status, grand_total, currency, quote_date, valid_until,
+                                 converted_to_document_id, salesperson_id
+                          FROM quotations WHERE account_id=? ORDER BY quote_date DESC`));
 
   // Proforma invoices and invoices raised for this customer. Without these
   // the 360 view stops at "we quoted them" and says nothing about whether
   // anyone actually billed them or got paid — which is the half that matters.
   const salesDocuments = all(`SELECT id, doc_type, doc_number, status, payment_status, grand_total,
-                                     amount_paid, balance_due, currency, doc_date, due_date, quotation_id
+                                     amount_paid, balance_due, currency, doc_date, due_date, quotation_id, salesperson_id, created_by
                                 FROM sales_documents WHERE account_id=? ORDER BY doc_date DESC`);
-  const proformaInvoices = salesDocuments.filter((d) => d.doc_type === 'proforma');
-  const invoices = salesDocuments.filter((d) => d.doc_type === 'invoice');
-  const subscriptions = all(`SELECT id, subscription_number, plan, status, recurring_amount, billing_cycle, renewal_date
-                             FROM subscriptions WHERE account_id=? ORDER BY renewal_date`);
+  const proformaInvoices = mine(req.user, 'proforma_invoices', salesDocuments.filter((d) => d.doc_type === 'proforma'));
+  const invoices = mine(req.user, 'invoices', salesDocuments.filter((d) => d.doc_type === 'invoice'));
+  const subscriptions = mine(req.user, 'subscriptions', all(`SELECT id, subscription_number, plan, status, recurring_amount, billing_cycle, renewal_date, owner_id
+                             FROM subscriptions WHERE account_id=? ORDER BY renewal_date`));
   const tickets = all(`SELECT id, ticket_number, subject, status, priority, created_at, resolved_at
                        FROM tickets WHERE account_id=? ORDER BY created_at DESC LIMIT 20`);
   const payments = all(`SELECT id, payment_number, amount, status, payment_date

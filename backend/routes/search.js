@@ -29,6 +29,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const access = require('../services/recordAccess');
 
 function hasView(user, moduleApiName) {
   const perm = user.permissions && user.permissions[moduleApiName];
@@ -128,15 +129,18 @@ router.get('/lookup/:module', (req, res) => {
   const q = String(req.query.q || '').trim();
   const limit = Math.min(Number(req.query.limit) || 20, 50);
   const searchable = columns.filter((c) => !['amount', 'selling_price'].includes(c));
+  // The picker offers only the records this person may see (Settings → Roles
+  // → Can see). Names of records already linked (ids, above) are still shown.
+  const mine = access.where(req.user, mod.api_name, '');
   let rows;
   if (q) {
     const where = searchable.map((c) => `${c} LIKE ?`).join(' OR ');
-    rows = db.prepare(`SELECT ${select} FROM ${mod.table_name} WHERE ${where} ORDER BY id DESC LIMIT ?`)
-      .all(...searchable.map(() => `%${q}%`), limit);
+    rows = db.prepare(`SELECT ${select} FROM ${mod.table_name} WHERE (${where})${mine.sql} ORDER BY id DESC LIMIT ?`)
+      .all(...searchable.map(() => `%${q}%`), ...mine.params, limit);
   } else {
     // An empty box still shows the most recent records, so picking the
     // customer you just created doesn't require typing its name.
-    rows = db.prepare(`SELECT ${select} FROM ${mod.table_name} ORDER BY id DESC LIMIT ?`).all(limit);
+    rows = db.prepare(`SELECT ${select} FROM ${mod.table_name} WHERE 1 = 1${mine.sql} ORDER BY id DESC LIMIT ?`).all(...mine.params, limit);
   }
   return res.json({ results: rows.map((r) => ({ id: r.id, label: cfg.label(r) || `#${r.id}`, sub: cfg.sub(r) })) });
 });
@@ -321,7 +325,7 @@ const CONTACT_HAY = "COALESCE(x.first_name, '') || ' ' || COALESCE(x.last_name, 
 // One module's query: SELECT … FROM table t WHERE every word matches,
 // ORDER BY how good the match is. Returns { sql, params } with the
 // parameters in the order they appear in the text.
-function moduleQuery(plan, words, limit, canSee) {
+function moduleQuery(plan, words, limit, canSee, user) {
   const params = [];
   const all = [...plan.key, ...plan.loose];
   const account = plan.accountCol && canSee('accounts') ? plan.accountCol : null;
@@ -371,9 +375,11 @@ function moduleQuery(plan, words, limit, canSee) {
     }
     where.push(`(${parts.join(' OR ')})`);
   });
-  params.push(limit);
+  // only the records this person may see
+  const mine = access.where(user, plan.mod.api_name, 't');
+  params.push(...mine.params, limit);
   return {
-    sql: `SELECT ${select.join(', ')} FROM ${plan.table} t WHERE ${where.join(' AND ')} ORDER BY _rank, t.id DESC LIMIT ?`,
+    sql: `SELECT ${select.join(', ')} FROM ${plan.table} t WHERE ${where.join(' AND ')}${mine.sql} ORDER BY _rank, t.id DESC LIMIT ?`,
     params,
   };
 }
@@ -381,7 +387,7 @@ function moduleQuery(plan, words, limit, canSee) {
 // Custom modules keep a record as a name plus a JSON object of field values;
 // the values (not the field names) are searched.
 const CUSTOM_DATA = "CASE WHEN t.data_json LIKE '{%' THEN CAST(t.data_json AS jsonb) ELSE CAST('{}' AS jsonb) END";
-function customQuery(plan, words, limit) {
+function customQuery(plan, words, limit, user) {
   const params = [plan.id];
   const where = ['t.module_id = ?'];
   const text = `COALESCE(t.record_name, '') || ' ' || COALESCE((SELECT string_agg(v.value, ' ') FROM jsonb_each_text(${CUSTOM_DATA}) v), '')`;
@@ -393,8 +399,9 @@ function customQuery(plan, words, limit) {
     }
     where.push(`(${parts.join(' OR ')})`);
   });
-  params.push(limit);
-  return { sql: `SELECT t.id, t.record_name, t.data_json, 2 AS _rank FROM custom_module_records t WHERE ${where.join(' AND ')} ORDER BY t.id DESC LIMIT ?`, params };
+  const mine = access.where(user, plan.mod.api_name, 't');
+  params.push(...mine.params, limit);
+  return { sql: `SELECT t.id, t.record_name, t.data_json, 2 AS _rank FROM custom_module_records t WHERE ${where.join(' AND ')}${mine.sql} ORDER BY t.id DESC LIMIT ?`, params };
 }
 
 function customResult(plan, row) {
@@ -444,14 +451,18 @@ router.get('/', (req, res) => {
 
   const canSee = (apiName) => hasView(req.user, apiName);
   const plans = searchPlans().filter((p) => canSee(p.mod.api_name));
-  const queries = plans.map((p) => (p.custom ? customQuery(p, words, limit) : moduleQuery(p, words, limit, canSee)));
+  const queries = plans.map((p) => (p.custom ? customQuery(p, words, limit, req.user) : moduleQuery(p, words, limit, canSee, req.user)));
   const rowsFor = new Array(plans.length).fill(null);
 
   // All modules in one trip to the database. If any part of that statement is
   // refused, each module is asked on its own instead, so one module with a
   // problem never empties the whole search.
+  // (For someone who sees only their own / their team's records every part
+  // carries that rule, and one statement made of all of them takes the
+  // database longer to plan than the parts take to run — so they are asked
+  // one by one.)
   let combined = false;
-  if (plans.length > 1) {
+  if (plans.length > 1 && !access.anyRestricted(req.user)) {
     try {
       const sql = queries.map((qy, i) => `SELECT ${i} AS _m, to_jsonb(s) AS _row FROM (${qy.sql}) s`).join(' UNION ALL ');
       const rows = db.prepare(sql).all(...queries.flatMap((qy) => qy.params));

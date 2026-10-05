@@ -37,7 +37,10 @@ function like(q) { return `%${String(q || '').trim().toLowerCase()}%`; }
  * (users, leads, contacts), the record selector also wants accounts,
  * opportunities and tickets.
  */
-function search({ q, modules, limit = 20 }) {
+function search({ q, modules, limit = 20, user = null }) {
+  // someone limited to their own / their team's records finds only those
+  // eslint-disable-next-line no-shadow
+  const db = user ? require('../recordAccess').scopedDb(user) : require('../../db');
   const want = new Set(
     (modules && modules.length ? modules : ['users', 'leads', 'contacts', 'accounts'])
       .map((m) => String(m).toLowerCase()),
@@ -175,7 +178,7 @@ function search({ q, modules, limit = 20 }) {
  * record reference is kept so the meeting still knows WHO in CRM terms, not
  * just an address — that is what lets a meeting appear on the right timeline.
  */
-function resolveAttendees(input) {
+function resolveAttendees(input, user = null) {
   const list = Array.isArray(input) ? input : [];
   const seen = new Set();
   const attendees = [];
@@ -189,7 +192,12 @@ function resolveAttendees(input) {
 
     // A CRM record contributes its own address — the point of picking a
     // record rather than typing one is not having to know the address.
-    if (kind !== 'external' && raw.module && raw.record_id) {
+    if (kind !== 'external' && raw.module && raw.record_id && !(name && email)) {
+      // …but only of a record this person is allowed to see
+      if (user && !require('../recordAccess').parentVisible(user, String(raw.module).toLowerCase(), raw.record_id)) {
+        problems.push({ kind, module: raw.module, record_id: raw.record_id, name: name || 'This attendee', reason: 'One of the people you picked is a record that belongs to someone else.' });
+        continue;
+      }
       const found = lookupRecord(raw.module, raw.record_id);
       if (found) {
         name = name || found.name;

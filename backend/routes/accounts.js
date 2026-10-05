@@ -4,6 +4,10 @@ const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const { fireWorkflows } = require('../services/workflowAutomation');
 const duplicates = require('../services/duplicates');
+const access = require('../services/recordAccess');
+
+// Who sees which accounts (Settings → Roles & Permissions → "Can see").
+router.param('id', access.param('accounts'));
 
 router.get('/', requirePermission('accounts', 'view'), (req, res) => {
   const { status, owner_id, q } = req.query;
@@ -39,6 +43,8 @@ router.get('/', requirePermission('accounts', 'view'), (req, res) => {
   if (status) { sql += ' AND a.status = ?'; params.push(status); }
   if (owner_id) { sql += ' AND a.owner_id = ?'; params.push(owner_id); }
   if (q) { sql += ' AND (a.account_name LIKE ? OR a.email LIKE ? OR a.phone LIKE ?)'; params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+  const scope = access.where(req.user, 'accounts', 'a');
+  sql += scope.sql; params.push(...scope.params);
   sql += ' ORDER BY a.account_name';
   res.json(db.prepare(sql).all(...params));
 });
@@ -47,14 +53,18 @@ router.get('/:id', requirePermission('accounts', 'view'), (req, res) => {
   const account = db.prepare('SELECT * FROM accounts WHERE id=?').get(req.params.id);
   if (!account) return res.status(404).json({ error: 'Not found' });
 
-  const contacts = db.prepare('SELECT * FROM contacts WHERE account_id=? ORDER BY first_name').all(req.params.id);
+  // The related lists follow each module's own "Can see": someone limited to
+  // their own opportunities sees their own opportunities here too.
+  const under = (module, alias) => access.where(req.user, module, alias);
+  const sc = under('contacts'); const so = under('opportunities', 'o'); const sq = under('quotations'); const ss = under('subscriptions');
+  const contacts = db.prepare(`SELECT * FROM contacts WHERE account_id=?${sc.sql} ORDER BY first_name`).all(req.params.id, ...sc.params);
   const opportunities = db.prepare(`
     SELECT o.*, s.name AS stage_name, s.color AS stage_color FROM opportunities o
     LEFT JOIN module_pipeline_stages s ON s.id = o.stage_id
-    WHERE o.account_id=? ORDER BY o.created_at DESC
-  `).all(req.params.id);
-  const quotations = db.prepare('SELECT * FROM quotations WHERE account_id=? ORDER BY quote_date DESC').all(req.params.id);
-  const subscriptions = db.prepare('SELECT * FROM subscriptions WHERE account_id=? ORDER BY created_at DESC').all(req.params.id);
+    WHERE o.account_id=?${so.sql} ORDER BY o.created_at DESC
+  `).all(req.params.id, ...so.params);
+  const quotations = db.prepare(`SELECT * FROM quotations WHERE account_id=?${sq.sql} ORDER BY quote_date DESC`).all(req.params.id, ...sq.params);
+  const subscriptions = db.prepare(`SELECT * FROM subscriptions WHERE account_id=?${ss.sql} ORDER BY created_at DESC`).all(req.params.id, ...ss.params);
   const tickets = db.prepare('SELECT * FROM tickets WHERE account_id=? ORDER BY created_at DESC').all(req.params.id);
 
   // Activity records use the polymorphic related_module/related_record_id
@@ -85,6 +95,8 @@ router.get('/:id', requirePermission('accounts', 'view'), (req, res) => {
 router.post('/', requirePermission('accounts', 'create'), (req, res) => {
   const b = req.body;
   if (!b.account_name) return res.status(400).json({ error: 'account_name is required' });
+  access.ownerDefault(req.user, 'accounts', b);
+  { const no = access.linkDenied(req.user, b); if (no) return res.status(403).json(no); }
   // Same company name, phone or email as an account that is already here →
   // shown to the person adding it instead of quietly creating a second one.
   if (duplicates.guard('accounts', req, res)) return;
@@ -112,6 +124,7 @@ router.post('/', requirePermission('accounts', 'create'), (req, res) => {
 router.put('/:id', requirePermission('accounts', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM accounts WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  { const no = access.linkDenied(req.user, req.body, existing); if (no) return res.status(403).json(no); }
   const m = { ...existing, ...req.body };
   db.prepare(`
     UPDATE accounts SET account_name=?, account_type=?, industry=?, website=?, email=?, phone=?, whatsapp=?,

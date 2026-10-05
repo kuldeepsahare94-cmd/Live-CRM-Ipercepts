@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const M = require('../services/dashboardMetrics');
+const access = require('../services/recordAccess');
 
 // ============================================================================
 // CRM dashboard.
@@ -69,9 +70,45 @@ function relatedRecord(module, id) {
   return { module, id, type: MODULE_LABEL[module] || module, name: name || `${MODULE_LABEL[module] || module} #${id}`, path: recordPath(module, id) };
 }
 
-router.get('/crm', requireAuth, (req, res) => {
+// The whole dashboard is about 80 database queries. Opening it again while
+// nothing has changed (the usual case when coming back from a list or a
+// record) returns the figures already worked out. They are recomputed as soon
+// as any table the dashboard reads is written to (db.versionOf), when the CRM
+// date changes, and at least every two minutes. Figures depend only on the
+// role's permissions and the filters, so people with the same role share them.
+const CRM_TABLES = [
+  'accounts', 'calls', 'contacts', 'leads', 'meetings', 'notes', 'opportunities', 'opportunity_stage_history',
+  'payments', 'quotations', 'sales_documents', 'subscriptions', 'tasks', 'teams', 'team_members', 'tickets',
+  'users', 'roles', 'role_permissions', 'module_pipelines', 'module_pipeline_stages', 'record_access_settings',
+];
+const CRM_TTL_MS = 2 * 60 * 1000;
+// The modules whose figures the Owner / Team filter narrows.
+const DASHBOARD_MODULES = ['leads', 'opportunities', 'tasks', 'meetings', 'calls', 'quotations', 'invoices', 'subscriptions', 'payments'];
+const crmCache = new Map();
+const crmDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: M.CRM_TIMEZONE }).format(new Date());
+
+function crmFromCache(req, res, next) {
+  if (typeof db.versionOf !== 'function') return next();
+  // …unless the role shows a person only their own / their team's records:
+  // then the figures are theirs alone.
+  const key = JSON.stringify([req.user.role_id || 0, access.cacheKey(req.user), crmDay(), req.query]);
+  const version = db.versionOf(CRM_TABLES);
+  const hit = crmCache.get(key);
+  if (hit && hit.version === version && Date.now() - hit.at < CRM_TTL_MS) return res.json(hit.body);
+  const send = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode < 400) {
+      if (crmCache.size > 200) crmCache.clear();
+      crmCache.set(key, { body, version, at: Date.now() });
+    }
+    return send(body);
+  };
+  return next();
+}
+
+router.get('/crm', requireAuth, crmFromCache, (req, res) => {
   const scope = scopeParams(req.query);
-  const ctx = M.context(scope);
+  const ctx = M.context(scope, req.user);
   const today = ctx.today;
   const period = M.PERIODS[req.query.period] ? req.query.period : 'this_month';
   const can = (module) => M.canView(req.user, module);
@@ -299,9 +336,18 @@ router.get('/crm', requireAuth, (req, res) => {
   // Scope choices for the header filter. Names only — no permission data.
   const scope_options = {
     users: db.prepare('SELECT id, COALESCE(full_name, username) name FROM users WHERE active=1 ORDER BY name').all(),
-    teams: db.prepare('SELECT id, name FROM teams WHERE COALESCE(active,1)=1 ORDER BY name').all(),
+    teams: db.prepare('SELECT id, name, lead_user_id FROM teams WHERE COALESCE(active,1)=1 ORDER BY name').all(),
   };
-  const scopeInfo = ctx.scope ? { ...scope, label: ctx.scope.label } : null;
+  // Someone who sees only their own or their team's records is offered only
+  // those people (and the teams they lead) to narrow by.
+  const pickable = access.visibleUsers(req.user, DASHBOARD_MODULES);
+  if (pickable) {
+    const ok = new Set(pickable.map(Number));
+    scope_options.users = scope_options.users.filter((u) => ok.has(Number(u.id)));
+    scope_options.teams = scope_options.teams.filter((t) => ok.size > 1 && Number(t.lead_user_id) === Number(req.user.id));
+  }
+  scope_options.teams = scope_options.teams.map(({ id, name }) => ({ id, name }));
+  const scopeInfo = ctx.scope && ctx.scope.label ? { ...scope, label: ctx.scope.label } : null;
 
   res.json({
     today, timezone: M.CRM_TIMEZONE, period, periods: M.PERIODS, scope: scopeInfo, scope_options,

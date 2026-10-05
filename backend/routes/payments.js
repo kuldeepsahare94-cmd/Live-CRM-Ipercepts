@@ -6,6 +6,12 @@ const { generateReceiptPdf } = require('../services/receiptPdf');
 const { companyProfile } = require('../services/documentPdf');
 const { fireEvent } = require('../services/whatsapp/workflowEngine');
 const { fireWorkflows } = require('../services/workflowAutomation');
+const access = require('../services/recordAccess');
+
+// A payment belongs to whoever owns what it pays for (the subscription, the
+// invoice, the deal or the account). A role that sees only its own / its
+// team's payments gets just those — in the list and by id.
+router.param('id', access.param('payments'));
 
 // Payments works for two shapes now: the legacy placement-flow payment
 // (linked to a student/admission/course, created by the old Admissions
@@ -53,6 +59,8 @@ router.get('/', requirePermission('payments', 'view'), (req, res) => {
   if (admission_id) { sql += ' AND p.admission_id = ?'; params.push(admission_id); }
   if (subscription_id) { sql += ' AND p.subscription_id = ?'; params.push(subscription_id); }
   if (q) { sql += ' AND (s.student_name LIKE ? OR acc.account_name LIKE ? OR p.payer_name LIKE ? OR p.payment_number LIKE ? OR p.transaction_number LIKE ?)'; params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`); }
+  const mine = access.where(req.user, 'payments', 'p');
+  sql += mine.sql; params.push(...mine.params);
   sql += ' ORDER BY p.created_at DESC';
   res.json(db.prepare(sql).all(...params));
 });
@@ -67,6 +75,7 @@ router.get('/:id', requirePermission('payments', 'view'), (req, res) => {
 // or none of them), independent of the old student/admission/course flow.
 router.post('/', requirePermission('payments', 'create'), (req, res) => {
   const b = req.body;
+  { const no = access.linkDenied(req.user, b); if (no) return res.status(403).json(no); }
   if (!b.account_id && !b.opportunity_id && !b.quotation_id && !b.payer_name) {
     return res.status(400).json({ error: 'Provide account_id, opportunity_id, quotation_id, or a payer_name' });
   }

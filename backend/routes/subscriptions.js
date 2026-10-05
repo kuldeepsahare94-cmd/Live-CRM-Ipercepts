@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { relatedActivity } = require('../services/relatedActivity');
 const { requirePermission } = require('../middleware/auth');
+const access = require('../services/recordAccess');
 const { fireWorkflows } = require('../services/workflowAutomation');
 const billing = require('../services/subscriptionBilling');
 const { crmToday } = require('../services/dashboardMetrics');
@@ -32,6 +33,9 @@ function sendError(res, e) {
   res.status(e.status || 500).json({ error: e.message });
 }
 
+// Who sees which subscriptions (Settings → Roles & Permissions → "Can see").
+router.param('id', access.param('subscriptions'));
+
 router.get('/', requirePermission('subscriptions', 'view'), (req, res) => {
   const { account_id, product_id, status, q, renewal } = req.query;
   let sql = `${billing.SELECT} WHERE 1=1`;
@@ -49,13 +53,16 @@ router.get('/', requirePermission('subscriptions', 'view'), (req, res) => {
     params.push(today, today);
   }
   if (q) { sql += ' AND (s.subscription_number LIKE ? OR a.account_name LIKE ? OR p.product_name LIKE ?)'; params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+  const scope = access.where(req.user, 'subscriptions', 's');
+  sql += scope.sql; params.push(...scope.params);
   sql += ' ORDER BY s.created_at DESC, s.id DESC';
   res.json(db.prepare(sql).all(...params));
 });
 
 // MRR / ARR summary across all active subscriptions.
 router.get('/summary', requirePermission('subscriptions', 'view'), (req, res) => {
-  const active = db.prepare(`SELECT * FROM subscriptions WHERE status='Active'`).all();
+  const scope = access.where(req.user, 'subscriptions');
+  const active = db.prepare(`SELECT * FROM subscriptions WHERE status='Active'${scope.sql}`).all(...scope.params);
   const mrr = active.reduce((sum, s) => sum + monthlyAmount(s), 0);
   res.json({ mrr, arr: mrr * 12, active_count: active.length });
 });
@@ -101,6 +108,8 @@ router.post('/', requirePermission('subscriptions', 'create'), (req, res) => {
   let v;
   try {
     const b = req.body || {};
+    access.ownerDefault(req.user, 'subscriptions', b);
+    { const no = access.linkDenied(req.user, b); if (no) return res.status(403).json(no); }
     if (!b.account_id) throw billing.badRequest('Customer is required.');
     if (!b.product_id) throw billing.badRequest('Product / Service is required.');
     if (!b.start_date) throw billing.badRequest('Start Date is required.');
@@ -138,6 +147,7 @@ router.post('/', requirePermission('subscriptions', 'create'), (req, res) => {
 router.put('/:id', requirePermission('subscriptions', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM subscriptions WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  { const no = access.linkDenied(req.user, req.body, existing); if (no) return res.status(403).json(no); }
   let m;
   try {
     const body = { ...req.body };
