@@ -72,9 +72,27 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
     if (!recordId) return res.status(400).json({ error: 'A follow-up needs the record it belongs to.' });
   }
 
-  const durationSeconds = Math.max(0, Math.round(Number(b.duration_seconds) || 0));
+  // A call made or received through the IVR (MCube): this Dispose fills in THAT
+  // call instead of logging a second one. MCube knows whether the call
+  // connected and how long it lasted; the agent says what was said.
+  //   call_id               a call MCube already reported
+  //   telephony_session_id  the call on the agent's screen (maybe still going on)
+  let tel = null;
+  if (b.call_id || b.telephony_session_id) {
+    try {
+      tel = require('../services/telephony/engine').attach(req.user, {
+        call_id: b.call_id, session_id: b.telephony_session_id, module, recordId,
+      });
+    } catch (e) { console.warn('[telephony] dispose:', e.message); tel = null; }
+    if (tel && tel.already) return res.status(409).json({ error: 'This call has already been disposed.' });
+    if (tel && tel.taken) return res.status(409).json({ error: 'Another agent answered this call, so it is theirs to dispose.' });
+    if (tel && !tel.call && !tel.session) tel = null;
+  }
+  const ivr = tel && tel.call ? tel.call : null;
+
+  const durationSeconds = ivr ? Number(ivr.duration_seconds || 0) : Math.max(0, Math.round(Number(b.duration_seconds) || 0));
   const formSeconds = Math.max(0, Math.round(Number(b.form_seconds) || 0));
-  const connected = b.connected ? 1 : 0;
+  const connected = ivr ? (ivr.connected === 1 ? 1 : 0) : (b.connected ? 1 : 0);
 
   // Subject reads well in the activity timeline without the agent typing one.
   const subject = b.call_subject
@@ -97,7 +115,19 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
   let leadBefore = null;       // the lead as it was, when this call also moves its status
   try {
     const tx = db.transaction(() => {
-      const info = db.prepare(`
+      if (ivr) {
+        db.prepare(`UPDATE calls SET call_subject = ?, call_outcome = ?, notes = ?, follow_up_date = ?, next_action = ?,
+            disposed_at = datetime('now'), form_seconds = ?, assigned_user_id = COALESCE(assigned_user_id, ?),
+            related_module = COALESCE(related_module, ?), related_record_id = COALESCE(related_record_id, ?),
+            updated_at = datetime('now') WHERE id = ?`).run(
+          subject, b.disposition, b.notes || null, callFollowUp, b.next_action_text || (nextAction === 'close' ? 'No further follow-up' : null),
+          formSeconds, req.user.id, module, recordId, ivr.id,
+        );
+      }
+      // (a call that is still going on has no row yet: it is made here, and
+      // MCube's facts land in it when the call ends)
+      const pending = !ivr && tel && tel.session ? require('../services/telephony/engine').pendingColumns(tel.session) : null;
+      const info = ivr ? { lastInsertRowid: ivr.id } : db.prepare(`
         INSERT INTO calls (
           call_subject, related_module, related_record_id, phone_number, call_type, direction,
           start_time, duration_seconds, duration_minutes, connected, status, call_outcome,
@@ -116,6 +146,10 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
         req.user.id, req.user.id, formSeconds
       );
       const callId = info.lastInsertRowid;
+      if (pending) {
+        db.prepare(`UPDATE calls SET provider = ?, provider_call_id = ?, did_number = ?, agent_number = ?, direction = ?, call_type = 'IVR Call' WHERE id = ?`)
+          .run(pending.provider, pending.provider_call_id, pending.did_number, pending.agent_number, pending.direction, callId);
+      }
 
       // Optionally move the lead's own status in the same action, so the
       // agent doesn't have to edit the lead separately after every call.
@@ -130,8 +164,10 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
           }
         }
         db.prepare('INSERT INTO lead_activities (lead_id, type, note) VALUES (?,?,?)')
-          .run(recordId, 'call',
-            `${connected ? 'Connected' : 'Not connected'} · ${b.disposition} · ${hhmmss(durationSeconds)}${b.notes ? ` — ${b.notes}` : ''}`);
+          .run(recordId, 'call', ivr
+            // the call itself is already on the timeline (written when it ended)
+            ? `Call outcome: ${b.disposition}${b.notes ? ` — ${b.notes}` : ''}`
+            : `${connected ? 'Connected' : 'Not connected'} · ${b.disposition} · ${hhmmss(durationSeconds)}${b.notes ? ` — ${b.notes}` : ''}`);
       }
 
       if (recordId && nextAction) {
@@ -154,8 +190,11 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
   } catch (e) {
     return res.status(e.status || 500).json({ error: e.message || 'Could not save the outcome' });
   }
+  // the call leaves the agent's screen; the auto-dialer moves on
+  if (tel) { try { require('../services/telephony/engine').disposed(tel.session, created.id, b.disposition); } catch (e) { console.warn('[telephony] dispose:', e.message); } }
 
-  fireWorkflows('calls', 'record_created', created, null, req.user.id);
+  if (ivr) fireWorkflows('calls', 'record_updated', created, ivr, req.user.id);
+  else fireWorkflows('calls', 'record_created', created, null, req.user.id);
   // The lead's status was moved in the same action: workflows that watch the
   // lead ("status changes to…", "lead marked dead") hear about it too.
   if (leadBefore && leadBefore.status !== b.lead_status) {

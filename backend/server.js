@@ -85,6 +85,12 @@ app.use('/api/whatsapp/webhook', express.raw({ type: '*/*', limit: '2mb' }), req
 // registered before the global JSON parser.
 app.use('/api/social-leads', express.raw({ type: '*/*', limit: '1mb' }), require('./routes/leadSourcesSocial'));
 
+// MCube IVR — the two links MCube calls when a call rings and when it ends.
+// Public (MCube cannot sign in; the long random key in the link lets a message
+// in) and read raw, because MCube sends JSON on some accounts and form fields
+// on others. (`type: () => true`: also a message that names no content type.)
+app.use('/api/telephony/hook', express.raw({ type: () => true, limit: '1mb' }), require('./routes/telephony').hooks);
+
 // A CSV import carries the whole file in the request. The normal 100 KB limit
 // refused any file beyond roughly a thousand rows ("request entity too
 // large"), so the two import routes get room for a real file.
@@ -205,6 +211,7 @@ app.use('/api/document-templates', requireAuth, require('./routes/documentTempla
 app.use('/api/company-profile', requireAuth, require('./routes/companyProfile'));
 app.use('/api/subscriptions', requireAuth, require('./routes/subscriptions'));
 app.use('/api/tickets', requireAuth, require('./routes/tickets'));
+app.use('/api/telephony', requireAuth, require('./routes/telephony'));
 app.use('/api/calls', requireAuth, require('./routes/callDisposition'));
 app.use('/api/calls', requireAuth, require('./routes/calls'));
 app.use('/api/meetings', requireAuth, require('./routes/meetings'));
