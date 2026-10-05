@@ -133,7 +133,7 @@ function sections(can) {
       title: 'Automation',
       items: [
         { to: '/settings/workflows', icon: Zap, tint: '#7C3AED', title: 'Workflows', show: can('settings', 'edit'),
-          desc: 'Automate what happens when a record is created, updated, or a field changes.' },
+          desc: 'Rules that run by themselves: tell the owner, remind about untouched leads, escalate to the manager, daily lists. Ready-made ones for every module.' },
       ],
     },
     {

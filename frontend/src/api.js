@@ -733,12 +733,32 @@ export const api = {
   globalSearch: (q, limit) => req('GET', `/search?q=${encodeURIComponent(q)}${limit ? `&limit=${limit}` : ''}`),
 
   // Universal CRM — general Workflow Automation engine
-  listWorkflows: () => req('GET', '/workflows'),
+  listWorkflows: () => req('GET', '/workflows'),                       // { workflows, clock }
   getWorkflow: (id) => req('GET', `/workflows/${id}`),
   createWorkflow: (body) => req('POST', '/workflows', body),
   updateWorkflow: (id, body) => req('PUT', `/workflows/${id}`, body),
   deleteWorkflow: (id) => req('DELETE', `/workflows/${id}`),
-  getWorkflowRuns: (id) => req('GET', `/workflows/${id}/runs`),
+  toggleWorkflow: (id, active) => req('POST', `/workflows/${id}/toggle`, { active }),
+  duplicateWorkflow: (id) => req('POST', `/workflows/${id}/duplicate`),
+  // Run it now: { record_id } for one record, nothing for every record it applies to.
+  runWorkflow: (id, body) => req('POST', `/workflows/${id}/run`, body || {}),
+  getWorkflowRuns: (id, status) => req('GET', `/workflows/${id}/runs${status ? `?status=${status}` : ''}`),
+  workflowRuns: ({ status, limit = 50, offset = 0, workflowId } = {}) => req('GET',
+    `/workflows/runs?limit=${limit}&offset=${offset}${status ? `&status=${status}` : ''}${workflowId ? `&workflow_id=${workflowId}` : ''}`),
+  // What the builder can offer for a module: fields, comparisons, steps, people.
+  workflowMeta: (module) => req('GET', `/workflows/meta${module ? `?module=${encodeURIComponent(module)}` : ''}`),
+  // A workflow as typed (saved or not): how many records it applies to now.
+  testWorkflow: (body) => req('POST', '/workflows/test', body),
+  workflowMatching: (id) => req('GET', `/workflows/${id}/matching`),
+  downloadWorkflowMatching: (id, name) => downloadFile(`/workflows/${id}/matching?format=csv`, `${name || 'workflow'}.csv`),
+  workflowSettings: () => req('GET', '/workflows/settings'),
+  saveWorkflowSettings: (body) => req('PUT', '/workflows/settings', body),
+  checkWorkflowsNow: () => req('POST', '/workflows/tick'),
+  // Ready-made workflows
+  workflowTemplates: () => req('GET', '/workflows/templates'),
+  workflowTemplate: (key) => req('GET', `/workflows/templates/${key}`),
+  useWorkflowTemplate: (key, active = true) => req('POST', `/workflows/templates/${key}/use`, { active }),
+  useWorkflowTemplates: (body) => req('POST', '/workflows/templates/use', body || {}),
 
   // Universal CRM — Pipeline Builder
   // Universal CRM — Pipeline Builder
