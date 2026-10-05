@@ -251,6 +251,13 @@ async function req(method, path, body) {
   return rawReq(method, path, body, token);
 }
 
+// A question that is sent as a POST because it is too long for an address
+// (the Leads list: search + filters + page). It changes nothing, so — unlike a
+// save — it must not empty what the screens remember.
+function ask(path, body) {
+  return rawReq('POST', path, body, localStorage.getItem('cd_token'));
+}
+
 async function rawReq(method, path, body, token, { quiet = false } = {}) {
   const tracked = !quiet && !BACKGROUND.test(path);
   if (tracked) setBusy(1);
@@ -375,6 +382,9 @@ export const api = {
 
   // leads
   listLeads: (params) => req('GET', '/leads' + qs(params)),
+  // One page of leads (or the board, or just the ids) with the real totals:
+  // { q, status, source, owner, conditions, match, ids, page, page_size, … }
+  queryLeads: (body) => ask('/leads/query', body || {}),
   getLead: (id) => req('GET', `/leads/${id}`),
   createLead: (body) => createChecked('/leads', body),
   updateLead: (id, body) => req('PUT', `/leads/${id}`, body),
@@ -450,6 +460,9 @@ export const api = {
   listRoles: () => req('GET', '/roles'),
   createRole: (body) => req('POST', '/roles', body),
   updateRolePermissions: (id, permissions) => req('PUT', `/roles/${id}/permissions`, { permissions }),
+  // Who sees which records: the modules it applies to + the "no owner" setting
+  recordAccess: () => req('GET', '/roles/record-access'),
+  saveRecordAccess: (body) => req('PUT', '/roles/record-access', body),
   deleteRole: (id) => req('DELETE', `/roles/${id}`),
 
   // security — IP & time-based access control

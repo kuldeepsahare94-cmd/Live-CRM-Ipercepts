@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import DetailSkeleton from '../components/DetailSkeleton';
+import NoAccess from '../components/NoAccess';
 import { remember, recall } from '../screenMemory';
 import {
   ArrowLeft, ArrowRight, UserCheck, Phone, Mail, MessageCircle, CalendarClock, Pencil, Flame, Snowflake, Check, X,
@@ -304,7 +305,8 @@ function Row({ label, value, strong }) {
 // Real prev/next navigation through the actual lead list.
 function usePrevNext(currentId) {
   const [ids, setIds] = useState(null);
-  useEffect(() => { api.listLeads().then((rows) => setIds(rows.map((r) => r.id))).catch(() => setIds([])); }, []);
+  // Only the ids, in list order — not every lead with all of its fields.
+  useEffect(() => { api.queryLeads({ ids_only: true }).then((r) => setIds((r?.ids || []).map(Number))).catch(() => setIds([])); }, []);
   if (!ids) return { prevId: null, nextId: null, loaded: false };
   const idx = ids.indexOf(Number(currentId));
   return {
@@ -321,6 +323,8 @@ export default function LeadDetail() {
   const location = useLocation();
   // A lead seen before shows at once, then refreshes (screenMemory.js).
   const [lead, setLead] = useState(() => recall(`lead:${id}`));
+  const leadRef = useRef(lead);
+  leadRef.current = lead;
   // One flow for "what happened + what's next" (was: separate Dispose and
   // Schedule Call buttons that each set a follow-up their own way).
   const [loggingOutcome, setLoggingOutcome] = useState(false);
@@ -348,9 +352,29 @@ export default function LeadDetail() {
 
   // The lead and its custom fields are fetched side by side (they used to be
   // one after the other).
+  // The lead could not be opened: it is someone else's (the role sees only
+  // its own / its team's leads), it is gone, or the request failed.
+  const [loadError, setLoadError] = useState(null);
+  const idRef = useRef(id);
+  idRef.current = id;
   const load = () => {
     loadCustomFields();
-    return api.getLead(id).then((l) => { setLead(l); remember(`lead:${id}`, l); });
+    const asked = id;
+    return api.getLead(id)
+      .then((l) => {
+        remember(`lead:${asked}`, l);
+        if (idRef.current !== asked) return;          // another lead is on screen by now
+        setLoadError(null); setLead(l);
+      })
+      .catch((e) => {
+        if (idRef.current !== asked) return;
+        // A refusal takes away what was shown from memory; and a lead that
+        // could not be loaded is never left showing the previous lead's
+        // details. (A refresh of the lead already on screen that fails for
+        // another reason leaves it as it is.)
+        const shownIsThis = leadRef.current && String(leadRef.current.id) === String(asked);
+        if (e?.status === 403 || e?.status === 404 || !shownIsThis) { setLead(null); setLoadError(e); }
+      });
   };
 
   // Custom fields an admin has added to Leads in Settings. They are editable
@@ -369,8 +393,11 @@ export default function LeadDetail() {
       })
       .catch(() => setCustomFields([]));
   };
-  useEffect(() => { load(); setPageTab('overview'); }, [id]);
+  useEffect(() => { setLoadError(null); load(); setPageTab('overview'); }, [id]);
 
+  if (loadError && !lead) {
+    return <NoAccess error={loadError} backTo="/leads" backLabel="Back to Leads" onRetry={() => { setLoadError(null); load(); }} />;
+  }
   if (!lead) {
     const preview = location.state?.preview;
     return <DetailSkeleton title={preview && String(preview.id) === String(id) ? preview.title : ''} />;

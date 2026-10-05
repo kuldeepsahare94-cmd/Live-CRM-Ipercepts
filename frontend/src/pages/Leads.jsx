@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   UserPlus, List, Columns3, Search, Mail, Phone, Clock, Download, X,
-  Users as UsersIcon, Sparkles, MoreVertical, Plus, Pencil,
+  Users as UsersIcon, Sparkles, MoreVertical, Plus, Pencil, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -10,13 +10,13 @@ import { downloadCSV } from '../utils/csv';
 import LeadEditModal from '../components/LeadEditModal';
 import { useModuleOptions, allOptions, selectableOptions, labelFor, toOptionsJson } from '../components/fieldOptions';
 import { localToIso, browserTimeZone } from '../components/followup/time';
-import DrillBanner, { useDrill, applyDrill } from '../components/DrillBanner';
+import DrillBanner, { useDrill } from '../components/DrillBanner';
 import AssignPicker from '../components/AssignPicker';
 import { remember, recall } from '../screenMemory';
-import StatusCards, { statusBreakdown, matchesStatus, BLANK } from '../components/StatusCards';
+import StatusCards, { breakdownFromServer, BLANK } from '../components/StatusCards';
 import { DuplicateHint, RepeatBadge } from '../components/DuplicateDialog';
 import {
-  FilterButton, FilterPanel, ActiveFilterChips, SavedFiltersMenu, applyFilters, isComplete, useMe,
+  FilterButton, FilterPanel, ActiveFilterChips, SavedFiltersMenu, isComplete, kindOf,
   useSelection, RowCheckbox, BulkBar, BulkUpdateModal, BulkAssignModal, BulkDeleteModal, runBulk,
 } from '../components/ListTools';
 import {
@@ -87,7 +87,9 @@ const toneVars = (status) => TONE_VARS[toneFor(status)] || TONE_VARS.neutral;
 
 const relative = (iso) => {
   if (!iso) return null;
-  const d = new Date(iso);
+  // The server stores "2026-10-05 04:30:00" in UTC; read as local time it was
+  // hours off ("5h ago" for a lead added a minute ago).
+  const d = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(String(iso)) ? `${String(iso).replace(' ', 'T')}Z` : iso);
   if (Number.isNaN(d.getTime())) return null;
   const mins = Math.floor((Date.now() - d.getTime()) / 60000);
   if (mins < 1) return 'just now';
@@ -197,7 +199,10 @@ function LeadCardBody({ lead, statuses, sourceLabel, canEdit, moving, moveError,
   );
 }
 
-function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, onMoved, only = '', order = [] }) {
+// `leads` holds the newest cards of every status, not every lead: `totals`
+// says how many each status really has, and `onMore` fetches the next cards
+// of one column.
+function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, onMoved, only = '', order = [], totals = {}, onMore, moreBusy = '' }) {
   // Drag-and-drop, implemented with the native HTML5 drag events rather
   // than pulling in a drag library for one board.
   //
@@ -241,11 +246,25 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
     const first = columns[0]?.value;
     leads.forEach((l) => {
       const effective = optimistic[l.id] || l.status || BLANK;
-      const key = map[effective] ? effective : first;
+      // One status is chosen: cards of any other status (still on the board
+      // from before, until the new answer arrives) are not shown under it.
+      const key = map[effective] ? effective : (only ? null : first);
       if (key) map[key].push(l);
     });
     return map;
-  }, [leads, optimistic, columns]);
+  }, [leads, optimistic, columns, only]);
+  // Cards on their way to another column (the save is still running).
+  const moving = useMemo(() => {
+    const out = {};
+    leads.forEach((l) => {
+      const to = optimistic[l.id];
+      const from = l.status || BLANK;
+      if (!to || to === from) return;
+      out[from] = (out[from] || 0) - 1;
+      out[to] = (out[to] || 0) + 1;
+    });
+    return out;
+  }, [leads, optimistic]);
 
   const handleDrop = async (status) => {
     setDragOver(null);
@@ -284,6 +303,7 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
       {columns.map(({ value: status, label: statusName, active, unlisted, blank }) => {
         const [soft, solid] = toneVars(status);
         const items = byStatus[status] || [];
+        const total = Math.max((Number(totals[status]) || 0) + (moving[status] || 0), items.length);
         const isTarget = dragOver === status && dragLead && dragLead.status !== status;
         return (
           <section key={status} className={`${only ? 'w-full' : 'w-[280px]'} shrink-0 rounded-xl flex flex-col transition-all`}
@@ -303,7 +323,7 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: solid }} />
                   <h3 className="text-sm font-semibold truncate" style={{ color: solid }}>{statusName}{active ? '' : ' (inactive)'}</h3>
                   <span className="text-xs font-medium px-1.5 rounded-full shrink-0"
-                    style={{ background: 'rgba(255,255,255,.7)', color: solid }}>{items.length}</span>
+                    style={{ background: 'rgba(255,255,255,.7)', color: solid }}>{total}</span>
                 </div>
                 <button className="p-0.5 rounded opacity-50 hover:opacity-100 shrink-0"
                   style={{ color: solid }} aria-label={`${statusName} column options`}>
@@ -322,6 +342,13 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
               ))}
               {items.length === 0 && (
                 <p className="text-[11px] text-center py-6 opacity-60 col-span-full" style={{ color: solid }}>No leads</p>
+              )}
+              {total > items.length && onMore && (
+                <button type="button" onClick={() => onMore(status)} disabled={moreBusy === status} data-show-more={status}
+                  className="w-full py-2 rounded-lg text-xs font-medium bg-white/60 hover:bg-white transition-colors col-span-full disabled:opacity-60"
+                  style={{ color: solid }}>
+                  {moreBusy === status ? 'Loading…' : `Show more (${(total - items.length).toLocaleString('en-IN')} more)`}
+                </button>
               )}
             </div>
 
@@ -486,28 +513,66 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
   );
 }
 
+// How many leads a page of the list holds, and how many cards a board column
+// starts with.
+const PAGE_SIZES = [25, 50, 100, 200];
+const BOARD_STEP = 30;
+const localToday = () => new Date().toLocaleDateString('en-CA');
+const num = (n) => Number(n || 0).toLocaleString('en-IN');
+
+function Pager({ page, pages, total, from, to, pageSize, onPage, onPageSize, busy }) {
+  const btn = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-line bg-white text-[var(--color-muted)] hover:text-ink hover:border-[var(--color-brand-border)] disabled:opacity-40 disabled:hover:text-[var(--color-muted)]';
+  return (
+    // (room on the right: the round assistant button floats over that corner)
+    <div className="pl-4 py-2.5 border-t border-line flex items-center justify-between gap-3 flex-wrap" data-pager style={{ paddingRight: 72 }}>
+      <div className="t-meta" data-pager-summary>
+        {total === 0 ? 'No leads' : <>Showing <b className="text-ink">{num(from)}–{num(to)}</b> of <b className="text-ink">{num(total)}</b> lead{total === 1 ? '' : 's'}</>}
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className="t-meta flex items-center gap-1.5">
+          Rows per page
+          <select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page"
+            className="border border-line rounded-lg px-1.5 py-1 text-xs bg-white text-ink">
+            {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+        <div className="flex items-center gap-1">
+          <button type="button" className={btn} onClick={() => onPage(1)} disabled={busy || page <= 1} aria-label="First page"><ChevronsLeft className="w-4 h-4" /></button>
+          <button type="button" className={btn} onClick={() => onPage(page - 1)} disabled={busy || page <= 1} aria-label="Previous page"><ChevronLeft className="w-4 h-4" /></button>
+          <span className="t-meta px-1.5 whitespace-nowrap" data-pager-page>Page <b className="text-ink">{num(page)}</b> of {num(pages)}</span>
+          <button type="button" className={btn} onClick={() => onPage(page + 1)} disabled={busy || page >= pages} aria-label="Next page"><ChevronRight className="w-4 h-4" /></button>
+          <button type="button" className={btn} onClick={() => onPage(pages)} disabled={busy || page >= pages} aria-label="Last page"><ChevronsRight className="w-4 h-4" /></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Leads() {
   const can = usePermissions();
-  // Coming back to Leads shows the last list at once; fresh rows follow.
-  const [list, setList] = useState(() => recall('leads:list') || []);
   const leadOpts = useModuleOptions('leads');
   const statuses = useMemo(() => allOptions(leadOpts?.status, FALLBACK_STATUSES), [leadOpts]);
   const sources = useMemo(() => allOptions(leadOpts?.source), [leadOpts]);
   const qualifications = useMemo(() => allOptions(leadOpts?.qualification), [leadOpts]);
   const sourceLabel = (v) => labelFor(leadOpts?.source, v);
-  const [loading, setLoading] = useState(() => !recall('leads:list'));
-  const [error, setError] = useState(null);
   const [view, setView] = useState(() => localStorage.getItem('leads_view') || 'list');
   const [statusFilter, setStatusFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
   const [q, setQ] = useState('');
+  const [search, setSearch] = useState('');           // q, once typing has paused
   const [addFor, setAddFor] = useState(null);
   const [editingId, setEditingId] = useState(null);   // lead being edited in the popup
   // Opened from a dashboard figure: narrow to exactly the leads behind it.
   const drill = useDrill();
+  const [urlParams] = useSearchParams();
+  const drillParams = useMemo(() => {
+    const out = {};
+    urlParams.forEach((v, k) => { if (k !== 'drill') out[k] = v; });
+    return out;
+  }, [urlParams]);
+  const drillKey = JSON.stringify(drillParams);
   // Field filters, saved filters, row selection and bulk actions.
-  const me = useMe();
   const [showFilters, setShowFilters] = useState(false);
   const [conditions, setConditions] = useState([]);
   const [match, setMatch] = useState('all');
@@ -516,43 +581,52 @@ export default function Leads() {
   const [bulk, setBulk] = useState(null);
   const selection = useSelection('leads');
 
-  // The status is chosen on this screen (cards / dropdown) and applied here,
-  // not by the server: the cards need every status's count at the same time,
-  // and a click then shows its leads at once with no wait.
-  const load = () => {
-    setError(null);
-    return api.listLeads({ q })
-      .then((rows) => { setList(rows); if (!q && Array.isArray(rows)) remember('leads:list', rows); })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  };
+  // ---- What is on screen ----------------------------------------------------
+  // The server searches, filters and counts; only one page of leads (or the
+  // first cards of each board column) is fetched. So the list opens as fast
+  // with fifty thousand leads as with fifty.
+  const [pageSize, setPageSize] = useState(() => {
+    const n = Number(localStorage.getItem('leads_page_size'));
+    return PAGE_SIZES.includes(n) ? n : 50;
+  });
+  // Coming back to Leads shows the last first page at once; fresh rows follow.
+  const kept = useMemo(() => { const k = drill.active ? null : recall('leads:first'); return k && k.pageSize === pageSize ? k : null; }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [data, setData] = useState(() => kept?.data || null);       // the list: { rows, total, page, pages, … }
+  const [board, setBoard] = useState(null);                          // the board: { board: [...], … }
+  const [more, setMore] = useState({});                              // board: cards fetched with "Show more", by status
+  const [moreBusy, setMoreBusy] = useState('');
+  const [summary, setSummary] = useState(() => kept?.data || null);  // totals for the cards (same for list and board)
+  const [meta, setMeta] = useState(() => kept?.meta || { owners: [], facets: {} });
+  const [loading, setLoading] = useState(!kept);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [notice, setNotice] = useState('');           // a small problem that does not hide the list
+  // Which dashboard figure the answers on screen belong to ('' = none).
+  const [answeredDrill, setAnsweredDrill] = useState('');
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Search box debounce. It is skipped on the first render: the effect above
-  // has already loaded the list, and running here too fetched every lead a
-  // second time 300 ms later on each visit to this page.
-  const searchReady = useRef(false);
-  useEffect(() => {
-    if (!searchReady.current) { searchReady.current = true; return undefined; }
-    const t = setTimeout(load, 300); return () => clearTimeout(t);
-  }, [q]);
+  useEffect(() => { const t = setTimeout(() => setSearch(q), 300); return () => clearTimeout(t); }, [q]);
   useEffect(() => { localStorage.setItem('leads_view', view); }, [view]);
+  useEffect(() => { localStorage.setItem('leads_page_size', String(pageSize)); }, [pageSize]);
 
-  const owners = useMemo(
-    () => [...new Set(list.map((l) => l.assigned_counselor).filter(Boolean))],
-    [list]
+  const owners = meta.owners || [];
+  // Rows that only carry the values a free-text field holds across ALL leads
+  // (cities, campaigns…), for the filter panel's and the mass update's choices.
+  const facetRows = useMemo(
+    () => Object.entries(meta.facets || {}).flatMap(([field, values]) => (values || []).map((v) => ({ [field]: v }))),
+    [meta],
   );
 
-  // Source/owner filter client-side; status and search go to the API.
   // Every configured option (inactive ones too — existing leads can hold
   // them) plus any value the data holds that is not configured at all.
+  const held = useMemo(() => ({
+    status: [...new Set([...(meta.facets?.status || []), ...(summary?.status_counts || []).map((c) => c.value)])],
+    source: meta.facets?.source || [],
+    qualification: meta.facets?.qualification || [],
+  }), [summary, meta]);
   const withData = (opts, key) => {
     const known = new Set(opts.map((o) => o.value));
-    const extra = [...new Set(list.map((l) => l[key]).filter((v) => v && !known.has(String(v))))];
+    const extra = [...new Set((held[key] || []).filter((v) => v && !known.has(String(v))))];
     return [...opts, ...extra.map((v) => ({ value: String(v), label: String(v), active: false }))];
   };
   const fields = useMemo(() => leadFields(
@@ -560,58 +634,229 @@ export default function Leads() {
     withData(sources, 'source'),
     withData(qualifications, 'qualification'),
     { ratings: leadOpts?.lead_rating, genders: leadOpts?.gender },
-  ), [list, statuses, sources, qualifications, leadOpts]); // eslint-disable-line react-hooks/exhaustive-deps
+  ), [held, statuses, sources, qualifications, leadOpts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Everything except the status choice: search, source, owner, the filter
-  // panel and a dashboard drill-down. The cards are counted from this, so a
+  // panel and a dashboard drill-down. The cards are counted on this, so a
   // card's number is always the number of leads it shows when clicked.
-  const base = useMemo(() => applyFilters(applyDrill(list, drill).filter((l) => (
-    (!sourceFilter || l.source === sourceFilter) &&
-    (!ownerFilter || l.assigned_counselor === ownerFilter)
-  )), conditions, match, fields, leadValue, me), [list, sourceFilter, ownerFilter, drill.idSet, drill.active, conditions, match, fields, me]);
+  const question = useMemo(() => {
+    const out = {
+      q: search.trim(), source: sourceFilter, owner: ownerFilter, match, today: localToday(),
+      conditions: conditions.filter(isComplete).map((c) => {
+        const f = fields.find((x) => x.api_name === c.field);
+        return f ? { field: c.field, op: c.op, value: c.value, value2: c.value2, quick: !!c.quick, kind: kindOf(f) } : null;
+      }).filter(Boolean),
+    };
+    // Opened from a dashboard figure: the server narrows the list with the
+    // figure's own query (its leads are not sent there and back as ids).
+    if (drill.active) out.drill = { metric: drill.metric, ...drillParams };
+    return out;
+  }, [search, sourceFilter, ownerFilter, conditions, match, fields, drill.active, drill.metric, drillKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const questionKey = JSON.stringify(question);
+  const plain = !search.trim() && !sourceFilter && !ownerFilter && !statusFilter && !question.conditions.length && !drill.active;
+
+  // The page belongs to one question: a new search or filter starts at page 1.
+  const pageKey = `${questionKey}|${statusFilter}|${pageSize}`;
+  const [pageAt, setPageAt] = useState({ key: pageKey, n: 1 });
+  const page = pageAt.key === pageKey ? pageAt.n : 1;
+  const setPage = (n) => setPageAt({ key: pageKey, n: Math.max(1, n) });
+
+  // Opened from a dashboard figure: waiting for it, ready, failed — or not at all.
+  const drillState = !drill.active ? 'off' : drill.data ? 'ready' : drill.error ? 'error' : 'wait';
+  const drillNow = drill.active ? JSON.stringify(question.drill || {}) : '';
+  const sigOf = (p) => [questionKey, statusFilter, p, pageSize, view, drillState].join('|');
+  const answeredSig = useRef('');            // the answer on screen already covers this (see load)
+
+  const seq = useRef(0);
+  const metaStale = useRef(true);            // owners and filter choices: asked for with the next load
+  const boardPer = useRef(BOARD_STEP);       // cards per column the board is loaded with
+  const load = async () => {
+    // Opened from a dashboard figure: wait for its list of leads (if that
+    // fails, the banner says so and nothing is listed).
+    if (drill.active && !drill.data) { if (drill.error) setLoading(false); return; }
+    const mine = ++seq.current;
+    const forDrill = drillNow;
+    const wantMeta = metaStale.current;
+    setBusy(true); setError(null);
+    try {
+      const body = { ...question, status: statusFilter, ...(wantMeta ? { with_owners: true, with_facets: true } : {}) };
+      const res = view === 'kanban'
+        ? await api.queryLeads({ ...body, board: { per_status: boardPer.current } })
+        : await api.queryLeads({ ...body, page, page_size: pageSize });
+      if (mine !== seq.current) return;              // a newer question was asked meanwhile
+      let nextMeta = meta;
+      if (wantMeta && res.owners) {
+        nextMeta = { owners: res.owners, facets: res.facets || {} };
+        setMeta(nextMeta);
+        metaStale.current = false;
+      }
+      setSummary(res);
+      setAnsweredDrill(forDrill);
+      if (view === 'kanban') { setBoard(res); setMore({}); } else {
+        setData(res);
+        // Asked for a page past the end (the last rows of the last page were
+        // deleted): the server answered with the last page there is — shown
+        // as it is, not asked for a second time.
+        if (res.page && res.page !== page) { answeredSig.current = sigOf(res.page); setPage(res.page); }
+        if (plain && res.page === 1) remember('leads:first', { data: res, meta: nextMeta, pageSize });
+      }
+    } catch (e) {
+      if (mine === seq.current) setError(e.message || 'Could not load the leads.');
+    } finally {
+      if (mine === seq.current) { setLoading(false); setBusy(false); }
+    }
+  };
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  // After something was saved: the same view again, with fresh totals,
+  // owners and filter choices — and nothing left ticked that the change took
+  // out of the list.
+  const keepRef = useRef(() => {});
+  const refresh = () => { metaStale.current = true; keepRef.current(); return loadRef.current(); };
+  // …the same, back on the first page (a lead that was just added is there).
+  const refreshFromTop = () => { if (page === 1) return refresh(); metaStale.current = true; setPage(1); return undefined; };
+
+  const sig = sigOf(page);
+  useEffect(() => {
+    if (answeredSig.current === sig) { answeredSig.current = ''; return; }
+    answeredSig.current = '';
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+
+  // A different question: what was ticked may no longer be in it.
+  const selectionKey = `${questionKey}|${statusFilter}`;
+  const firstSelectionKey = useRef(selectionKey);
+  useEffect(() => {
+    if (firstSelectionKey.current === selectionKey) return;
+    firstSelectionKey.current = selectionKey;
+    selection.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey]);
 
   // One card per real status: the configured ones in their order, plus any
   // other status the leads actually hold. Nothing is grouped or renamed.
+  // (While a dashboard figure's leads are still being worked out — or could
+  // not be — the cards count nothing, rather than the list that was on screen
+  // before.)
+  const counted = (drill.active && !drill.data) || answeredDrill !== drillNow ? null : summary;
   const statusCards = useMemo(
-    () => statusBreakdown(base, (l) => l.status, statuses, { selected: statusFilter, blankLabel: 'No status' }),
-    [base, statuses, statusFilter],
+    () => breakdownFromServer(counted?.status_counts || [], statuses, { selected: statusFilter, blankLabel: 'No status' }),
+    [counted, statuses, statusFilter],
   );
+  const baseTotal = counted?.base_total || 0;
+  const total = counted?.total || 0;                 // matching everything, the status included
 
-  const filtered = useMemo(
-    () => (statusFilter ? base.filter((l) => matchesStatus(l.status, statusFilter)) : base),
-    [base, statusFilter],
-  );
+  const stale = answeredDrill !== drillNow;         // what is held was asked for another dashboard figure (or none)
+  const rows = stale ? [] : (data?.rows || []);
+  const from = total === 0 ? 0 : ((data?.page || 1) - 1) * (data?.page_size || pageSize) + 1;
+  const to = from === 0 ? 0 : from + rows.length - 1;
 
-  useEffect(() => {
-    const visible = new Set(filtered.map((r) => r.id));
-    const stale = [...selection.ids].filter((id) => !visible.has(id));
-    if (stale.length) selection.setMany(stale, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered]);
+  // The board: the first cards of every column, then what "Show more" added.
+  const boardLeads = useMemo(() => {
+    if (stale) return [];
+    const first = board?.board || [];
+    const seen = new Set(first.map((l) => l.id));
+    const extra = Object.values(more).flat().filter((l) => !seen.has(l.id) && seen.add(l.id));
+    return [...first, ...extra];
+  }, [board, more, stale]);
+  const boardTotals = useMemo(() => {
+    const out = {};
+    (summary?.status_counts || []).forEach((c) => { const k = c.value === null || String(c.value).trim() === '' ? BLANK : String(c.value); out[k] = (out[k] || 0) + (Number(c.n) || 0); });
+    return out;
+  }, [summary]);
+  const showMore = async (status) => {
+    const have = boardLeads.filter((l) => (l.status || BLANK) === status || (status === BLANK && String(l.status || '').trim() === '')).length;
+    const asked = seq.current;
+    setMoreBusy(status);
+    try {
+      const res = await api.queryLeads({ ...question, status, offset: have, page_size: BOARD_STEP });
+      if (asked !== seq.current) return;             // the board was reloaded meanwhile (new search, a save)
+      setMore((m) => ({ ...m, [status]: [...(m[status] || []), ...(res.rows || [])] }));
+      boardPer.current = Math.min(200, Math.max(boardPer.current, have + (res.rows || []).length));
+    } catch (e) { setNotice(`Could not load more leads: ${e.message || 'please try again.'}`); } finally { setMoreBusy(''); }
+  };
 
+  const shown = view === 'kanban' ? boardLeads : rows;
   const selectedIds = [...selection.ids];
-  const allSelected = filtered.length > 0 && filtered.every((l) => selection.has(l.id));
-  const someSelected = filtered.some((l) => selection.has(l.id));
+  const allSelected = rows.length > 0 && rows.every((l) => selection.has(l.id));
+  const someSelected = rows.some((l) => selection.has(l.id));
   const runUpdate = async (field, value, onProgress) => {
     const result = await runBulk(selectedIds, (id) => api.updateLead(id, { [field.api_name]: value }), onProgress);
-    load();
+    refresh();
     return result;
   };
   const runUpdateMany = async (changes, onProgress) => {
     const body = Object.fromEntries(changes.map((c) => [c.field.api_name, c.value]));
     const result = await runBulk(selectedIds, (id) => api.updateLead(id, body), onProgress);
-    load();
+    refresh();
     return result;
   };
   const runDelete = async (onProgress) => {
     const result = await runBulk(selectedIds, (id) => api.deleteLead(id), onProgress, 2);
     selection.clear();
-    load();
+    refresh();
     return result;
   };
   const reassign = (l) => async (value) => {
     await api.updateLead(l.id, { assigned_counselor: value || null });
-    setList((ls) => ls.map((x) => (x.id === l.id ? { ...x, assigned_counselor: value } : x)));
+    setData((d) => (d ? { ...d, rows: d.rows.map((x) => (x.id === l.id ? { ...x, assigned_counselor: value } : x)) } : d));
+    if (value) setMeta((m) => (m.owners?.includes(value) ? m : { ...m, owners: [...(m.owners || []), value].sort((a, b) => a.localeCompare(b)) }));
+    refresh();                                        // the row may no longer belong in this list; the choices may have changed
+  };
+
+  // Every lead that matches, not just the page on screen.
+  const [capped, setCapped] = useState(0);          // "select all" stopped at this many
+  const selectionKeyRef = useRef('');
+  selectionKeyRef.current = selectionKey;
+  const selectAllMatching = async () => {
+    const asked = selectionKey;
+    try {
+      const res = await api.queryLeads({ ...question, status: statusFilter, ids_only: true });
+      if (asked !== selectionKeyRef.current) return;  // the search or a filter changed meanwhile
+      selection.replace(res.ids || []);
+      setCapped(res.capped ? (res.ids || []).length : 0);
+    } catch (e) { setNotice(`Could not select all the leads: ${e.message || 'please try again.'}`); }
+  };
+  useEffect(() => { if (selection.ids.size !== capped) setCapped(0); }, [selection.ids]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!notice) return undefined; const t = setTimeout(() => setNotice(''), 8000); return () => clearTimeout(t); }, [notice]);
+  // After a change to the ticked leads some may no longer match the search
+  // and filters on screen: they are unticked, so the next action cannot touch
+  // leads that are out of sight.
+  const keepMatchingSelected = async (ids) => {
+    if (!ids.length) return;
+    const asked = selectionKeyRef.current;
+    try {
+      const res = await api.queryLeads({ ...question, status: statusFilter, ids_only: true });
+      if (res.capped || asked !== selectionKeyRef.current) return;
+      const still = new Set((res.ids || []).map(Number));
+      selection.replace(ids.filter((id) => still.has(Number(id))));
+    } catch { /* the selection stays as it is */ }
+  };
+  keepRef.current = () => { if (selection.ids.size) keepMatchingSelected([...selection.ids]); };
+  const exportAll = async () => {
+    setExporting(true);
+    try {
+      const all = [];
+      let p = 1; let pages = 1;
+      do {
+        const res = await api.queryLeads({ ...question, status: statusFilter, page: p, page_size: 1000 });
+        all.push(...(res.rows || []));
+        pages = res.pages || 1;
+        p += 1;
+      } while (p <= pages);
+      downloadCSV('leads.csv', all);
+    } catch (e) { alert(`Could not export: ${e.message}`); } finally { setExporting(false); }
+  };
+  const exportSelected = async () => {
+    try {
+      const all = [];
+      for (let i = 0; i < selectedIds.length; i += 1000) {
+        const res = await api.queryLeads({ ids: selectedIds.slice(i, i + 1000), page_size: 1000 });
+        all.push(...(res.rows || []));
+      }
+      downloadCSV('leads-selected.csv', all);
+    } catch (e) { alert(`Could not export: ${e.message}`); }
   };
 
   const viewBtn = (id, Icon, label) => (
@@ -620,6 +865,9 @@ export default function Leads() {
       <Icon className="w-4 h-4" /> {label}
     </button>
   );
+  const waitingForDrill = drill.active && drill.loading;
+  const ready = !loading && !error && !(drill.active && (drill.loading || drill.error));
+  const have = stale ? null : (view === 'kanban' ? board : data);      // the answer for the view on screen
 
   return (
     <div className="max-w-[1600px] mx-auto">
@@ -627,8 +875,9 @@ export default function Leads() {
         {viewBtn('list', List, 'List View')}
         {viewBtn('kanban', Columns3, 'Kanban View')}
         {can('leads', 'export') && (
-          <button onClick={() => downloadCSV('leads.csv', filtered)} className="btn btn-secondary">
-            <Download className="w-4 h-4" /><span className="hidden sm:inline">Export</span>
+          <button onClick={exportAll} disabled={exporting} className="btn btn-secondary disabled:opacity-60"
+            title={`Download ${num(total)} lead${total === 1 ? '' : 's'}`}>
+            <Download className="w-4 h-4" /><span className="hidden sm:inline">{exporting ? 'Exporting…' : 'Export'}</span>
           </button>
         )}
         {can('leads', 'create') && (
@@ -644,7 +893,7 @@ export default function Leads() {
           and board); click it again, or click Total Leads, to see all. */}
       {loading ? <SkeletonCards count={5} /> : (
         <StatusCards
-          total={{ label: 'Total Leads', value: base.length, icon: UsersIcon, from: '#E879F9', to: '#A21CAF' }}
+          total={{ label: 'Total Leads', value: baseTotal, icon: UsersIcon, from: '#E879F9', to: '#A21CAF' }}
           items={statusCards} selected={statusFilter} onSelect={setStatusFilter} />
       )}
 
@@ -668,18 +917,18 @@ export default function Leads() {
           <option value="">All Sources</option>
           {sources.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
-        {owners.length > 0 && (
+        {(owners.length > 0 || ownerFilter) && (
           <select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}
             className="input w-auto min-w-[130px]" aria-label="Filter by owner">
             <option value="">All Owners</option>
-            {owners.map((o) => <option key={o}>{o}</option>)}
+            {[...new Set([...owners, ...(ownerFilter ? [ownerFilter] : [])])].map((o) => <option key={o}>{o}</option>)}
           </select>
         )}
         <FilterButton count={conditions.filter(isComplete).length} open={showFilters} onClick={() => setShowFilters((v) => !v)} />
         <SavedFiltersMenu module="leads" refreshKey={savedRefresh} activeId={activeSaved?.id}
           onSelect={(f) => { setActiveSaved(f); setConditions(f ? f.filters : []); setMatch(f ? f.match : 'all'); setShowFilters(false); }} />
         {(q || statusFilter || sourceFilter || ownerFilter) && (
-          <button onClick={() => { setQ(''); setStatusFilter(''); setSourceFilter(''); setOwnerFilter(''); }}
+          <button onClick={() => { setQ(''); setSearch(''); setStatusFilter(''); setSourceFilter(''); setOwnerFilter(''); }}
             className="text-xs font-medium px-3 py-2 rounded-lg border border-line text-slate-500 hover:text-ink hover:bg-[var(--color-canvas)]">
             Clear
           </button>
@@ -688,7 +937,7 @@ export default function Leads() {
 
       {showFilters && (
         <div className="mb-3">
-          <FilterPanel key={activeSaved?.id || 'adhoc'} module="leads" fields={fields} initial={conditions} initialMatch={match} rows={list} getValue={leadValue}
+          <FilterPanel key={activeSaved?.id || 'adhoc'} module="leads" fields={fields} initial={conditions} initialMatch={match} rows={facetRows} getValue={leadValue}
             onClose={() => setShowFilters(false)} onSaved={() => setSavedRefresh((n) => n + 1)}
             onApply={(conds, m, saved) => { setConditions(conds); setMatch(m); setActiveSaved(saved || null); setShowFilters(false); }} />
         </div>
@@ -697,27 +946,40 @@ export default function Leads() {
         <ActiveFilterChips conditions={conditions} match={match} fields={fields} savedName={activeSaved?.name}
           onRemove={(c) => { setConditions((cs) => cs.filter((x) => x !== c)); setActiveSaved(null); }}
           onClear={() => { setConditions([]); setActiveSaved(null); }} />
-        <BulkBar count={selection.ids.size} pageCount={filtered.length} matchingCount={filtered.length} allPageSelected={allSelected}
-          onSelectAllMatching={() => selection.replace(filtered.map((l) => l.id))} onClear={selection.clear}
+        <BulkBar count={selection.ids.size} pageCount={rows.length} matchingCount={capped ? selection.ids.size : total} allPageSelected={allSelected}
+          onSelectAllMatching={selectAllMatching} onClear={selection.clear}
           canEdit={can('leads', 'edit')} canDelete={can('leads', 'delete')} canExport={can('leads', 'export')} hasUserField
           onUpdate={() => setBulk('update')} onAssign={() => setBulk('assign')} onDelete={() => setBulk('delete')}
-          onExport={() => downloadCSV('leads-selected.csv', filtered.filter((l) => selection.has(l.id)))} />
+          onExport={exportSelected} />
+        {capped > 0 && selection.ids.size > 0 && (
+          <p className="t-meta mt-1.5" data-selection-capped>
+            {num(capped)} is the most that can be selected at once, so the newest {num(capped)} of the {num(total)} matching leads are selected.
+          </p>
+        )}
       </div>
 
-      <DrillBanner drill={drill} shown={drill.data ? filtered.length : undefined} noun="leads" />
-      {drill.active && drill.data && <div className="mb-4" />}
-
-      {(loading || (drill.active && drill.loading)) && <SkeletonRows rows={6} cols={6} />}
-
-      {!loading && error && (
-        <ErrorState message="Unable to load leads." detail={error} onRetry={() => { setLoading(true); load(); }} />
+      {notice && (
+        <div className="text-xs rounded-lg px-3 py-2 mb-3 flex items-center justify-between gap-3" role="status" data-leads-notice
+          style={{ background: 'var(--color-warning-soft)', color: 'var(--color-warning-strong, var(--color-warning))' }}>
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss" className="shrink-0"><X className="w-3.5 h-3.5" /></button>
+        </div>
       )}
 
-      {!loading && !error && !(drill.active && (drill.loading || drill.error)) && filtered.length === 0 && (
+      <DrillBanner drill={drill} shown={drill.data && !stale ? total : undefined} noun="leads" />
+      {drill.active && drill.data && <div className="mb-4" />}
+
+      {(loading || waitingForDrill || (ready && !have)) && <SkeletonRows rows={6} cols={6} />}
+
+      {!loading && error && (
+        <ErrorState message="Unable to load leads." detail={error} onRetry={() => { setLoading(true); refresh(); }} />
+      )}
+
+      {ready && have && shown.length === 0 && (
         <EmptyState icon={UsersIcon} title={drill.data ? 'No leads match these dashboard filters' : 'No leads found'}
           description={drill.data
             ? 'Nothing currently meets the criteria above — the dashboard figure is genuinely zero.'
-            : q || statusFilter || sourceFilter || ownerFilter
+            : q || statusFilter || sourceFilter || ownerFilter || question.conditions.length
               ? 'No leads match your current filters. Try clearing them.'
               : 'Leads you add or capture will appear here.'}>
           {can('leads', 'create') && (
@@ -728,20 +990,23 @@ export default function Leads() {
         </EmptyState>
       )}
 
-      {!loading && !error && !(drill.active && drill.loading) && filtered.length > 0 && view === 'kanban' && (
-        <KanbanBoard leads={filtered} statuses={statuses} sourceLabel={sourceLabel} onAdd={setAddFor} canCreate={can('leads', 'create')}
-          canEdit={can('leads', 'edit')} onMoved={load} only={statusFilter} order={statusCards.map((c) => c.value)} />
+      {ready && have && shown.length > 0 && view === 'kanban' && (
+        <div style={{ opacity: busy ? 0.6 : 1, transition: 'opacity .15s' }} aria-busy={busy}>
+          <KanbanBoard leads={boardLeads} statuses={statuses} sourceLabel={sourceLabel} onAdd={setAddFor} canCreate={can('leads', 'create')}
+            canEdit={can('leads', 'edit')} onMoved={refresh} only={statusFilter} order={statusCards.map((c) => c.value)}
+            totals={boardTotals} onMore={showMore} moreBusy={moreBusy} />
+        </div>
       )}
 
-      {!loading && !error && !(drill.active && drill.loading) && filtered.length > 0 && view === 'list' && (
+      {ready && have && shown.length > 0 && view === 'list' && (
         <div className="card overflow-hidden">
-          <div className="overflow-x-auto thin-scroll">
+          <div className="overflow-x-auto thin-scroll" style={{ opacity: busy ? 0.6 : 1, transition: 'opacity .15s' }} aria-busy={busy}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left bg-[var(--color-canvas)] border-b border-line">
                   <th className="py-2.5 pl-4 pr-1 w-8">
                     <RowCheckbox checked={allSelected} indeterminate={!allSelected && someSelected} label="Select all leads shown"
-                      onChange={() => selection.setMany(filtered.map((l) => l.id), !allSelected)} />
+                      onChange={() => selection.setMany(rows.map((l) => l.id), !allSelected)} />
                   </th>
                   {['Lead', 'Contact', 'Source', 'Status', 'Rating', 'Assigned To', 'Next Follow-up', 'Created'].map((h) => (
                     <th key={h} className="py-2.5 px-4 t-meta font-semibold whitespace-nowrap">{h}</th>
@@ -750,7 +1015,7 @@ export default function Leads() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((l) => (
+                {rows.map((l) => (
                   <tr key={l.id} className="border-b border-line/60 hover:bg-[var(--color-canvas)] transition-colors"
                     style={selection.has(l.id) ? { background: 'var(--color-brand-faint)' } : undefined}>
                     <td className="py-3 pl-4 pr-1 w-8">
@@ -810,14 +1075,13 @@ export default function Leads() {
               </tbody>
             </table>
           </div>
-          <div className="px-4 py-2.5 border-t border-line t-meta">
-            Showing {filtered.length} of {list.length} lead{list.length === 1 ? '' : 's'}
-          </div>
+          <Pager page={data?.page || 1} pages={data?.pages || 1} total={total} from={from} to={to} pageSize={pageSize}
+            onPage={setPage} onPageSize={setPageSize} busy={busy} />
         </div>
       )}
 
       {bulk === 'update' && (
-        <BulkUpdateModal fields={fields} count={selection.ids.size} noun="lead" rows={list} getValue={leadValue} onRun={runUpdateMany} onClose={() => setBulk(null)} />
+        <BulkUpdateModal fields={fields} count={selection.ids.size} noun="lead" rows={facetRows} getValue={leadValue} onRun={runUpdateMany} onClose={() => setBulk(null)} />
       )}
       {bulk === 'assign' && (
         <BulkAssignModal userFields={fields.filter((f) => f.field_type === 'user_name')} count={selection.ids.size} noun="lead"
@@ -828,13 +1092,13 @@ export default function Leads() {
       {editingId && (
         <LeadEditModal leadId={editingId}
           onClose={() => setEditingId(null)}
-          onSaved={() => { setEditingId(null); load(); }} />
+          onSaved={() => { setEditingId(null); refresh(); }} />
       )}
 
       {addFor && (
         <AddLeadModal initialStatus={addFor} statuses={statuses} sources={sources} ratings={leadOpts?.lead_rating}
           onClose={() => setAddFor(null)}
-          onSaved={() => { setAddFor(null); setLoading(true); load(); }} />
+          onSaved={() => { setAddFor(null); refreshFromTop(); }} />
       )}
     </div>
   );

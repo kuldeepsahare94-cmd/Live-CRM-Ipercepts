@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { ArrowLeft, Trash2, Pencil, Send, MessageCircle, Sparkles, CheckSquare, FileText, Download, Paperclip, Upload, PhoneCall, CalendarPlus, StickyNote, Building2, Mail } from 'lucide-react';
 import { api } from '../../api';
+import NoAccess from '../../components/NoAccess';
 import { usePermissions } from '../../context/usePermissions';
 import StatusBadge from '../../components/StatusBadge';
 import { friendlyError } from '../../components/ui';
@@ -601,6 +602,7 @@ export default function UniversalDetail() {
   const recordRef = useRef(record);
   recordRef.current = record;
   const [error, setError] = useState('');
+  const [denied, setDenied] = useState(null);
   const [editing, setEditing] = useState(false);
   const [tab, setTab] = useState('overview');
   const [addingRelation, setAddingRelation] = useState(null);
@@ -614,15 +616,24 @@ export default function UniversalDetail() {
   const snapshot = useRef(shown ? { ...shown } : {});
   const keep = (part) => { snapshot.current = { ...snapshot.current, ...part }; if (snapshot.current.record) remember(memKey, snapshot.current); };
 
+  // An answer that arrives after another record was opened is not this
+  // page's any more.
+  const pageKey = `${moduleApiName}/${id}`;
+  const pageKeyRef = useRef(pageKey);
+  pageKeyRef.current = pageKey;
   const load = () => {
     // Refreshing a record already on screen (after an edit, or one shown from
     // memory) keeps it visible instead of blanking the page to "Loading…".
     if (!recordRef.current) setLoading(true);
     setError('');
+    const asked = pageKey;
+    const current = () => pageKeyRef.current === asked;
     api.getModuleMeta(moduleApiName)
       .then(async (mod) => {
-        setModule(mod);
         const [f, rec] = await Promise.all([api.listModuleFields(mod.id), api.universalGet(mod, id)]);
+        if (!current()) return;
+        setModule(mod);
+        setDenied(null);
         setFields(f);
         api.getModuleLayout(mod.id, 'detail')
           .then((r) => { const l = r.layout_json || { sections: [] }; setLayout(l); keep({ layout: l }); })
@@ -635,16 +646,23 @@ export default function UniversalDetail() {
         // other field with no special-casing needed.
         const hasCustomFields = mod.table_name && f.some((field) => !field.is_system);
         const customValues = hasCustomFields ? await api.getCustomFieldValues(mod.api_name, id).catch(() => ({})) : {};
+        if (!current()) return;
         const merged = { ...rec, ...customValues };
         setRecord(merged);
         keep({ module: mod, fields: f, record: merged });
 
-        api.listRelated(mod.api_name, id).then((r) => { setRelated(r); keep({ related: r }); }).catch(() => setRelated([]));
+        api.listRelated(mod.api_name, id).then((r) => { if (!current()) return; setRelated(r); keep({ related: r }); }).catch(() => { if (current()) setRelated([]); });
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (!current()) return;
+        setError(e.message);
+        // Someone else's record (the role sees only its own / its team's):
+        // what was shown from memory goes, and the reason is said plainly.
+        if (e?.status === 403 || e?.status === 404) { setDenied(e); setRecord(null); } else setDenied(null);
+      })
+      .finally(() => { if (current()) setLoading(false); });
   };
-  useEffect(() => { load(); }, [moduleApiName, id]);
+  useEffect(() => { setDenied(null); load(); }, [moduleApiName, id]);
 
   const detailFields = useMemo(() => fields.filter((f) => f.show_in_detail), [fields]);
   const editFields = useMemo(() => fields.filter((f) => f.show_in_edit), [fields]);
@@ -698,6 +716,7 @@ export default function UniversalDetail() {
     const preview = location.state?.preview;
     return <DetailSkeleton title={preview && String(preview.id) === String(id) ? preview.title : ''} />;
   }
+  if (denied) return <NoAccess error={denied} backTo={`/records/${moduleApiName}`} />;
   if (error) return <div className="py-8 text-sm" style={{ color: "var(--color-danger)" }}>{error}</div>;
   if (!module || !record) return null;
 

@@ -21,9 +21,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, X, GitMerge, ExternalLink, Repeat, Phone, Mail, Building2, UserRound, Check, CopyPlus, History,
+  AlertTriangle, X, GitMerge, ExternalLink, Repeat, Phone, Mail, Building2, UserRound, Check, CopyPlus, History, Lock,
 } from 'lucide-react';
 import { api } from '../api';
+import { useAuth } from '../context/AuthContext';
 
 // ---- small helpers --------------------------------------------------------
 
@@ -104,11 +105,20 @@ export function MatchCard({ match, selected, selectable, onSelect, compact = fal
           </span>
         </span>
       </span>
-      <a href={match.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-        className="shrink-0 text-xs font-medium inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--color-canvas)]"
-        style={{ color: 'var(--color-brand)' }} title="Open in a new tab">
-        View <ExternalLink className="w-3 h-3" />
-      </a>
+      {/* A record this person's role does not show them: it is named (so they
+          know it exists, and with whom) but cannot be opened. */}
+      {match.hidden || !match.link ? (
+        <span className="shrink-0 text-[11px] font-medium inline-flex items-center gap-1 px-2 py-1 rounded-lg" data-match-hidden
+          style={{ background: 'var(--color-canvas)', color: 'var(--color-muted)' }} title="This record belongs to someone else">
+          <Lock className="w-3 h-3" /> Not yours
+        </span>
+      ) : (
+        <a href={match.link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+          className="shrink-0 text-xs font-medium inline-flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--color-canvas)]"
+          style={{ color: 'var(--color-brand)' }} title="Open in a new tab">
+          View <ExternalLink className="w-3 h-3" />
+        </a>
+      )}
     </Wrapper>
   );
 }
@@ -143,7 +153,8 @@ export default function DuplicateHost() {
       // Two forms cannot ask at once; a second question cancels the first.
       if (askRef.current) askRef.current.resolve({ choice: 'cancel' });
       setAsk({ info: d.info, resolve: d.resolve });
-      setPick(d.info.matches?.[0]?.id ?? null);
+      // the first one this person may open, when there is one
+      setPick((d.info.matches?.find((m) => !m.hidden) || d.info.matches?.[0])?.id ?? null);
     };
     const onMerged = (e) => setMerged(e.detail || null);
     window.addEventListener('icrm:duplicate', onAsk);
@@ -210,32 +221,45 @@ export default function DuplicateHost() {
                 <MatchCard key={m.id} match={m} selectable={many} selected={many && m.id === pick} onSelect={() => setPick(m.id)} />
               ))}
 
-              <div className="rounded-xl px-3 py-2.5 text-xs leading-relaxed mt-1"
-                style={{ background: 'var(--color-canvas)', color: 'var(--color-muted)' }}>
-                <strong className="text-ink">Merge</strong> makes no second {what}.{' '}
-                {info.module === 'leads'
-                  ? <><strong className="text-ink">{chosen?.title}</strong> will show that it came in again today, and its empty fields are filled from what you entered.</>
-                  : <>The empty fields of <strong className="text-ink">{chosen?.title}</strong> are filled from what you entered.</>}
-                {' '}Nothing already on it is changed.
-              </div>
+              {chosen?.hidden ? (
+                <div className="rounded-xl px-3 py-2.5 text-xs leading-relaxed mt-1" data-duplicate-not-yours
+                  style={{ background: 'var(--color-canvas)', color: 'var(--color-muted)' }}>
+                  <strong className="text-ink">{chosen.title}</strong> belongs to{' '}
+                  <strong className="text-ink">{chosen.owner || 'someone else'}</strong>, so you cannot open it or merge into it.
+                  {' '}Ask {chosen.owner || 'its owner'} or your manager.
+                </div>
+              ) : (
+                <div className="rounded-xl px-3 py-2.5 text-xs leading-relaxed mt-1"
+                  style={{ background: 'var(--color-canvas)', color: 'var(--color-muted)' }}>
+                  <strong className="text-ink">Merge</strong> makes no second {what}.{' '}
+                  {info.module === 'leads'
+                    ? <><strong className="text-ink">{chosen?.title}</strong> will show that it came in again today, and its empty fields are filled from what you entered.</>
+                    : <>The empty fields of <strong className="text-ink">{chosen?.title}</strong> are filled from what you entered.</>}
+                  {' '}Nothing already on it is changed.
+                </div>
+              )}
               {info.blocked && (
                 <div className="rounded-xl px-3 py-2 text-xs" style={{ background: 'var(--color-danger-soft)', color: 'var(--color-danger)' }}>
-                  Creating a duplicate is switched off for {what}s. You can merge instead.
+                  Creating a duplicate is switched off for {what}s.{chosen?.hidden ? '' : ' You can merge instead.'}
                 </div>
               )}
             </div>
 
             <div className="flex items-center justify-end gap-2 flex-wrap px-5 py-3.5 border-t border-line shrink-0">
-              <button type="button" onClick={() => { const link = chosen?.link; answer('cancel'); if (link) navigate(link); }}
-                className="btn btn-ghost mr-auto" data-duplicate-open>
-                <ExternalLink className="w-4 h-4" /> Open existing
-              </button>
+              {chosen?.link && !chosen.hidden ? (
+                <button type="button" onClick={() => { const link = chosen?.link; answer('cancel'); if (link) navigate(link); }}
+                  className="btn btn-ghost mr-auto" data-duplicate-open>
+                  <ExternalLink className="w-4 h-4" /> Open existing
+                </button>
+              ) : (
+                <button type="button" onClick={() => answer('cancel')} className="btn btn-ghost mr-auto" data-duplicate-cancel>Cancel</button>
+              )}
               {info.can_create && (
                 <button type="button" onClick={() => answer('create')} className="btn btn-secondary" data-duplicate-create>
                   <CopyPlus className="w-4 h-4" /> Create anyway
                 </button>
               )}
-              {info.can_merge && (
+              {info.can_merge && !chosen?.hidden && (
                 <button type="button" onClick={() => answer('merge')} className="btn btn-primary" data-duplicate-merge autoFocus>
                   <GitMerge className="w-4 h-4" /> Merge into existing
                 </button>
@@ -328,6 +352,8 @@ export function SimilarBanner({ module, recordId, items, what = 'lead' }) {
     return () => { live = false; };
   }, [module, recordId, items]);
 
+  const { user } = useAuth();
+  const limited = ['team', 'own'].includes(user?.permissions?.[module]?.scope);
   if (!list.length) return null;
   const on = [...new Set(list.flatMap((m) => m.matched_on || []))].map((k) => (k === 'mobile' ? 'mobile number' : k)).join(' or ');
   return (
@@ -340,14 +366,20 @@ export function SimilarBanner({ module, recordId, items, what = 'lead' }) {
         {list.slice(0, 3).map((m, i) => (
           <span key={m.id}>
             {i > 0 && ', '}
-            <Link to={m.link} className="font-medium underline" style={{ color: 'var(--color-brand)' }}>{m.title}</Link>
+            {m.hidden || !m.link
+              ? <span className="font-medium" data-similar-hidden>{m.title}{m.owner ? ` (with ${m.owner})` : ''}</span>
+              : <Link to={m.link} className="font-medium underline" style={{ color: 'var(--color-brand)' }}>{m.title}</Link>}
           </span>
         ))}
         {list.length > 3 && ` and ${list.length - 3} more`}.
       </div>
-      <Link to={`/duplicates?module=${module}&focus=${recordId}`} className="btn btn-secondary shrink-0 !py-1.5 !text-xs">
-        <GitMerge className="w-3.5 h-3.5" /> Review &amp; merge
-      </Link>
+      {/* Reviewing duplicates goes through every record of the module, so it
+          is for people whose role shows them all of it. */}
+      {!limited && (
+        <Link to={`/duplicates?module=${module}&focus=${recordId}`} className="btn btn-secondary shrink-0 !py-1.5 !text-xs">
+          <GitMerge className="w-3.5 h-3.5" /> Review &amp; merge
+        </Link>
+      )}
     </div>
   );
 }
