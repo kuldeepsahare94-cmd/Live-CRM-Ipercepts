@@ -12,7 +12,144 @@ const h = require('./helpers');
 // Status text alone is not reliable — anyone can rename a status.
 const CONVERTED = '(l.converted_opportunity_id IS NOT NULL OR l.converted_account_id IS NOT NULL)';
 
+// Open ("active") leads and when the team last did something on each of them.
+// Asked of the workflow engine, so "open" and "touched" mean here exactly what
+// they mean in a workflow: Settings → Workflows → Settings decides which
+// statuses are won / dead and which activities count as a touch. A lead that
+// was never touched counts from the day it was created.
+function activeLeads() {
+  const F = require('../workflows/fields');
+  const E = require('../workflows/engine');
+  const d = F.describe('leads');
+  if (!d) return [];
+  const found = E.matching(
+    { trigger_type: 'record_created', conditions: { match: 'all', rules: [{ field: '_is_open', op: 'yes' }] } },
+    d, { limit: 20000, scan: 20000, also: ['_has_followup'] },
+  );
+  return found.records.map(({ record, get }) => {
+    const last = get('_last_activity_at');
+    return {
+      name: record.student_name,
+      account_name: record.account_name,
+      mobile: record.mobile,
+      source: record.source,
+      status: record.status,
+      owner: String(record.assigned_counselor || '').trim() || 'Unassigned',
+      days_untouched: Number(get('_days_since_activity')) || 0,
+      last_activity: last ? F.localText(F.toMs(last)) : 'Never',
+      never: !last,
+      follow_up: get('_has_followup') ? 'Yes' : 'No',
+      created_at: record.created_at,
+    };
+  });
+}
+const UNTOUCHED_BANDS = [
+  { key: 'd0', label: '0–2 days', min: 0, max: 2 },
+  { key: 'd3', label: '3–6 days', min: 3, max: 6 },
+  { key: 'd7', label: '7–14 days', min: 7, max: 14 },
+  { key: 'd15', label: '15–30 days', min: 15, max: 30 },
+  { key: 'd31', label: 'Over 30 days', min: 31, max: Infinity },
+];
+
 module.exports = [
+  {
+    key: 'untouched-leads-by-owner',
+    label: 'Untouched Active Leads — by Owner',
+    category: 'Leads',
+    module: 'leads',
+    description: 'For each owner: how many of their open leads (not converted, not dead) nobody has worked on, by how long. "Touched" means a call, note, meeting, email or WhatsApp was logged — what counts, and which statuses are dead, is set under Settings → Workflows → Settings.',
+    palette: 'orange',
+    chart: {
+      type: 'stackedBar',
+      x: 'owner',
+      series: [
+        { key: 'd3', label: '3–6 days', type: 'bar', format: 'number', color: '#FBBF24' },
+        { key: 'd7', label: '7–14 days', type: 'bar', format: 'number', color: '#F97316' },
+        { key: 'd15', label: '15–30 days', type: 'bar', format: 'number', color: '#EF4444' },
+        { key: 'd31', label: 'Over 30 days', type: 'bar', format: 'number', color: '#991B1B' },
+      ],
+    },
+    columns: [
+      { key: 'owner', label: 'Owner' },
+      { key: 'open', label: 'Active Leads', format: 'number' },
+      { key: 'd0', label: 'Touched in 0–2 days', format: 'number' },
+      { key: 'd3', label: 'Untouched 3–6 days', format: 'number' },
+      { key: 'd7', label: '7–14 days', format: 'number' },
+      { key: 'd15', label: '15–30 days', format: 'number' },
+      { key: 'd31', label: 'Over 30 days', format: 'number' },
+      { key: 'never', label: 'Never Contacted', format: 'number' },
+      { key: 'untouched_share', label: 'Untouched 3+ days %', format: 'percent' },
+    ],
+    run() {
+      const byOwner = new Map();
+      for (const l of activeLeads()) {
+        if (!byOwner.has(l.owner)) byOwner.set(l.owner, { owner: l.owner, open: 0, d0: 0, d3: 0, d7: 0, d15: 0, d31: 0, never: 0 });
+        const row = byOwner.get(l.owner);
+        row.open += 1;
+        const band = UNTOUCHED_BANDS.find((b) => l.days_untouched >= b.min && l.days_untouched <= b.max);
+        if (band) row[band.key] += 1;
+        if (l.never) row.never += 1;
+      }
+      return [...byOwner.values()]
+        .map((r) => ({ ...r, untouched_share: h.percent(r.open - r.d0, r.open) }))
+        .sort((a, b) => (b.open - b.d0) - (a.open - a.d0) || b.open - a.open);
+    },
+    summary(rows) {
+      const sum = (k) => rows.reduce((s, r) => s + (r[k] || 0), 0);
+      const open = sum('open');
+      return [
+        { label: 'Active Leads', value: open, format: 'number' },
+        { label: 'Untouched 3+ Days', value: open - sum('d0'), format: 'number' },
+        { label: 'Untouched 7+ Days', value: sum('d7') + sum('d15') + sum('d31'), format: 'number' },
+        { label: 'Never Contacted', value: sum('never'), format: 'number' },
+      ];
+    },
+  },
+
+  {
+    key: 'untouched-leads',
+    label: 'Untouched Active Leads — List',
+    category: 'Leads',
+    module: 'leads',
+    description: 'Every open lead (not converted, not dead) that nobody has worked on for 3 days or more — longest first, ready to export and work through. Choose another number of days, or one owner, in the filters. To have this sent to each manager every morning, switch on "Daily list of untouched active leads" under Settings → Workflows → Ready-made.',
+    palette: 'orange',
+    chart: null,
+    filters: [
+      { key: 'days', label: 'Untouched for at least (days)', type: 'select', options: ['1', '2', '3', '5', '7', '10', '15', '30', '60'] },
+      { key: 'owner', label: 'Owner', type: 'select', source: { table: 'leads', column: 'assigned_counselor' } },
+      { key: 'status', label: 'Status', type: 'select', source: { table: 'leads', column: 'status' } },
+    ],
+    columns: [
+      { key: 'name', label: 'Lead Name' },
+      { key: 'account_name', label: 'Company' },
+      { key: 'mobile', label: 'Mobile' },
+      { key: 'source', label: 'Source' },
+      { key: 'status', label: 'Status', format: 'status' },
+      { key: 'owner', label: 'Owner' },
+      { key: 'days_untouched', label: 'Days Untouched', format: 'number' },
+      { key: 'last_activity', label: 'Last Activity' },
+      { key: 'follow_up', label: 'Follow-up Scheduled' },
+      { key: 'created_at', label: 'Created', format: 'date' },
+    ],
+    run(db, { filters = {} }) {
+      const min = Math.max(0, Number(filters.days) || 3);
+      return activeLeads()
+        .filter((l) => l.days_untouched >= min
+          && (!filters.owner || l.owner === filters.owner)
+          && (!filters.status || l.status === filters.status))
+        .sort((a, b) => b.days_untouched - a.days_untouched)
+        .slice(0, 5000)
+        .map(({ never, ...row }) => row);
+    },
+    summary(rows) {
+      return [
+        { label: 'Leads', value: rows.length, format: 'number' },
+        { label: 'Never Contacted', value: rows.filter((r) => r.last_activity === 'Never').length, format: 'number' },
+        { label: 'Without a Follow-up', value: rows.filter((r) => r.follow_up === 'No').length, format: 'number' },
+      ];
+    },
+  },
+
   {
     key: 'lead-source-performance',
     label: 'Lead Source Performance',
@@ -166,10 +303,10 @@ module.exports = [
 
   {
     key: 'lead-ageing',
-    label: 'Lead Ageing (Untouched Leads)',
+    label: 'Lead Ageing (Since Created)',
     category: 'Leads',
     module: 'leads',
-    description: 'How long open leads have been sitting since they were created. Everything to the right of 30 days is, in practice, a lead nobody is working.',
+    description: 'How long open leads have been sitting since they were created. For leads nobody has worked on lately, whatever their age, see the two "Untouched Active Leads" reports.',
     palette: 'orange',
     chart: { type: 'bar', x: 'label', series: [{ key: 'count', label: 'Open Leads', format: 'number' }] },
     columns: [

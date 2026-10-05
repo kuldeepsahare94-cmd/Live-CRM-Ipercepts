@@ -91,6 +91,7 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
 
   let created;
   let followUp = null;
+  let leadBefore = null;       // the lead as it was, when this call also moves its status
   try {
     const tx = db.transaction(() => {
       const info = db.prepare(`
@@ -117,7 +118,8 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
       // agent doesn't have to edit the lead separately after every call.
       if (module === 'leads' && recordId) {
         if (b.lead_status) {
-          const before = db.prepare('SELECT status FROM leads WHERE id=?').get(recordId);
+          const before = db.prepare('SELECT * FROM leads WHERE id=?').get(recordId);
+          leadBefore = before || null;
           db.prepare('UPDATE leads SET status=? WHERE id=?').run(b.lead_status, recordId);
           if (before && before.status !== b.lead_status) {
             db.prepare('INSERT INTO lead_activities (lead_id, type, note) VALUES (?,?,?)')
@@ -151,6 +153,11 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
   }
 
   fireWorkflows('calls', 'record_created', created, null, req.user.id);
+  // The lead's status was moved in the same action: workflows that watch the
+  // lead ("status changes to…", "lead marked dead") hear about it too.
+  if (leadBefore && leadBefore.status !== b.lead_status) {
+    try { fireWorkflows('leads', 'record_updated', db.prepare('SELECT * FROM leads WHERE id=?').get(leadBefore.id), leadBefore, req.user.id); } catch { /* never break the save */ }
+  }
   res.status(201).json({ ...created, follow_up: followUp });
 });
 

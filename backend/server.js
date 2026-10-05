@@ -95,6 +95,9 @@ app.use(express.json());
 
 // Public routes
 app.use('/api/auth', require('./routes/auth'));
+// The workflows' keep-awake link: no sign-in, the long key in the address is
+// the secret (Settings → Workflows → Settings shows it).
+app.use('/api/workflow-tick', require('./routes/workflows').tick);
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 // Speed check: how long one trip from this server to the database takes.
 // Open /api/health/db in a browser. Well under 5 ms means the server and the
@@ -288,6 +291,14 @@ app.listen(PORT, () => {
     require('./services/followUpPush').start();
   } catch (e) {
     console.warn('[follow-ups] reminder service not started:', e.message);
+  }
+
+  // Workflows: the time-based ones ("untouched for 3 days", "follow-up
+  // overdue", "every day at 9:30") and the steps that are waiting.
+  try {
+    require('./services/workflows/engine').start();
+  } catch (e) {
+    console.warn('[workflows] clock not started:', e.message);
   }
 
   // Support Desk: give pre-existing tickets an SLA policy once, then keep

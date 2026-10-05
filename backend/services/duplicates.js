@@ -462,6 +462,7 @@ function mergeIncoming(module, existingId, values, ctx = {}) {
   const m = moduleOrThrow(module);
   const rule = ctx.rule || getRule(module);
   let result;
+  let before = null;
 
   const tx = db.transaction(() => {
     const current = db.prepare(`SELECT * FROM ${m.table} WHERE id = ?`).get(existingId);
@@ -510,6 +511,7 @@ function mergeIncoming(module, existingId, values, ctx = {}) {
 
     const record = db.prepare(`SELECT * FROM ${m.table} WHERE id = ?`).get(existingId);
     result = { record, filled, event_id: eventId, status_changed: statusFrom !== null, previous_status: statusFrom };
+    before = current;
   });
   tx();
 
@@ -523,6 +525,17 @@ function mergeIncoming(module, existingId, values, ctx = {}) {
         fields: { student_name: l.student_name, mobile: l.mobile, source: l.source, city: l.city, assigned_counselor: l.assigned_counselor, status: l.status, follow_up_date: l.follow_up_date },
       });
     } catch { /* automations are optional */ }
+  }
+  // …and so do the workflows (Settings → Workflows): "a lead comes in again",
+  // and the edit itself (details filled in, the status reopened). A file
+  // import merges many rows at once and stays quiet.
+  if (ctx.channel !== 'import') {
+    try {
+      const { fireWorkflows } = require('./workflowAutomation');
+      const userId = ctx.user && ctx.user.id ? ctx.user.id : null;
+      if (module === 'leads') fireWorkflows('leads', 'reenquiry', result.record, before, userId);
+      fireWorkflows(module, 'record_updated', result.record, before, userId);
+    } catch { /* workflows are optional */ }
   }
   return result;
 }

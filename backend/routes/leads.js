@@ -72,7 +72,11 @@ router.post('/', requirePermission('leads', 'create'), (req, res) => {
   if (lead.follow_up_date) {
     try { followUps.syncFromRecord('leads', lead.id, lead.follow_up_date, req.user?.id); } catch (e) { console.warn('[follow-ups]', e.message); }
   }
-  res.status(201).json(lead);
+  // Workflows (Settings → Workflows): "a lead is created". A workflow may
+  // change the lead at once (share it out in turn, set a field), so what is
+  // sent back is the lead as it is after they ran.
+  fireWorkflows('leads', 'record_created', lead, null, req.user?.id);
+  res.status(201).json(db.prepare('SELECT * FROM leads WHERE id=?').get(lead.id) || lead);
 });
 
 router.put('/:id', requirePermission('leads', 'edit'), (req, res) => {
@@ -108,7 +112,9 @@ router.put('/:id', requirePermission('leads', 'edit'), (req, res) => {
   if (req.body.status && req.body.status !== existing.status) fireEvent('lead_status_changed', { entityType: 'lead', entityId: updated.id, mobile: updated.mobile, fields: leadFields });
   if (req.body.assigned_counselor && req.body.assigned_counselor !== existing.assigned_counselor) fireEvent('lead_assigned', { entityType: 'lead', entityId: updated.id, mobile: updated.mobile, fields: leadFields });
   if (req.body.follow_up_date && req.body.follow_up_date !== existing.follow_up_date) fireEvent('follow_up_scheduled', { entityType: 'lead', entityId: updated.id, mobile: updated.mobile, fields: leadFields });
-  res.json(updated);
+  // Workflows: "a lead is edited" / "a field changes" (also writes the audit log).
+  fireWorkflows('leads', 'record_updated', updated, existing, req.user?.id);
+  res.json(db.prepare('SELECT * FROM leads WHERE id=?').get(req.params.id) || updated);
 });
 
 router.delete('/:id', requirePermission('leads', 'delete'), (req, res) => {
@@ -272,6 +278,8 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
   }
   if (!accountReused) fireWorkflows('accounts', 'record_created', account, null, req.user.id);
   fireWorkflows('opportunities', 'record_created', opportunity, null, req.user.id);
+  // The lead itself changed too: its status is now Converted.
+  fireWorkflows('leads', 'record_updated', db.prepare('SELECT * FROM leads WHERE id=?').get(lead.id), lead, req.user.id);
 
   res.status(201).json({
     contact_id: contactId, account_id: accountId, opportunity_id: opportunityId,

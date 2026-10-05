@@ -277,6 +277,9 @@ register({
       VALUES (?,?,?,?,?,?,?,?, 'New')
     `).run(i.student_name, i.mobile || null, i.email || null, i.source || null, i.city || null, i.assigned_counselor || null, i.follow_up_date || null, i.remarks || null);
     try { require('./duplicates').noteCreated('leads', info.lastInsertRowid, { channel: 'assistant', source: i.source || null, user }); } catch { /* history only */ }
+    try {
+      require('./workflowAutomation').fireWorkflows('leads', 'record_created', db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid), null, user && user.id ? user.id : null);
+    } catch { /* workflows are optional */ }
     return db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid);
   },
 });

@@ -99,7 +99,11 @@ function captureLead(source, payload) {
   );
 
   duplicates.noteCreated('leads', info.lastInsertRowid, { channel: CHANNEL[source.source_type] || 'api', source: source.name });
-  return { status: 'success', lead: db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid) };
+  const lead = db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid);
+  // Workflows (Settings → Workflows) hear about a lead from a website form, an
+  // API or a lead ad exactly as they do about one added by hand.
+  try { require('../workflowAutomation').fireWorkflows('leads', 'record_created', lead, null, null); } catch (e) { console.warn('[workflows]', e.message); }
+  return { status: 'success', lead: db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid) || lead };
 }
 
 module.exports = { captureLead, isSpam, findDuplicate, normalizePhone, DEFAULT_ALIASES };
