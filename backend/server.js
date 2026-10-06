@@ -97,6 +97,19 @@ app.use('/api/telephony/hook', express.raw({ type: () => true, limit: '1mb' }), 
 app.use('/api/admin/import', express.json({ limit: '30mb' }));
 app.use('/api/admin/import-analyze', express.json({ limit: '30mb' }));
 
+// Expense management — field expenses with bill photos, claims, approvals,
+// advances and payment (also what the mobile app talks to). A bill photo
+// travels inside the request, so these routes read a bigger body than the
+// rest; the sign-in is checked first, so nobody without a login can send one.
+{
+  const readExpenseBody = express.json({ limit: '30mb' });
+  app.use('/api/expenses', requireAuth, (req, res, next) => readExpenseBody(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.status === 413 || err.type === 'entity.too.large';
+    return res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'The bills are too large to send together. Add them one at a time.' : 'The request could not be read.' });
+  }), require('./routes/expenses'));
+}
+
 app.use(express.json());
 
 // Public routes
