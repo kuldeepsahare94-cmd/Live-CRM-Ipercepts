@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import {
   CalendarDays, Settings as SettingsIcon, Sparkles, Database, ShieldCheck, Boxes, Zap, GitBranch, Users2, History,
   Percent, Mail, LayoutList, Check, AlertTriangle, Building2, LayoutTemplate, ListChecks, Bell, Search, Palette,
-  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge, PhoneCall,
+  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge, PhoneCall, ReceiptText
 } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -145,6 +145,8 @@ function sections(can) {
           desc: 'WhatsApp Business providers, templates, workflows and campaigns.' },
         { to: '/settings/telephony', icon: PhoneCall, tint: '#3B5BFF', title: 'Telephony (MCube IVR)', show: can('settings', 'view'),
           desc: 'Click-to-call, automatic call logs with recordings, incoming-call pop-up, missed-call follow-ups, auto-dialer and live calls.' },
+        { to: '/settings/expenses', icon: ReceiptText, tint: '#0D9488', title: 'Expenses', show: can('settings', 'view'),
+          desc: 'Field expenses with bill photos, km and daily allowance: categories and limits, who approves, who pays, advances. Also what the mobile app uses.' },
         { to: '/lead-sources', icon: Radio, tint: '#C026D3', title: 'Lead Sources', show: can('lead_sources', 'view'),
           desc: 'Website forms and Facebook / Instagram lead ads that create leads automatically.' },
       ],

@@ -19,12 +19,12 @@ const MODULES = ['leads', 'accounts', 'contacts', 'opportunities', 'quotations',
   'invoices', 'document_templates', 'products', 'subscriptions', 'tickets', 'calls', 'meetings',
   'tasks', 'notes', 'emails', 'payments', 'documents', 'teams', 'workflows', 'reports', 'users',
   'chat', 'calendar', 'settings', 'support', 'support_settings', 'kb_articles', 'major_incidents', 'problems',
-  'service_catalog', 'assets', 'assistant', 'whatsapp', 'lead_sources'];
+  'service_catalog', 'assets', 'assistant', 'whatsapp', 'lead_sources', 'expenses'];
 const MODULE_LABEL = {
   proforma_invoices: 'Proforma Invoices', document_templates: 'Document Templates',
   support: 'Support Desk', support_settings: 'Support Settings', kb_articles: 'Knowledge Base',
   major_incidents: 'Major Incidents', service_catalog: 'Service Catalog',
-  assistant: 'AI Assistant', whatsapp: 'WhatsApp', lead_sources: 'Lead Sources',
+  assistant: 'AI Assistant', whatsapp: 'WhatsApp', lead_sources: 'Lead Sources', expenses: 'Expenses',
 };
 const ACTIONS = ['view', 'create', 'edit', 'delete', 'export'];
 

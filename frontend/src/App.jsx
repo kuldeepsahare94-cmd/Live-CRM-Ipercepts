@@ -49,6 +49,9 @@ const Duplicates = lazy(() => import('./pages/Duplicates'));
 const SettingsTelephony = lazy(() => import('./pages/SettingsTelephony'));
 const Dialer = lazy(() => import('./pages/Dialer'));
 const LiveCalls = lazy(() => import('./pages/LiveCalls'));
+const Expenses = lazy(() => import('./pages/expenses/Expenses'));
+const ExpenseClaim = lazy(() => import('./pages/expenses/ClaimDetail'));
+const SettingsExpenses = lazy(() => import('./pages/SettingsExpenses'));
 const Inbox = lazy(() => import('./pages/Inbox'));
 const EmailCampaigns = lazy(() => import('./pages/EmailCampaigns'));
 const Appearance = lazy(() => import('./pages/Appearance'));
@@ -185,6 +188,9 @@ export default function App() {
               <Route path="/dialer" element={<Dialer />} />
               <Route path="/dialer/:id" element={<Dialer />} />
               <Route path="/live-calls" element={<LiveCalls />} />
+              <Route path="/expenses" element={<Expenses />} />
+              <Route path="/expenses/claims/:id" element={<ExpenseClaim />} />
+              <Route path="/settings/expenses" element={<SettingsExpenses />} />
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/email-campaigns" element={<EmailCampaigns />} />
               <Route path="/appearance" element={<Appearance />} />

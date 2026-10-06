@@ -4,7 +4,7 @@ import {
   CalendarDays,
   LayoutDashboard, Users as UsersIcon, Wallet, BarChart3, Settings as SettingsIcon,
   LogOut, UserCog, ShieldCheck, Palette, Menu, X, MessageCircle, Radio, ChevronRight,
-  ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy, ListOrdered, Headphones,
+  ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy, ListOrdered, Headphones, ReceiptText,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api, noteNavigation, prefetchRoute } from '../api';
@@ -24,6 +24,8 @@ import ComposeHost from './EmailCompose';
 import DuplicateHost from './DuplicateDialog';
 import TelephonyHost, { TelephonyMenu } from './telephony/TelephonyHost';
 import { useTelephony } from './telephony/telephony';
+import ExpenseHost from './expenses/ExpenseHost';
+import { useExpenseMeta } from './expenses/expenses';
 
 // Hand-written links for the modules that have bespoke pages. Everything
 // else is generated from the module registry below, so a module created
@@ -118,6 +120,10 @@ function SidebarContent({ onNavigate, showClose, onClose }) {
     (tel.status?.can_call || tel.status?.dial_manage) && { to: '/dialer', label: 'Auto-dialer', icon: ListOrdered, accent: 'calls' },
     tel.status?.supervisor && { to: '/live-calls', label: 'Live Calls', icon: Headphones, accent: 'calls' },
   ].filter(Boolean);
+  // Expenses: shown once expense management is switched on, to people whose
+  // role has the permission (and to administrators before that, to set it up).
+  const expenseMeta = useExpenseMeta();
+  if (expenseMeta?.available) callLinks.push({ to: '/expenses', label: 'Expenses', icon: ReceiptText, accent: 'payments' });
 
   return (
     <div className="flex flex-col h-full" style={{ background: '#111A3A' }}>
@@ -429,6 +435,11 @@ export default function Layout() {
           pop-up and the Dispose box of a call. Nothing for non-agents. */}
       <ErrorBoundary fallback={null}>
         <TelephonyHost />
+      </ErrorBoundary>
+      {/* Expenses: the "Add expense" box, opened from the Expenses page or
+          from a lead / contact / account / deal. Nothing while it is off. */}
+      <ErrorBoundary fallback={null}>
+        <ExpenseHost />
       </ErrorBoundary>
     </div>
   );

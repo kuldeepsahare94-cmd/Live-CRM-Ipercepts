@@ -6,7 +6,7 @@ import { remember, recall } from '../screenMemory';
 import {
   ArrowLeft, ArrowRight, UserCheck, Phone, Mail, MessageCircle, CalendarClock, Pencil, Flame, Snowflake, Check, X,
   Info, PhoneCall, Calendar, CheckSquare, TrendingUp, Paperclip, StickyNote, LayoutGrid,
-  MapPin, FileText, Lightbulb, ChevronRight, Send,
+  MapPin, FileText, Lightbulb, ChevronRight, Send, ReceiptText,
 } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -27,6 +27,7 @@ import { accentFor } from '../theme/moduleAccents';
 import { avatarGradientFor } from '../theme/avatarColors';
 import { CallsTab, MeetingsTab, TasksTab, DocumentsTab, DealsTab, NotesTab } from '../components/LeadRelatedTabs';
 import CallButton from '../components/telephony/CallButton';
+import { useExpenseMeta, askAddExpense } from '../components/expenses/expenses';
 
 // The funnel tracker's stages (stored values). Their labels, and every other
 // status, come from Settings → Dropdown Options (Leads › Status).
@@ -399,6 +400,8 @@ export default function LeadDetail() {
   // A call of this lead ended (MCube), or was disposed from the call card at
   // the bottom of the screen: show it here without a reload.
   const [callsVersion, setCallsVersion] = useState(0);
+  // An expense for this lead — only when expense management is on for this person.
+  const expenseMeta = useExpenseMeta();
   const loadRef = useRef(load);
   loadRef.current = load;
   const ownDisposeOpen = useRef(false);
@@ -705,6 +708,16 @@ export default function LeadDetail() {
                 <span className="text-xs font-medium text-ink whitespace-nowrap">{a.label}</span>
               </button>
             ))}
+            {/* An expense for this lead (a visit, a meal) — only when expense management is on for this person. */}
+            {expenseMeta?.available && expenseMeta.me?.can?.create && (
+              <button onClick={() => askAddExpense({ related: { module: 'leads', id: lead.id, name: lead.student_name } })}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-line hover:shadow-md hover:-translate-y-0.5 transition-all shrink-0" data-testid="lead-add-expense">
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center text-white shadow-sm" style={{ background: 'linear-gradient(135deg, #5EEAD4, #0F766E)' }}>
+                  <ReceiptText className="w-3.5 h-3.5" />
+                </span>
+                <span className="text-xs font-medium text-ink whitespace-nowrap">Add Expense</span>
+              </button>
+            )}
           </div>
         </div>
 

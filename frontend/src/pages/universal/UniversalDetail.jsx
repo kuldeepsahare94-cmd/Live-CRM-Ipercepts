@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
-import { ArrowLeft, Trash2, Pencil, Send, MessageCircle, Sparkles, CheckSquare, FileText, Download, Paperclip, Upload, PhoneCall, Phone, CalendarPlus, StickyNote, Building2, Mail } from 'lucide-react';
+import { ArrowLeft, Trash2, Pencil, Send, MessageCircle, Sparkles, CheckSquare, FileText, Download, Paperclip, Upload, PhoneCall, Phone, CalendarPlus, StickyNote, Building2, Mail, ReceiptText } from 'lucide-react';
 import { api } from '../../api';
 import NoAccess from '../../components/NoAccess';
 import { usePermissions } from '../../context/usePermissions';
@@ -32,6 +32,7 @@ import { openCompose } from '../../components/EmailCompose';
 import RecordEmails from '../../components/RecordEmails';
 import { SimilarBanner } from '../../components/DuplicateDialog';
 import { useCallAction } from '../../components/telephony/CallButton';
+import { useExpenseMeta, askAddExpense } from '../../components/expenses/expenses';
 
 // Records that email is exchanged about. They get an Emails tab even before
 // the first message; any other record gets one once it has an address.
@@ -668,6 +669,8 @@ export default function UniversalDetail() {
   // Call through the IVR (MCube) from a contact or an account; and when a call
   // of this record ends, or is disposed from the call card, show it here.
   const ivrCall = useCallAction(moduleApiName, id);
+  // An expense for this customer — only when expense management is on for this person.
+  const expenseMeta = useExpenseMeta();
   const loadRef = useRef(load);
   loadRef.current = load;
   const ownDisposeOpen = useRef(false);
@@ -1104,6 +1107,9 @@ export default function UniversalDetail() {
           canCreateRelation('notes', module.api_name) && can('notes', 'create')
             && { key: 'note', label: 'Note', icon: StickyNote, from: '#C4B5FD', to: '#6D28D9',
               run: () => setAddingRelation('notes') },
+          expenseMeta?.available && expenseMeta.me?.can?.create && ['contacts', 'accounts', 'opportunities'].includes(module.api_name)
+            && { key: 'expense', label: 'Expense', icon: ReceiptText, from: '#5EEAD4', to: '#0F766E',
+              run: () => askAddExpense({ related: { module: module.api_name, id: record.id, name: recordTitle(record, fields) } }) },
         ].filter(Boolean);
         if (actions.length === 0) return null;
         return (

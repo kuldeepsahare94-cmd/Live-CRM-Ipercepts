@@ -60,6 +60,19 @@ export async function downloadFile(path, fallbackName = 'download') {
   return filename;
 }
 
+// A file as a blob, with the sign-in (a bill photo cannot be an <img src>:
+// the browser would ask for it without the sign-in).
+export async function fetchBlob(path) {
+  const token = localStorage.getItem('cd_token');
+  const res = await fetch(BASE + path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) {
+    let message = `Could not open the file (${res.status})`;
+    try { const d = await res.json(); if (d?.error) message = d.error; } catch { /* keep status */ }
+    throw new Error(message);
+  }
+  return res.blob();
+}
+
 // Opens a PDF in a new tab (rather than saving it), still authenticated.
 export async function openFileInTab(path) {
   const token = localStorage.getItem('cd_token');
@@ -106,7 +119,7 @@ const META = [
   /^\/finance\/(currencies|taxes)$/, /^\/settings\/master-options(\?.*)?$/, /^\/company-profile$/, /^\/support\/meta$/,
 ];
 // Requests that must always go to the server (live counters, polling, auth).
-const NEVER_SHARED = /^\/(auth\/|chat\/|notifications|follow-ups\/reminders|health|duplicates\/check|telephony\/)/;
+const NEVER_SHARED = /^\/(auth\/|chat\/|notifications|follow-ups\/reminders|health|duplicates\/check|telephony\/|expenses\/(meta|summary)$)/;
 const getCache = new Map();          // path -> { at, data, meta, prefetched, promise }
 let cacheOwner = null;
 
@@ -131,7 +144,7 @@ function setBusy(delta) {
   busyCount = Math.max(0, busyCount + delta);
   busyListeners.forEach((fn) => { try { fn(busyCount); } catch { /* ignore */ } });
 }
-const BACKGROUND = /^\/(chat\/|notifications|follow-ups\/(reminders|preferences|push)|calendar\/agenda|health|duplicates\/check|telephony\/(live|status|pending|dialer\/\d+$))/;
+const BACKGROUND = /^\/(chat\/|notifications|follow-ups\/(reminders|preferences|push)|calendar\/agenda|health|duplicates\/check|telephony\/(live|status|pending|dialer\/\d+$)|expenses\/(meta|summary|check)$)/;
 
 // ---- Learning what each screen loads -------------------------------------
 // For a screen like /leads/132 the requests are remembered with the number
@@ -926,6 +939,43 @@ export const api = {
   deleteDialList: (id) => req('DELETE', `/telephony/dialer/${id}`),
   liveCalls: () => req('GET', '/telephony/live-calls'),
   liveCallAction: (id, body) => ask(`/telephony/live-calls/${id}/action`, body),
+
+  // Expense management: expenses with bills, claims, approvals, advances, payment
+  expenseMeta: () => req('GET', '/expenses/meta'),
+  expenseSummary: () => req('GET', '/expenses/summary'),
+  expensePeople: () => req('GET', '/expenses/people'),
+  expenses: (params) => req('GET', `/expenses${qs(params)}`),
+  expense: (id) => req('GET', `/expenses/${id}`),
+  saveExpense: (body, id) => req(id ? 'PUT' : 'POST', id ? `/expenses/${id}` : '/expenses', body),
+  deleteExpense: (id) => req('DELETE', `/expenses/${id}`),
+  checkExpense: (body) => ask('/expenses/check', body),
+  deleteExpenseBill: (rid) => req('DELETE', `/expenses/receipts/${rid}`),
+  expenseBill: (rid, thumb) => fetchBlob(`/expenses/receipts/${rid}${thumb ? '?thumb=1' : ''}`),
+  expenseClaims: (params) => req('GET', `/expenses/claims${qs(params)}`),
+  expenseClaim: (id) => req('GET', `/expenses/claims/${id}`),
+  createExpenseClaim: (body) => req('POST', '/expenses/claims', body),
+  updateExpenseClaim: (id, body) => req('PUT', `/expenses/claims/${id}`, body),
+  deleteExpenseClaim: (id) => req('DELETE', `/expenses/claims/${id}`),
+  // action: submit | withdraw | approve | reject | return | reassign | correct
+  expenseClaimAction: (id, action, body) => req('POST', `/expenses/claims/${id}/${action}`, body || {}),
+  expenseApprovals: (params) => req('GET', `/expenses/approvals${qs(params)}`),
+  expensePayable: () => req('GET', '/expenses/finance/payable'),
+  payExpenseClaims: (body) => req('POST', '/expenses/finance/pay', body),
+  expensePayouts: (params) => req('GET', `/expenses/finance/payouts${qs(params)}`),
+  expensePayout: (id) => req('GET', `/expenses/finance/payouts/${id}`),
+  expenseAdvances: (params) => req('GET', `/expenses/advances${qs(params)}`),
+  expenseAdvance: (id) => req('GET', `/expenses/advances/${id}`),
+  createExpenseAdvance: (body) => req('POST', '/expenses/advances', body),
+  // action: approve | reject | cancel | pay | return
+  expenseAdvanceAction: (id, action, body) => req('POST', `/expenses/advances/${id}/${action}`, body || {}),
+  expenseReport: (name, params) => req('GET', `/expenses/reports/${name}${qs(params)}`),
+  downloadExpenseReport: (name, params) => downloadFile(`/expenses/reports/${name}${qs({ ...params, format: 'csv' })}`, `expenses-${name}${params && params.from && params.to ? `-${params.from}-to-${params.to}` : ''}.csv`),
+  expenseSettings: () => req('GET', '/expenses/settings'),
+  saveExpenseSettings: (body) => req('PUT', '/expenses/settings', body),
+  saveExpenseCategory: (body, id) => req(id ? 'PUT' : 'POST', id ? `/expenses/categories/${id}` : '/expenses/categories', body),
+  deleteExpenseCategory: (id) => req('DELETE', `/expenses/categories/${id}`),
+  orderExpenseCategories: (ids) => req('PUT', '/expenses/categories-order', { ids }),
+  saveExpenseVehicleRates: (rates) => req('PUT', '/expenses/vehicle-rates', { rates }),
 
   // Follow-ups: exact date + time, lifecycle, reminders
   followUpsFor: (module, recordId) => req('GET', `/follow-ups${qs({ module, record_id: recordId })}`),
