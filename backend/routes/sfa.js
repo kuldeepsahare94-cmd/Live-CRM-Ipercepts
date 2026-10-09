@@ -1,0 +1,149 @@
+// ============================================================================
+// Field force (SFA) — everything under /api/sfa  (the mobile app and the web)
+// ============================================================================
+//   GET  /meta                         for the web menu: is it on, may I look, am I a manager
+//   GET  /m/bootstrap                  the app starts with this
+//   GET  /m/list/:module               a page of a list (leads, accounts, quotations…)
+//
+//   GET  /me/today                     my day: punched in?, km, visits, today's meetings
+//   POST /punch-in    POST /punch-out  { lat, lng, accuracy, at, selfie, note, client_ref }
+//   POST /points                       { points: [{ at, lat, lng, accuracy, speed, battery, is_mock }] }
+//
+//   POST /visits/check-in              { meeting_id | related_module + related_record_id, lat, lng, … }
+//   POST /visits/:id/check-out         { lat, lng, notes, outcome, next_action }
+//   POST /visits/:id/files             { files: [{ file_name, mime, data, thumb }] }  (or a file upload "files")
+//   GET  /visits  GET /visits/:id      GET /files/:id[?thumb=1]
+//
+//   GET  /nearby?lat=&lng=&radius_km=  leads, contacts, accounts near me
+//   GET|PUT|DELETE /places/:module/:id   POST /places/:module/:id/geocode
+//
+//   GET  /live   GET /trail?user_id=&day=   GET /register?from=&to=[&format=csv]   GET /people
+//   GET|PUT /settings
+//   (no sign-in: GET /api/app/info — mounted in server.js)
+// ============================================================================
+
+const express = require('express');
+const multer = require('multer');
+const db = require('../db');
+const { requirePermission } = require('../middleware/auth');
+const store = require('../services/sfa/store');
+const field = require('../services/sfa/field');
+const mobile = require('../services/sfa/mobile');
+
+const router = express.Router();
+
+function fail(res, e) {
+  const status = Number(e && e.status) || 500;
+  const plain = status >= 500 && status !== 502;
+  if (plain) console.error('[sfa]', e && e.stack ? e.stack : e);
+  const out = { error: plain ? 'Something went wrong. Please try again.' : e.message };
+  for (const k of ['off', 'session', 'visit']) if (e && e[k] !== undefined) out[k] = e[k];
+  res.status(status).json(out);
+}
+const run = (fn, status = 200) => async (req, res) => {
+  try {
+    const out = await fn(req, res);
+    if (out !== undefined && !res.headersSent) res.status(out && out.already_saved ? 200 : status).json(out);
+  } catch (e) { fail(res, e); }
+};
+
+// A photo or file can also come as a normal file upload (field "files" or "selfie")
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 10, fields: 40 } });
+function files(req, res, next) {
+  if (!req.is('multipart/form-data')) return next();
+  return upload.fields([{ name: 'files', maxCount: 10 }, { name: 'selfie', maxCount: 1 }])(req, res, (err) => {
+    if (!err) return next();
+    return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'A file can be 5 MB at most.' : 'The upload could not be read.' });
+  });
+}
+function body(req) {
+  let b = req.body && typeof req.body === 'object' ? req.body : {};
+  if (typeof b.data === 'string' && req.is('multipart/form-data')) { try { b = JSON.parse(b.data) || {}; } catch { b = {}; } }
+  const f = req.files || {};
+  const asFile = (x) => ({ buffer: x.buffer, mime: x.mimetype, file_name: x.originalname });
+  if (Array.isArray(f.files) && f.files.length) b = { ...b, files: [...(Array.isArray(b.files) ? b.files : []), ...f.files.map(asFile)] };
+  if (Array.isArray(f.selfie) && f.selfie[0]) b = { ...b, selfie: asFile(f.selfie[0]) };
+  return b;
+}
+
+// --- settings (Settings → Field force) ---------------------------------------
+function settingsPayload() {
+  let categories = []; let vehicles = [];
+  try { categories = db.prepare("SELECT id, name, active FROM expense_categories WHERE kind = 'mileage' ORDER BY sort_order, id").all().map((c) => ({ id: Number(c.id), name: c.name, active: c.active !== 0 })); } catch { categories = []; }
+  try { vehicles = db.prepare('SELECT name, rate_per_km, active FROM expense_vehicle_rates ORDER BY sort_order, id').all().map((v) => ({ name: v.name, rate_per_km: Number(v.rate_per_km), active: v.active !== 0 })); } catch { vehicles = []; }
+  let expenses = false;
+  try { expenses = !!require('../services/expenses/store').getSettings().enabled; } catch { expenses = false; }
+  return {
+    settings: store.getSettings(), km_categories: categories, vehicles, expenses_on: expenses,
+    roles: db.prepare('SELECT id, name FROM roles ORDER BY id').all().map((r) => ({ id: Number(r.id), name: r.name })),
+  };
+}
+router.get('/settings', requirePermission('settings', 'view'), run(() => settingsPayload()));
+router.put('/settings', requirePermission('settings', 'edit'), run((req) => { store.saveSettings(req.body || {}); return settingsPayload(); }));
+
+// --- the web menu --------------------------------------------------------------
+router.get('/meta', run((req) => {
+  const s = store.getSettings();
+  const admin = field.isAdmin(req.user);
+  const view = field.can(req.user, 'view');
+  return {
+    enabled: s.enabled, available: view && (s.enabled || admin), is_admin: admin, me_id: Number(req.user.id),
+    is_manager: view ? field.isManager(req.user) : false, sees_all: view ? field.seesAll(req.user) : false,
+    can_export: field.can(req.user, 'export'), track: s.track, geocode: s.geocode, map_tiles_url: s.map_tiles_url, map_attribution: s.map_attribution, work_start: s.work_start, work_end: s.work_end, time_zone: field.zone(), today: field.today(),
+  };
+}));
+
+// --- the app -----------------------------------------------------------------
+router.get('/m/bootstrap', run((req) => mobile.bootstrap(req.user)));
+router.get('/m/list/:module', run((req) => mobile.list(req.user, req.params.module, req.query)));
+
+// --- my day ------------------------------------------------------------------
+router.get('/me/today', run((req) => field.myDay(req.user)));
+router.post('/punch-in', files, run((req) => field.punchIn(req.user, body(req)), 201));
+router.post('/punch-out', files, run((req) => field.punchOut(req.user, body(req))));
+router.post('/points', run((req) => field.addPoints(req.user, req.body || {})));
+
+// --- visits ------------------------------------------------------------------
+router.post('/visits/check-in', files, run((req) => field.checkIn(req.user, body(req)), 201));
+router.post('/visits/:id/check-out', run((req) => field.checkOut(req.user, req.params.id, req.body || {})));
+router.post('/visits/:id/files', files, run((req) => { const b = body(req); return field.addVisitFiles(req.user, req.params.id, b.files || b); }));
+router.get('/visits', run((req) => field.listVisits(req.user, req.query)));
+router.get('/visits/:id', run((req) => { field.needOn(req.user); return field.getVisit(req.user, req.params.id); }));
+router.get('/files/:id', (req, res) => {
+  try {
+    field.needOn(req.user);
+    const f = field.fileOf(req.user, req.params.id, { thumb: req.query.thumb === '1' });
+    res.setHeader('Content-Type', f.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', `inline; filename="${String(f.file_name).replace(/[^\w.\- ()]/g, '_')}"`);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.end(f.buffer);
+  } catch (e) { fail(res, e); }
+});
+
+// --- places ------------------------------------------------------------------
+router.get('/nearby', run((req) => field.nearby(req.user, req.query)));
+router.get('/places/:module/:id', run((req) => field.getPlace(req.user, req.params.module, req.params.id)));
+router.put('/places/:module/:id', run((req) => field.setPlace(req.user, req.params.module, req.params.id, req.body || {})));
+router.delete('/places/:module/:id', run((req) => field.clearPlace(req.user, req.params.module, req.params.id)));
+router.post('/places/:module/:id/geocode', run((req) => field.geocode(req.user, req.params.module, req.params.id)));
+
+// --- managers ----------------------------------------------------------------
+router.get('/people', run((req) => { field.needOn(req.user); return { people: field.people(req.user) }; }));
+router.get('/live', run((req) => field.live(req.user)));
+router.get('/trail', run((req) => field.trail(req.user, req.query)));
+router.get('/register', (req, res) => {
+  try {
+    const r = field.register(req.user, req.query);
+    if (req.query.format !== 'csv') return res.json(r);
+    if (!field.can(req.user, 'export')) return res.status(403).json({ error: 'Your role cannot export the attendance.' });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="attendance-${r.from}-to-${r.to}.csv"`);
+    return res.send(field.registerCsv(r));
+  } catch (e) { return fail(res, e); }
+});
+
+module.exports = router;
+module.exports.appInfo = (req, res) => {
+  try { res.setHeader('Cache-Control', 'no-store'); res.json(mobile.appInfo()); } catch (e) { fail(res, e); }
+};

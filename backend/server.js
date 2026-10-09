@@ -101,6 +101,20 @@ app.use('/api/admin/import-analyze', express.json({ limit: '30mb' }));
 // it needs the body exactly as sent, so it is read raw, before express.json).
 app.use('/api/expenses-webhook/razorpayx', express.raw({ type: () => true, limit: '1mb' }), require('./routes/expenses').razorpayxWebhook);
 
+// Field force (SFA): punch in/out, the route, visits with photos — the mobile
+// app sends selfies and photos inside the request, so a bigger body is read
+// (after the sign-in is checked).
+{
+  const readSfaBody = express.json({ limit: '25mb' });
+  app.use('/api/sfa', requireAuth, (req, res, next) => readSfaBody(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.status === 413 || err.type === 'entity.too.large';
+    return res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'Too much to send at once. Send fewer photos or points at a time.' : 'The request could not be read.' });
+  }), require('./routes/sfa'));
+}
+// What the mobile app asks before signing in: which company this server is, what is switched on.
+app.get('/api/app/info', require('./routes/sfa').appInfo);
+
 // Expense management — field expenses with bill photos, claims, approvals,
 // advances and payment (also what the mobile app talks to). A bill photo
 // travels inside the request, so these routes read a bigger body than the

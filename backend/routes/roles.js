@@ -16,7 +16,7 @@ const MODULES = ['leads', 'accounts', 'contacts', 'opportunities', 'quotations',
   'subscriptions', 'tickets', 'calls', 'meetings', 'tasks', 'notes', 'emails', 'payments',
   'documents', 'teams', 'workflows', 'reports', 'users', 'chat', 'calendar', 'settings',
   'assistant', 'whatsapp', 'lead_sources', 'support', 'support_settings', 'kb_articles', 'major_incidents', 'problems',
-  'service_catalog', 'assets', 'expenses'];
+  'service_catalog', 'assets', 'expenses', 'sfa'];
 
 // ---------------------------------------------------------------------------
 // Who sees which records ("Can see" on the Roles screen)
