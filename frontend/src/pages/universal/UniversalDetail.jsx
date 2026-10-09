@@ -22,6 +22,7 @@ import { userName } from '../../components/userDirectory';
 import DocumentItemsPanel from './DocumentItemsPanel';
 import { ProductPhotoPanel, ProductThumb } from '../../components/ProductPhoto';
 import DocumentActionsPanel from './DocumentActionsPanel';
+import FieldVisitsPanel from '../../components/field/FieldVisitsPanel';
 import DocumentPaymentsPanel from './DocumentPaymentsPanel';
 import SubscriptionPanels, { CustomerSubscriptions } from './SubscriptionPanels';
 import AssignPicker from '../../components/AssignPicker';
@@ -1081,6 +1082,10 @@ export default function UniversalDetail() {
       {SALES_DOCUMENT_MODULES.has(module.api_name) && (
         <DocumentActionsPanel module={module} record={record}
           canEdit={can(module.api_name, 'edit')} onUpdated={load} />
+      )}
+
+      {['contacts', 'accounts', 'opportunities'].includes(module.api_name) && (
+        <FieldVisitsPanel module={module.api_name} recordId={Number(id)} canEdit={can(module.api_name, 'edit')} />
       )}
 
       <AiAnalysisPanel moduleApiName={module.api_name} recordId={id} />

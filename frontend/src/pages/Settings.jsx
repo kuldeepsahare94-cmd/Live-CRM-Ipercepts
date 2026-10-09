@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import {
   CalendarDays, Settings as SettingsIcon, Sparkles, Database, ShieldCheck, Boxes, Zap, GitBranch, Users2, History,
   Percent, Mail, LayoutList, Check, AlertTriangle, Building2, LayoutTemplate, ListChecks, Bell, Search, Palette,
-  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge, PhoneCall, ReceiptText
+  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge, PhoneCall, ReceiptText, MapPinned
 } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -147,6 +147,8 @@ function sections(can) {
           desc: 'Click-to-call, automatic call logs with recordings, incoming-call pop-up, missed-call follow-ups, auto-dialer and live calls.' },
         { to: '/settings/expenses', icon: ReceiptText, tint: '#0D9488', title: 'Expenses', show: can('settings', 'view'),
           desc: 'Field expenses with bill photos, km and daily allowance: categories and limits, who approves, who pays, advances. Also what the mobile app uses.' },
+        { to: '/settings/field', icon: MapPinned, tint: '#0284C7', title: 'Field force', show: can('settings', 'view'),
+          desc: 'The mobile app for the field team: punch in / out with location and selfie, live tracking, km per day, visits at customers, km as an expense.' },
         { to: '/lead-sources', icon: Radio, tint: '#C026D3', title: 'Lead Sources', show: can('lead_sources', 'view'),
           desc: 'Website forms and Facebook / Instagram lead ads that create leads automatically.' },
       ],

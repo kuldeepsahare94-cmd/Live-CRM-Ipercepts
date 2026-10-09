@@ -28,6 +28,7 @@ import { avatarGradientFor } from '../theme/avatarColors';
 import { CallsTab, MeetingsTab, TasksTab, DocumentsTab, DealsTab, NotesTab } from '../components/LeadRelatedTabs';
 import CallButton from '../components/telephony/CallButton';
 import { useExpenseMeta, askAddExpense } from '../components/expenses/expenses';
+import FieldVisitsPanel from '../components/field/FieldVisitsPanel';
 
 // The funnel tracker's stages (stored values). Their labels, and every other
 // status, come from Settings → Dropdown Options (Leads › Status).
@@ -864,6 +865,8 @@ export default function LeadDetail() {
               </div>
               <DealsTab lead={lead} />
             </div>
+
+            <FieldVisitsPanel module="leads" recordId={Number(id)} canEdit={can('leads', 'edit')} />
           </div>
         </div>
         </>

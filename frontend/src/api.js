@@ -955,6 +955,23 @@ export const api = {
   liveCalls: () => req('GET', '/telephony/live-calls'),
   liveCallAction: (id, body) => ask(`/telephony/live-calls/${id}/action`, body),
 
+  // Field force (SFA): attendance, routes, visits — the web side of the mobile app
+  fieldMeta: () => req('GET', '/sfa/meta'),
+  fieldLive: () => req('GET', '/sfa/live'),
+  fieldPeople: () => req('GET', '/sfa/people'),
+  fieldTrail: (params) => req('GET', `/sfa/trail${qs(params)}`),
+  fieldRegister: (params) => req('GET', `/sfa/register${qs(params)}`),
+  downloadFieldRegister: (params) => downloadFile(`/sfa/register${qs({ ...params, format: 'csv' })}`, `attendance-${params.from}-to-${params.to}.csv`),
+  fieldVisits: (params) => req('GET', `/sfa/visits${qs(params)}`),
+  fieldVisit: (id) => req('GET', `/sfa/visits/${id}`),
+  fieldFile: (id, thumb) => fetchBlob(`/sfa/files/${id}${thumb ? '?thumb=1' : ''}`),
+  fieldPlace: (module, id) => req('GET', `/sfa/places/${module}/${id}`),
+  saveFieldPlace: (module, id, body) => req('PUT', `/sfa/places/${module}/${id}`, body),
+  clearFieldPlace: (module, id) => req('DELETE', `/sfa/places/${module}/${id}`),
+  geocodeFieldPlace: (module, id) => req('POST', `/sfa/places/${module}/${id}/geocode`, {}),
+  fieldSettings: () => req('GET', '/sfa/settings'),
+  saveFieldSettings: (body) => req('PUT', '/sfa/settings', body),
+
   // Expense management: expenses with bills, claims, approvals, advances, payment
   expenseMeta: () => req('GET', '/expenses/meta'),
   expenseSummary: () => req('GET', '/expenses/summary'),

@@ -4,7 +4,7 @@ import {
   CalendarDays,
   LayoutDashboard, Users as UsersIcon, Wallet, BarChart3, Settings as SettingsIcon,
   LogOut, UserCog, ShieldCheck, Palette, Menu, X, MessageCircle, Radio, ChevronRight,
-  ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy, ListOrdered, Headphones, ReceiptText,
+  ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy, ListOrdered, Headphones, ReceiptText, MapPinned,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api, noteNavigation, prefetchRoute } from '../api';
@@ -26,6 +26,7 @@ import TelephonyHost, { TelephonyMenu } from './telephony/TelephonyHost';
 import { useTelephony } from './telephony/telephony';
 import ExpenseHost from './expenses/ExpenseHost';
 import { useExpenseMeta } from './expenses/expenses';
+import { useFieldMeta } from './field/field';
 
 // Hand-written links for the modules that have bespoke pages. Everything
 // else is generated from the module registry below, so a module created
@@ -124,6 +125,9 @@ function SidebarContent({ onNavigate, showClose, onClose }) {
   // role has the permission (and to administrators before that, to set it up).
   const expenseMeta = useExpenseMeta();
   if (expenseMeta?.available) callLinks.push({ to: '/expenses', label: 'Expenses', icon: ReceiptText, accent: 'payments' });
+  // Field team: attendance, live map, routes and km (once Field force is on)
+  const fieldMeta = useFieldMeta();
+  if (fieldMeta?.available) callLinks.push({ to: '/field', label: 'Field team', icon: MapPinned, accent: 'meetings' });
 
   return (
     <div className="flex flex-col h-full" style={{ background: '#111A3A' }}>
