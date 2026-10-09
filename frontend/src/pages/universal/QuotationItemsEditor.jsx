@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../../api';
+import { ProductThumb } from '../../components/ProductPhoto';
 
 /* ---------------------------------------------------------------------------
    Line-item editor used while CREATING a quotation.
@@ -81,6 +82,9 @@ export default function QuotationItemsEditor({
   };
 
   const totals = computeTotals(items, discountType, discountValue);
+  const photoOf = (item) => (item.product_id
+    ? (products.find((p) => String(p.id) === String(item.product_id))?.thumb_url || null) : null);
+  const anyPhoto = items.some((i) => photoOf(i));
   const cell = 'border border-line rounded-md px-2 py-1 text-sm w-full';
 
   return (
@@ -116,15 +120,20 @@ export default function QuotationItemsEditor({
                 return (
                   <tr key={idx} className="border-b border-line/60 align-top">
                     <td className="py-2 px-2">
-                      {products.length > 0 && (
-                        <select className={`${cell} mb-1`} value={item.product_id || ''}
-                          onChange={(e) => pickProduct(idx, e.target.value)}>
-                          <option value="">— Custom item —</option>
-                          {products.map((p) => <option key={p.id} value={p.id}>{p.product_name}</option>)}
-                        </select>
-                      )}
-                      <input className={cell} value={item.description || ''} placeholder="Description"
-                        onChange={(e) => update(idx, { description: e.target.value })} />
+                      <div className="flex gap-2 items-start">
+                        {anyPhoto && <ProductThumb url={photoOf(item)} size={56} alt={item.description || ''} />}
+                        <div className="flex-1 min-w-0">
+                          {products.length > 0 && (
+                            <select className={`${cell} mb-1`} value={item.product_id || ''}
+                              onChange={(e) => pickProduct(idx, e.target.value)}>
+                              <option value="">— Custom item —</option>
+                              {products.map((p) => <option key={p.id} value={p.id}>{p.product_name}</option>)}
+                            </select>
+                          )}
+                          <input className={cell} value={item.description || ''} placeholder="Description"
+                            onChange={(e) => update(idx, { description: e.target.value })} />
+                        </div>
+                      </div>
                     </td>
                     <td className="py-2 px-2">
                       <input type="number" min="0" step="any" className={`${cell} text-right`} value={item.quantity ?? ''}

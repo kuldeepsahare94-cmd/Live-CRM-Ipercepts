@@ -7,6 +7,7 @@ import { ModuleIcon } from '../../components/moduleIcons';
 import { accentFor, accentGradient } from '../../theme/moduleAccents';
 import { avatarGradientFor, initialsOf } from '../../theme/avatarColors';
 import QuotationItemsEditor from './QuotationItemsEditor';
+import { PhotoChooser, ProductThumb } from '../../components/ProductPhoto';
 import { api } from '../../api';
 import { usePermissions } from '../../context/usePermissions';
 import StatusBadge from '../../components/StatusBadge';
@@ -55,6 +56,9 @@ export default function UniversalList() {
   // Quotation line items live outside `form` because they're a child
   // collection, not a column on the record.
   const [quoteItems, setQuoteItems] = useState([]);
+  // A product photo picked in the create form; uploaded once the product exists.
+  const [newPhoto, setNewPhoto] = useState(null);
+  useEffect(() => { if (!showForm) setNewPhoto(null); }, [showForm]);
   const [discountType, setDiscountType] = useState('percent');
   const [discountValue, setDiscountValue] = useState(0);
   // Quotations, proforma invoices and invoices are all built the same way:
@@ -62,6 +66,7 @@ export default function UniversalList() {
   // line-item editor for all three rather than for quotations alone.
   const SALES_DOCUMENTS = ['quotations', 'proforma_invoices', 'invoices'];
   const isQuotations = SALES_DOCUMENTS.includes(moduleApiName);
+  const isProducts = moduleApiName === 'products';
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
@@ -414,7 +419,16 @@ export default function UniversalList() {
           overall_discount_value: Number(discountValue) || 0,
         }
         : form;
-      await api.universalCreate(module, payload);
+      const created = await api.universalCreate(module, payload);
+      if (isProducts && newPhoto && created?.id) {
+        const { image, thumb, fit, original_name, original_bytes } = newPhoto;
+        try {
+          await api.saveProductImage(created.id, { image, thumb, fit, original_name, original_bytes });
+        } catch (photoErr) {
+          alert(`The product was saved, but its photo was not: ${photoErr.message}\nOpen the product to add the photo again.`);
+        }
+      }
+      setNewPhoto(null);
       setForm(defaultsForCreate);
       setQuoteItems([]);
       setDiscountValue(0);
@@ -590,6 +604,12 @@ export default function UniversalList() {
               )}
             </div>
           ))}
+          {isProducts && (
+            <div className="col-span-2">
+              <label className="text-xs text-slate-500 font-medium block mb-1">Product photo</label>
+              <PhotoChooser value={newPhoto} onChange={setNewPhoto} disabled={saving} />
+            </div>
+          )}
           {isQuotations && (
             <QuotationItemsEditor
               items={quoteItems} setItems={setQuoteItems}
@@ -649,10 +669,14 @@ export default function UniversalList() {
                       <Link to={`/records/${module.api_name}/${r.id}`} onClick={(e) => e.stopPropagation()}
                         state={{ preview: { id: r.id, title: recordTitle(r, fields) } }}
                         className="flex items-center gap-2.5 group">
-                        <span className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 shadow-sm"
-                          style={{ background: avatarGradientFor(formatFieldValue(getFieldValue(r, f), f)) }}>
-                          {initialsOf(formatFieldValue(getFieldValue(r, f), f))}
-                        </span>
+                        {isProducts && r.thumb_url ? (
+                          <ProductThumb url={r.thumb_url} size={32} rounded="rounded-lg" alt="" />
+                        ) : (
+                          <span className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 shadow-sm"
+                            style={{ background: avatarGradientFor(formatFieldValue(getFieldValue(r, f), f)) }}>
+                            {initialsOf(formatFieldValue(getFieldValue(r, f), f))}
+                          </span>
+                        )}
                         <span className="text-ink font-medium group-hover:text-[var(--color-brand)] truncate">
                           {formatFieldValue(getFieldValue(r, f), f)}
                         </span>

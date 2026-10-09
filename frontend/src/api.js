@@ -60,6 +60,15 @@ export async function downloadFile(path, fallbackName = 'download') {
   return filename;
 }
 
+// The full address of a picture the server serves on a signed address
+// (product photos). Those need no sign-in, so they can be a plain <img src>
+// and stay in the browser's cache.
+export function mediaUrl(path) {
+  if (!path) return null;
+  if (/^(https?:|data:|blob:)/i.test(path)) return path;
+  return `${API_ROOT}${path}`;
+}
+
 // A file as a blob, with the sign-in (a bill photo cannot be an <img src>:
 // the browser would ask for it without the sign-in).
 export async function fetchBlob(path) {
@@ -740,6 +749,12 @@ export const api = {
     : req('POST', recordsBase(module), body)),
   universalUpdate: (module, id, body) => req('PUT', `${recordsBase(module)}/${id}`, body),
   universalDelete: (module, id) => req('DELETE', `${recordsBase(module)}/${id}`),
+
+  // Product photos (one per product; sized in the browser, see utils/productPhoto.js)
+  productImageRules: () => req('GET', '/products/image-rules'),
+  getProductImage: (id) => req('GET', `/products/${id}/image`),
+  saveProductImage: (id, body) => req('PUT', `/products/${id}/image`, body),
+  removeProductImage: (id) => req('DELETE', `/products/${id}/image`),
 
   // Custom fields on a STANDARD module's record (EAV values, separate from
   // the record's real columns) — only meaningful when module.table_name is

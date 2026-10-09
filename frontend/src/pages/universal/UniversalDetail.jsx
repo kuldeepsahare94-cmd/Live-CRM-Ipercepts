@@ -20,6 +20,7 @@ import OutcomeModal from '../../components/followup/OutcomeModal';
 import FollowUpCard from '../../components/followup/FollowUpCard';
 import { userName } from '../../components/userDirectory';
 import DocumentItemsPanel from './DocumentItemsPanel';
+import { ProductPhotoPanel, ProductThumb } from '../../components/ProductPhoto';
 import DocumentActionsPanel from './DocumentActionsPanel';
 import DocumentPaymentsPanel from './DocumentPaymentsPanel';
 import SubscriptionPanels, { CustomerSubscriptions } from './SubscriptionPanels';
@@ -811,10 +812,14 @@ export default function UniversalDetail() {
         }} />
         <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3.5 min-w-0">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-white text-lg shrink-0 shadow-md"
-            style={{ background: avatarGradientFor(title) }}>
-            {initialsOf(title)}
-          </div>
+          {module.api_name === 'products' && record.thumb_url ? (
+            <ProductThumb url={record.thumb_url} size={56} rounded="rounded-2xl" alt={title} className="shadow-md" />
+          ) : (
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-white text-lg shrink-0 shadow-md"
+              style={{ background: avatarGradientFor(title) }}>
+              {initialsOf(title)}
+            </div>
+          )}
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="t-page-title">{title}</h1>
@@ -1023,6 +1028,12 @@ export default function UniversalDetail() {
             </p>
           )}
         </div>
+      )}
+
+      {/* A product's photo — sized automatically, shown on quotations. */}
+      {module.api_name === 'products' && (
+        <ProductPhotoPanel productId={Number(id)} productName={record.product_name}
+          canEdit={can('products', 'edit')} onChanged={load} />
       )}
 
       {/* Subscription / AMC: overview, payment schedule (Payments module),

@@ -3,6 +3,7 @@ import { Plus, Trash2, GripVertical, Save } from 'lucide-react';
 import { api } from '../../api';
 import { friendlyError } from '../../components/ui';
 import { computeTotals } from './QuotationItemsEditor';
+import { ProductThumb } from '../../components/ProductPhoto';
 
 /* ---------------------------------------------------------------------------
    Line items, for any sales document.
@@ -104,6 +105,16 @@ export default function DocumentItemsPanel({
 
   const totals = useMemo(() => computeTotals(items, discountType, discountValue), [items, discountType, discountValue]);
 
+  // Each line's product photo: from the product list when it is loaded (so a
+  // product picked just now shows its photo at once), else from the line.
+  const productById = useMemo(() => new Map(products.map((p) => [String(p.id), p])), [products]);
+  const photoOf = (item) => {
+    if (!item.product_id) return null;
+    const p = productById.get(String(item.product_id));
+    return p ? (p.thumb_url || null) : (item.product_thumb_url || null);
+  };
+  const anyPhoto = items.some((i) => photoOf(i));
+
   const save = async () => {
     setSaving(true); setMessage(null);
     try {
@@ -182,19 +193,27 @@ export default function DocumentItemsPanel({
                   <tr key={idx} className="border-b border-line/60 align-top">
                     <td className="py-2 px-2 text-[var(--color-faint)]"><GripVertical className="w-3.5 h-3.5" /></td>
                     <td className="py-2 px-2">
-                      {canEdit && products.length > 0 && (
-                        <select className={cell + ' mb-1'} value={item.product_id || ''}
-                          onChange={(e) => pickProduct(idx, e.target.value)}>
-                          <option value="">— Custom item —</option>
-                          {products.map((p) => <option key={p.id} value={p.id}>{p.product_name}</option>)}
-                        </select>
-                      )}
-                      {canEdit ? (
-                        <input className={cell} value={item.description || ''} placeholder="Description"
-                          onChange={(e) => update(idx, { description: e.target.value })} />
-                      ) : (
-                        <span className="text-ink">{item.product_name || item.description}</span>
-                      )}
+                      <div className="flex gap-2 items-start">
+                        {anyPhoto && (
+                          <ProductThumb url={photoOf(item)} size={canEdit ? 56 : 44}
+                            alt={item.product_name || item.description || ''} />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          {canEdit && products.length > 0 && (
+                            <select className={cell + ' mb-1'} value={item.product_id || ''}
+                              onChange={(e) => pickProduct(idx, e.target.value)}>
+                              <option value="">— Custom item —</option>
+                              {products.map((p) => <option key={p.id} value={p.id}>{p.product_name}</option>)}
+                            </select>
+                          )}
+                          {canEdit ? (
+                            <input className={cell} value={item.description || ''} placeholder="Description"
+                              onChange={(e) => update(idx, { description: e.target.value })} />
+                          ) : (
+                            <span className="text-ink">{item.product_name || item.description}</span>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     {showTaxColumns && (
                       <td className="py-2 px-2">
