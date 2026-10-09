@@ -110,9 +110,22 @@ app.use('/api/admin/import-analyze', express.json({ limit: '30mb' }));
   }), require('./routes/expenses'));
 }
 
+// A product photo (two small, already-sized JPEGs) is bigger than the
+// standard 100 KB body limit, so only that one route reads up to 1 MB.
+{
+  const readPhotoBody = express.json({ limit: '1mb' });
+  app.use(/^\/api\/products\/[^/]+\/image\/?$/, (req, res, next) => readPhotoBody(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.status === 413 || err.type === 'entity.too.large';
+    return res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'The photo is too large. Pick it again so the CRM can make it smaller.' : 'The request could not be read.' });
+  }));
+}
+
 app.use(express.json());
 
 // Public routes
+// Product photos — signed addresses, see routes/productImages.js.
+app.use('/api/product-images', require('./routes/productImages'));
 app.use('/api/auth', require('./routes/auth'));
 // The workflows' keep-awake link: no sign-in, the long key in the address is
 // the secret (Settings → Workflows → Settings shows it).

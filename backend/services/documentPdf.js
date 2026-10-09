@@ -715,14 +715,35 @@ const BLOCK_RENDERERS = {
     const bodyTop = doc.y;
     drawHeader();
 
+    // Product photos, beside the item name. Every photo is the same square
+    // (the CRM sizes them when they are uploaded), so the rows line up.
+    // On unless the template switches "Show product photos" off; a document
+    // whose products have no photos prints exactly as before.
+    const thumbs = (block.show_images !== false && keys.includes('description'))
+      ? productThumbs(context.items) : new Map();
+    const pic = thumbs.size ? p.gap(42) : 0;
+    const picGap = pic ? 6 : 0;
+    const opened = new Map();
+    const photoOf = (item) => {
+      const id = Number(item.product_id);
+      if (!pic || !thumbs.has(id)) return null;
+      if (!opened.has(id)) {
+        try { opened.set(id, doc.openImage(thumbs.get(id))); } catch { opened.set(id, null); }
+      }
+      return opened.get(id);
+    };
+    const textWidth = (k) => widthOf(k) - 8 - (k === 'description' ? pic + picGap : 0);
+
     const currency = context.doc.currency;
     context.items.forEach((item, index) => {
       const cells = keys.map((k) => cellText(k, item, currency));
       // Measure first: a long description wraps, and the row's background and
       // its neighbours all have to agree on how tall that made it.
       doc.font(p.f.regular).fontSize(p.fs(8.5));
-      const rowHeight = Math.max(p.gap(18), ...keys.map((k, i) => (
-        doc.heightOfString(cells[i], { width: widthOf(k) - 8 }) + p.gap(9)
+      // Only a line that has a photo is made taller for it; the text of every
+      // line still starts at the same place, so the column stays straight.
+      const rowHeight = Math.max(p.gap(18), photoOf(item) ? pic + p.gap(8) : 0, ...keys.map((k, i) => (
+        doc.heightOfString(cells[i], { width: textWidth(k) }) + p.gap(9)
       )));
 
       if (doc.y + rowHeight > doc.page.height - doc.page.margins.bottom - 90) {
@@ -737,7 +758,19 @@ const BLOCK_RENDERERS = {
       doc.font(p.f.regular).fontSize(p.fs(8.5)).fillColor(theme.text);
       let x = left + 6;
       keys.forEach((k, i) => {
-        doc.text(cells[i], x, y + p.gap(5), { width: widthOf(k) - 8, align: COLUMN_DEFS[k].align });
+        let tx = x;
+        if (k === 'description' && pic) {
+          const photo = photoOf(item);
+          if (photo) {
+            try {
+              doc.image(photo, x, y + p.gap(4), { fit: [pic, pic], align: 'center', valign: 'center' });
+              doc.save().lineWidth(0.4).strokeColor(theme.line).rect(x, y + p.gap(4), pic, pic).stroke().restore();
+            } catch { /* a photo that will not draw is not a reason to lose the line */ }
+          }
+          tx = x + pic + picGap;
+          doc.font(p.f.regular).fontSize(p.fs(8.5)).fillColor(theme.text);
+        }
+        doc.text(cells[i], tx, y + p.gap(5), { width: textWidth(k), align: COLUMN_DEFS[k].align });
         x += widthOf(k);
       });
 
@@ -1035,6 +1068,20 @@ const BLOCK_RENDERERS = {
 
   page_break(p) { p.doc.addPage(); },
 };
+
+// The small product photos for a document's lines, by product id — one
+// query for the whole document. Never fails the PDF.
+function productThumbs(items) {
+  try {
+    const ids = (items || []).map((i) => i.product_id).filter(Boolean);
+    if (!ids.length) return new Map();
+    return require('./productImages').thumbsFor(ids);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[pdf] product photos skipped:', e.message);
+    return new Map();
+  }
+}
 
 function cellText(key, item, currency) {
   switch (key) {

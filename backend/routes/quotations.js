@@ -11,6 +11,7 @@ const { sendEmail, isConfigured: emailConfigured } = require('../services/email'
 const { nextNumber } = require('../services/documentNumbering');
 const engine = require('../services/documentEngine');
 const docs = require('../services/documentService');
+const productImages = require('../services/productImages');
 
 function resolveMobile(accountId, contactId) {
   if (contactId) {
@@ -94,9 +95,15 @@ router.get('/:id', requirePermission('quotations', 'view'), (req, res) => {
   `).get(req.params.id);
   if (!quote) return res.status(404).json({ error: 'Not found' });
   const items = db.prepare(`
-    SELECT qi.*, p.product_name FROM quotation_items qi LEFT JOIN products p ON p.id = qi.product_id
+    SELECT qi.*, p.product_name, ph.image_key AS product_image_key FROM quotation_items qi
+      LEFT JOIN products p ON p.id = qi.product_id
+      LEFT JOIN product_images ph ON ph.product_id = qi.product_id
     WHERE qi.quotation_id=? ORDER BY qi.sort_order, qi.id
-  `).all(req.params.id);
+  `).all(req.params.id).map(({ product_image_key: imageKey, ...item }) => ({
+    ...item,
+    // The product's small photo, shown beside the line (null when none).
+    product_thumb_url: productImages.urlFor(item.product_id, imageKey, 'thumb'),
+  }));
   res.json({ ...quote, items, ...relatedActivity('quotations', req.params.id) });
 });
 

@@ -354,7 +354,10 @@ const BLOCKS = [
   { type: 'parties', label: 'Bill to / Ship to', description: "The customer's name and addresses.",
     options: [{ key: 'show_shipping', label: 'Show shipping address', type: 'boolean', default: false }] },
   { type: 'items', label: 'Line items', description: 'The table of what is being charged for.',
-    options: [{ key: 'columns', label: 'Columns', type: 'columns', default: ITEM_COLUMNS_FULL }] },
+    options: [
+      { key: 'columns', label: 'Columns', type: 'columns', default: ITEM_COLUMNS_FULL },
+      { key: 'show_images', label: 'Show product photos', type: 'boolean', default: true },
+    ] },
   { type: 'totals', label: 'Totals', description: 'Subtotal, discount, tax, grand total.' },
   { type: 'tax_summary', label: 'Tax breakdown', description: 'Taxable value and tax, rate by rate.' },
   { type: 'amount_in_words', label: 'Amount in words', description: 'Rupees … only.' },
