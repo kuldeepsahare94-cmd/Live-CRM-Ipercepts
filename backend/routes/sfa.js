@@ -4,6 +4,7 @@
 //   GET  /meta                         for the web menu: is it on, may I look, am I a manager
 //   GET  /m/bootstrap                  the app starts with this
 //   GET  /m/list/:module               a page of a list (leads, accounts, quotations…)
+//   POST /m/renew                      a fresh sign-in token (the app asks once a day)
 //
 //   GET  /me/today                     my day: punched in?, km, visits, today's meetings
 //   POST /punch-in    POST /punch-out  { lat, lng, accuracy, at, selfie, note, client_ref }
@@ -96,6 +97,13 @@ router.get('/meta', run((req) => {
 // --- the app -----------------------------------------------------------------
 router.get('/m/bootstrap', run((req) => mobile.bootstrap(req.user)));
 router.get('/m/list/:module', run((req) => mobile.list(req.user, req.params.module, req.query)));
+// a fresh sign-in for the app (it asks once a day): a phone in daily use is not signed out every 7 days.
+// The old one keeps working until it ends. A user who was switched off gets nothing (requireAuth stops them).
+router.post('/m/renew', run((req) => {
+  const jwt = require('jsonwebtoken');
+  const { JWT_SECRET } = require('../middleware/auth');
+  return { token: jwt.sign({ id: req.user.id }, JWT_SECRET, { expiresIn: '7d' }), expires_in_days: 7 };
+}));
 
 // --- my day ------------------------------------------------------------------
 router.get('/me/today', run((req) => field.myDay(req.user)));

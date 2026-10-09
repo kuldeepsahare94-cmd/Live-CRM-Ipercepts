@@ -72,7 +72,13 @@ app.use('/api/capture', cors(), express.json(), require('./routes/leadCapture'))
 // maxAge: the browser remembers this answer for 2 hours instead of asking
 // again ("preflight") before nearly every API call — each of those questions
 // is a full round trip to the server before the real request can start.
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', maxAge: 7200 }));
+// The mobile app (iCRM for Android) runs its screens from https://localhost inside the phone:
+// it is let in too (it signs in like the web, with a token — no cookies).
+const APP_ORIGINS = ['https://localhost', 'capacitor://localhost'];
+app.use(cors({
+  origin: process.env.FRONTEND_URL ? [...process.env.FRONTEND_URL.split(',').map((x) => x.trim()).filter(Boolean), ...APP_ORIGINS] : '*',
+  maxAge: 7200,
+}));
 
 // WhatsApp webhook receiver — PUBLIC (providers can't send our JWT) and needs
 // the raw request body for signature verification, so it's registered here,

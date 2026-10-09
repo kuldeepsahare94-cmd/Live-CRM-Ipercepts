@@ -57,6 +57,7 @@ const LIST = {
   products: {
     table: 'products', title: 't.product_name', sub: "TRIM(COALESCE(t.sku, '') || CASE WHEN t.category IS NOT NULL AND t.category <> '' THEN ' · ' || t.category ELSE '' END)", status: "CASE WHEN t.active = 1 THEN 'Active' ELSE 'Inactive' END",
     amount: 't.selling_price', search: ['t.product_name', 't.sku', 't.category'], order: 't.product_name', photo: true,
+    extra: ['t.tax_percent', 't.unit', 't.currency'],
   },
 };
 const APP_MODULES = Object.keys(LIST);
@@ -96,6 +97,28 @@ function fieldsOf(moduleId) {
   }));
 }
 
+// A lead's own columns are not all in the field list (the web's lead form has them built in):
+// the app gets them the same way, first, before this company's extra fields.
+const LEAD_CORE = [
+  { api_name: 'student_name', label: 'Full name', type: 'text', required: true },
+  { api_name: 'mobile', label: 'Mobile', type: 'phone' },
+  { api_name: 'alternate_mobile', label: 'Alternate mobile', type: 'phone' },
+  { api_name: 'email', label: 'Email', type: 'email' },
+  { api_name: 'city', label: 'City', type: 'text' },
+  { api_name: 'address', label: 'Address', type: 'textarea' },
+  { api_name: 'date_of_birth', label: 'Date of birth', type: 'date' },
+  { api_name: 'remarks', label: 'Remarks', type: 'textarea' },
+];
+const LEAD_NEVER = new Set(['lead_score', 'converted_at', 'converted_contact_id', 'converted_account_id', 'converted_opportunity_id', 'follow_up_date']);
+function withLeadCore(fields) {
+  const have = new Set(fields.map((f) => f.api_name));
+  const core = LEAD_CORE.filter((f) => !have.has(f.api_name)).map((f, i) => ({
+    options: [], lookup_module: null, placeholder: '', help: '', default_value: null, section: 'Basic Information', position: i - 100,
+    required: false, system: true, create: true, edit: true, detail: true, list: false, ...f,
+  }));
+  return [...core, ...fields.map((f) => (LEAD_NEVER.has(f.api_name) ? { ...f, create: false, edit: false } : f))];
+}
+
 /** Signed in: everything the app needs to start. */
 function bootstrap(user) {
   const s = store.getSettings();
@@ -105,7 +128,7 @@ function bootstrap(user) {
     .map((m) => ({
       api_name: m.api_name, singular: m.singular_label, plural: m.plural_label, icon: m.icon || null, color: m.color || null,
       can: { view: true, create: can(user, m.api_name, 'create'), edit: can(user, m.api_name, 'edit'), delete: can(user, m.api_name, 'delete') },
-      fields: fieldsOf(m.id),
+      fields: m.api_name === 'leads' ? withLeadCore(fieldsOf(m.id)) : fieldsOf(m.id),
     }));
   let currency = { code: 'INR', symbol: '₹' };
   try { const c = db.prepare('SELECT code, symbol FROM currencies WHERE is_base = 1 LIMIT 1').get(); if (c) currency = { code: c.code, symbol: c.symbol || c.code }; } catch { /* keep INR */ }
@@ -154,7 +177,7 @@ function list(user, module, q = {}) {
   const W = `FROM ${c.table} t ${c.join || ''} WHERE ${where.join(' AND ')}`;
   const total = Number(db.prepare(`SELECT COUNT(*) AS n ${W}`).get(...params).n) || 0;
   const cols = [`t.id`, `${c.title} AS title`, `${c.sub} AS sub`, c.status ? `${c.status} AS status` : 'NULL AS status', c.phone ? `${c.phone} AS phone` : 'NULL AS phone',
-    c.amount ? `${c.amount} AS amount` : 'NULL AS amount', c.date ? `${c.date} AS date` : 'NULL AS date'];
+    c.amount ? `${c.amount} AS amount` : 'NULL AS amount', c.date ? `${c.date} AS date` : 'NULL AS date', ...(c.extra || [])];
   const rows = db.prepare(`SELECT ${cols.join(', ')} ${W} ORDER BY ${c.order} LIMIT ? OFFSET ?`).all(...params, size, (page - 1) * size);
   let photos = new Map();
   if (c.photo && rows.length) {
@@ -176,6 +199,7 @@ function list(user, module, q = {}) {
       id: Number(r.id), title: r.title || `#${r.id}`, sub: r.sub || '', status: r.status || '', phone: r.phone || '',
       amount: r.amount === null || r.amount === undefined ? null : Number(r.amount), date: r.date || null,
       thumb_url: photos.get(Number(r.id)) || undefined, place: places.get(Number(r.id)) || undefined,
+      ...(module === 'products' ? { tax_percent: Number(r.tax_percent) || 0, unit: r.unit || '', currency: r.currency || '' } : {}),
     })),
   };
 }
