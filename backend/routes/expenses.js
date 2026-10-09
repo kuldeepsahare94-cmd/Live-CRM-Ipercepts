@@ -27,6 +27,18 @@
 //
 //   GET    /reports                      GET /reports/:name[?format=csv]
 //
+//   POST   /bill-reading                 read a bill: { text } (read on the device) or { image } (the assistant)
+//
+//   GET|PUT /bank/me                     my bank details
+//   GET    /bank/people                  PUT /bank/people/:userId     POST /bank/people/:userId/verify
+//   GET    /bank/batches                 POST /bank/batches           GET /bank/batches/:id
+//   GET    /bank/batches/:id/file        POST /bank/batches/:id/results | cancel | release | refresh
+//   POST   /bank/batches/:id/lines/:lineId/returned
+//   (RazorpayX webhook: POST /api/expenses-webhook/razorpayx — mounted in server.js)
+//
+//   GET    /tally/preview?upto=          POST /tally/exports          GET /tally/exports[/:id]
+//   GET    /tally/exports/:id/file       POST /tally/exports/:id/undo GET /tally/ledgers-file
+//
 //   GET|PUT /settings   POST|PUT|DELETE /categories[/:id]   PUT /categories-order   PUT /vehicle-rates
 // ============================================================================
 
@@ -40,6 +52,9 @@ const core = require('../services/expenses/core');
 const claims = require('../services/expenses/claims');
 const advances = require('../services/expenses/advances');
 const reports = require('../services/expenses/reports');
+const billreader = require('../services/expenses/billreader');
+const bank = require('../services/expenses/bank');
+const tally = require('../services/expenses/tally');
 
 const router = express.Router();
 const { bad } = store;
@@ -49,9 +64,11 @@ const { bad } = store;
 // ---------------------------------------------------------------------------
 function fail(res, e) {
   const status = Number(e && e.status) || 500;
-  if (status >= 500) console.error('[expenses]', e && e.stack ? e.stack : e);
-  const out = { error: status >= 500 ? 'Something went wrong while saving. Please try again.' : e.message };
-  for (const k of ['blocked', 'skipped', 'claim_id', 'off', 'stale', 'expected_total']) if (e && e[k] !== undefined) out[k] = e[k];
+  // (502: someone else — the bank, the assistant — did not answer; the message says so plainly)
+  const plain = status >= 500 && status !== 502;
+  if (plain) console.error('[expenses]', e && e.stack ? e.stack : e);
+  const out = { error: plain ? 'Something went wrong while saving. Please try again.' : e.message };
+  for (const k of ['blocked', 'skipped', 'claim_id', 'off', 'stale', 'expected_total', 'downloaded']) if (e && e[k] !== undefined) out[k] = e[k];
   res.status(status).json(out);
 }
 // a route: what the function gives back is the answer
@@ -62,6 +79,20 @@ const run = (fn, status = 200) => (req, res) => {
     if (out !== undefined && !res.headersSent) res.status(out && out.already_saved ? 200 : status).json(out);
   } catch (e) { fail(res, e); }
 };
+// the same, for work that waits on someone else (the bank, the assistant)
+const runAsync = (fn, status = 200) => async (req, res) => {
+  try {
+    const out = await fn(req, res);
+    if (out !== undefined && !res.headersSent) res.status(status).json(out);
+  } catch (e) { fail(res, e); }
+};
+// a file to download
+function sendFile(res, f, type) {
+  res.setHeader('Content-Type', type);
+  res.setHeader('Content-Disposition', `attachment; filename="${String(f.name).replace(/[^\w.\-]/g, '_')}"`);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.send(f.text);
+}
 
 const isAdmin = (user) => access.isSuper(user) || !!(user && user.permissions && user.permissions.settings && user.permissions.settings.edit);
 const view = requirePermission('expenses', 'view');
@@ -129,6 +160,13 @@ router.get('/meta', run((req) => {
       receipt_types: [...core.MIMES.keys()], max_claim_lines: core.MAX_LINES, advances: s.advances, adjust_advance: s.adjust_advance, approval_levels: s.approval_levels,
     },
     payment_modes: fin ? s.payment_modes : [],
+    // reading a bill photo: 'off' | 'device' (the screen reads it, sends the text) | 'ai' (send the photo)
+    bill_reading: s.bill_reading,
+    // expenses in another currency (rate = one unit in the CRM currency)
+    multi_currency: s.multi_currency, fx_rate_edit: s.fx_rate_edit, fx_tolerance: s.fx_tolerance,
+    currencies: s.multi_currency ? store.listCurrencies() : [],
+    bank: { on: s.bank_payments, self_edit: s.bank_payments && s.bank_self_edit, payout: fin && s.bank_payments && s.payout_ready ? s.payout_provider : null },
+    tally: fin && s.tally,
     related_modules: [{ module: 'leads', label: 'Lead' }, { module: 'contacts', label: 'Contact' }, { module: 'accounts', label: 'Account' }, { module: 'opportunities', label: 'Deal' }],
     reports: reports.list(),
   };
@@ -210,6 +248,45 @@ router.post('/claims/:id/reassign', run((req) => claims.reassign(req.user, req.p
 router.post('/claims/:id/correct', run((req) => claims.correct(req.user, req.params.id, req.body || {})));
 router.get('/approvals', run((req) => claims.approvals(req.user, req.query)));
 
+// --- reading a bill --------------------------------------------------------
+router.post('/bill-reading', files, runAsync((req) => {
+  const b = body(req);
+  // (the app may send the photo as a normal file upload)
+  if (!b.image && !b.text && Array.isArray(b.receipts) && b.receipts[0]) b.image = b.receipts[0];
+  return billreader.read(req.user, b);
+}));
+
+// --- bank details and payments through the bank -----------------------------
+router.get('/bank/me', run((req) => bank.myBank(req.user)));
+router.put('/bank/me', run((req) => bank.saveBank(req.user, req.user.id, req.body || {}, { self: true })));
+router.get('/bank/people', run((req) => bank.listPeople(req.user, req.query)));
+router.put('/bank/people/:userId', run((req) => bank.saveBank(req.user, req.params.userId, req.body || {})));
+router.post('/bank/people/:userId/verify', run((req) => bank.verify(req.user, req.params.userId, req.body || {})));
+router.get('/bank/batches', run((req) => bank.listBatches(req.user, req.query)));
+router.post('/bank/batches', run((req) => bank.prepare(req.user, req.body || {}), 201));
+router.get('/bank/batches/:id', run((req) => bank.getBatch(req.user, req.params.id)));
+router.get('/bank/batches/:id/file', (req, res) => {
+  try { return sendFile(res, bank.bankFile(req.user, req.params.id, { again: req.query.again === '1' }), 'text/csv; charset=utf-8'); } catch (e) { return fail(res, e); }
+});
+router.post('/bank/batches/:id/results', run((req) => bank.results(req.user, req.params.id, req.body || {})));
+router.post('/bank/batches/:id/cancel', run((req) => bank.cancel(req.user, req.params.id, req.body || {})));
+router.post('/bank/batches/:id/release', runAsync((req) => bank.release(req.user, req.params.id, req.body || {})));
+router.post('/bank/batches/:id/refresh', runAsync((req) => bank.refresh(req.user, req.params.id)));
+router.post('/bank/batches/:id/lines/:lineId/returned', run((req) => bank.returned(req.user, req.params.id, req.params.lineId, req.body || {})));
+
+// --- Tally -----------------------------------------------------------------
+router.get('/tally/preview', run((req) => tally.preview(req.user, req.query)));
+router.get('/tally/exports', run((req) => tally.listExports(req.user, req.query)));
+router.post('/tally/exports', run((req) => tally.make(req.user, req.body || {}), 201));
+router.get('/tally/exports/:id', run((req) => tally.getExport(req.user, req.params.id)));
+router.get('/tally/exports/:id/file', (req, res) => {
+  try { return sendFile(res, tally.exportFile(req.user, req.params.id), 'application/xml; charset=utf-8'); } catch (e) { return fail(res, e); }
+});
+router.post('/tally/exports/:id/undo', run((req) => tally.undo(req.user, req.params.id, req.body || {})));
+router.get('/tally/ledgers-file', (req, res) => {
+  try { return sendFile(res, tally.ledgersFile(req.user), 'application/xml; charset=utf-8'); } catch (e) { return fail(res, e); }
+});
+
 // --- the finance team ------------------------------------------------------
 router.get('/finance/payable', run((req) => claims.payable(req.user)));
 router.post('/finance/pay', run((req) => claims.pay(req.user, req.body || {})));
@@ -252,4 +329,19 @@ router.post('/:id/receipts', files, run((req) => {
   return core.addBills(req.user, req.params.id, list);
 }));
 
+// RazorpayX tells the CRM how a transfer went. No sign-in: the signature of
+// the message (with the webhook secret from Expense settings) is the proof.
+function razorpayxWebhook(req, res) {
+  try {
+    const out = bank.webhook(Buffer.isBuffer(req.body) ? req.body : Buffer.from(''), req.get('X-Razorpay-Signature'));
+    if (out.status !== 200) console.warn('[expenses] RazorpayX webhook refused:', out.text);
+    return res.status(out.status).json({ ok: out.status === 200, message: out.text });
+  } catch (e) {
+    console.error('[expenses] RazorpayX webhook:', e && e.stack ? e.stack : e);
+    // (500: RazorpayX sends it again later)
+    return res.status(500).json({ ok: false });
+  }
+}
+
 module.exports = router;
+module.exports.razorpayxWebhook = razorpayxWebhook;

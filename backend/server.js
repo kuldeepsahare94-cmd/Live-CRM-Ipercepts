@@ -97,6 +97,10 @@ app.use('/api/telephony/hook', express.raw({ type: () => true, limit: '1mb' }), 
 app.use('/api/admin/import', express.json({ limit: '30mb' }));
 app.use('/api/admin/import-analyze', express.json({ limit: '30mb' }));
 
+// RazorpayX reports bank transfers of expense claims here (signed, no sign-in;
+// it needs the body exactly as sent, so it is read raw, before express.json).
+app.use('/api/expenses-webhook/razorpayx', express.raw({ type: () => true, limit: '1mb' }), require('./routes/expenses').razorpayxWebhook);
+
 // Expense management — field expenses with bill photos, claims, approvals,
 // advances and payment (also what the mobile app talks to). A bill photo
 // travels inside the request, so these routes read a bigger body than the

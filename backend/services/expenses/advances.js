@@ -301,6 +301,30 @@ function adjustForClaim(userId, claim, amount, byUserId) {
   return used;
 }
 
+/**
+ * Undo what adjustForClaim did for one claim: the payment it was taken off did
+ * not happen after all (a bank transfer was cancelled, failed, or came back).
+ * Called INSIDE a transaction. Returns how much went back to the person's advances.
+ */
+function releaseForClaim(claim, byUserId, why) {
+  const uses = db.prepare("SELECT * FROM expense_advance_uses WHERE claim_id = ? AND kind = 'claim' ORDER BY id").all(claim.id);
+  const now = nowIso();
+  let back = 0;
+  for (const u of uses) {
+    const a = db.prepare('SELECT * FROM expense_advances WHERE id = ?').get(u.advance_id);
+    if (a) {
+      const adjusted = Math.max(0, money(Number(a.adjusted_amount || 0) - Number(u.amount || 0)));
+      // (an advance that this had used up is open again)
+      db.prepare("UPDATE expense_advances SET adjusted_amount = ?, status = CASE WHEN status = 'closed' THEN 'paid' ELSE status END, closed_at = CASE WHEN status = 'closed' THEN NULL ELSE closed_at END, updated_at = ? WHERE id = ?")
+        .run(adjusted, now, a.id);
+      core.history({ advance_id: a.id, user_id: byUserId || null, action: 'put_back', amount: u.amount, note: `Claim ${claim.claim_number}: ${why || 'the payment did not happen'}` });
+    }
+    db.prepare('DELETE FROM expense_advance_uses WHERE id = ?').run(u.id);
+    back = money(back + Number(u.amount || 0));
+  }
+  return back;
+}
+
 // ---------------------------------------------------------------------------
 // Reading
 // ---------------------------------------------------------------------------
@@ -354,5 +378,5 @@ function toPay(user) {
 }
 
 module.exports = {
-  createAdvance, decide, cancel, pay, takeBack, adjustForClaim, balanceOf, getAdvance, listAdvances, toApprove, toPay, present, payment, stranded,
+  createAdvance, decide, cancel, pay, takeBack, adjustForClaim, releaseForClaim, balanceOf, getAdvance, listAdvances, toApprove, toPay, present, payment, stranded,
 };

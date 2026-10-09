@@ -83,9 +83,21 @@ Ask this once after signing in (and again when the app comes back to the front).
              "max_claim_lines": 300, "advances": true, "adjust_advance": true, "approval_levels": 1 },
   "related_modules": [ { "module": "leads", "label": "Lead" }, { "module": "contacts", "label": "Contact" },
                        { "module": "accounts", "label": "Account" }, { "module": "opportunities", "label": "Deal" } ],
-  "reports": [ { "name": "summary", "title": "Summary" }, … ]
+  "reports": [ { "name": "summary", "title": "Summary" }, … ],
+  "bill_reading": "device",
+  "multi_currency": true, "fx_rate_edit": true, "fx_tolerance": 5,
+  "currencies": [ { "code": "INR", "name": "Indian Rupee", "symbol": "₹", "decimals": 2, "is_base": true, "rate": 1 },
+                  { "code": "USD", "name": "US Dollar", "symbol": "$", "decimals": 2, "is_base": false, "rate": 83.333333 } ],
+  "bank": { "on": true, "self_edit": true, "payout": null },
+  "tally": false
 }
 ```
+
+- `bill_reading`: how a bill photo is read (section 4b): `off`, `device` (read
+  the text on the phone and send the TEXT) or `ai` (send the photo).
+- `currencies` (only with `multi_currency`): `rate` is what ONE unit of that
+  currency is in the CRM currency (1 USD = ₹83.33). The first one is the CRM's own.
+- `bank.on`: payments through the bank are used — show "Bank details" (section 9).
 
 - When `available` is `false`, do not show expenses at all: the company has not
   switched it on, or this person's role has no permission. (Only `enabled`,
@@ -130,6 +142,7 @@ GET /api/expenses/summary
   "lat": null, "lng": null,
   "status": "open", "claim_id": null, "claim_number": null, "claim_status": null,
   "approved_amount": null, "approver_note": "",
+  "foreign": false, "orig_amount": 450.5, "orig_tax": 21.45, "fx_rate": 1,
   "flags": [ { "code": "over_expense", "hard": true, "text": "Over the limit for one Food expense (₹400)" } ],
   "receipts": 1, "receipt_list": [ { "id": 77, "file_name": "bill.jpg", "mime": "image/jpeg", "size": 184220, "has_thumb": true, "thumb": "/9j/4AAQ…" } ],
   "client_ref": "5f0c…", "can_edit": true,
@@ -145,6 +158,9 @@ GET /api/expenses/summary
   `over_expense`, `over_day`, `over_month`, `no_receipt`, `no_note`, `too_old`
   (all `hard`) and `duplicate` (a remark only).
 - `can_edit`: only the owner, only while `status` is `open`.
+- `foreign: true` — a bill in another currency: `currency` is that currency,
+  `orig_amount` / `orig_tax` what the bill says, `fx_rate` the rate used.
+  `amount` and `tax_amount` are ALWAYS in the CRM currency.
 - `thumb` is a small JPEG as base64 (`data:image/jpeg;base64,<thumb>`). It is
   sent along in an expense, in a list asked with `with_thumbs=1`, and in a
   claim of up to 60 expenses. Where it is not sent along, `has_thumb` says
@@ -175,6 +191,13 @@ POST /api/expenses
 
 Only `expense_date`, `category_id` and the amount (or km + vehicle, or days)
 are needed.
+
+**A bill in another currency** (only kind `amount`, only with `multi_currency`):
+send `"currency": "USD", "orig_amount": 45.20, "orig_tax": 5` (optional) and,
+when the person typed it, `"fx_rate": 84.1` (one USD in the CRM currency). Do
+not send `amount`: the server works it out. Without `fx_rate` the CRM rate is
+used. A typed rate more than `fx_tolerance` % away is saved with the flag
+`fx_rate`; one more than 20 times off is refused.
 
 ### Bills (two ways to send them)
 
@@ -244,6 +267,27 @@ GET /api/search/lookup/leads?q=sharma&limit=12        (also: contacts, accounts,
 ```
 
 ---
+
+## 4b. Reading a bill photo
+
+```
+POST /api/expenses/bill-reading
+{ "text": "HOTEL SAI PALACE\nGSTIN 27AACCT6552B1ZI\n…Grand Total 2,688.00" }     ← bill_reading "device"
+{ "image": { "mime": "image/jpeg", "data": "<base64>" } }                      ← bill_reading "ai" (or a file upload "receipts")
+
+200 → { "source": "text" | "ai",
+        "fields": { "amount": 2688, "tax_amount": 288, "expense_date": "2026-10-03", "merchant": "Hotel Sai Palace",
+                    "bill_number": "SP/2456", "gstin": "27AACCT6552B1ZI", "currency": "USD", "category_id": 6 },
+        "sure":   { "amount": "high", "gstin": "high", "category_id": "low", … },
+        "found": 7 }
+```
+
+- With `device`, the app reads the photo itself (Android: ML Kit text
+  recognition; iPhone: Vision) and sends only the text. Free, private.
+- Only what was found is in `fields`. Nothing is saved: show the values, let
+  the person correct them, then save the expense as usual.
+- Too many in a few minutes → 429 (60 texts / 15 photos in 5 minutes).
+  `bill_reading: "off"` → 409. A photo while the mode is `device` → 409.
 
 ## 5. Claims
 
@@ -428,7 +472,28 @@ back or paid.
 
 ---
 
-## 9. Small print
+## 9. Bank details (when `meta.bank.on`)
+
+```
+GET  /api/expenses/bank/me
+200 → { "holder_name": "Ravi Kumar", "account": "XXXX9012", "account_last4": "9012", "ifsc": "HDFC0001234",
+        "bank_name": "HDFC Bank", "upi_id": "", "bank_status": "none" | "unverified" | "verified",
+        "verified_by_name": "", "verified_at": null, "on": true, "can_edit": true }
+
+PUT  /api/expenses/bank/me
+{ "holder_name": "Ravi Kumar", "account_number": "123456789012", "ifsc": "HDFC0001234", "bank_name": "HDFC Bank", "upi_id": "ravi@okhdfc" }
+```
+
+- The full account number is never sent back. Leave `account_number` out to
+  keep the one that is there.
+- Any change makes the details `unverified`; the finance team checks them
+  before anything is paid to them.
+- `can_edit: false` — the company has the finance team enter them.
+
+The finance team's own links (`/bank/people`, `/bank/batches…`, `/tally/…`)
+are used by the web screens only.
+
+## 10. Small print
 
 - A claim holds 300 expenses at most; an expense 6 bills.
 - A request can be 30 MB at most. Send large bills one at a time.

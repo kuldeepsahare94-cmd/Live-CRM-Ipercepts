@@ -197,6 +197,13 @@ function evaluate(e, { roleId, excludeId = null, receipts = null, skipAge = fals
   if (!skipAge && s.max_age_days > 0 && dayDiff(today(), e.expense_date) > s.max_age_days) {
     out.push({ code: 'too_old', hard: true, text: `Older than ${s.max_age_days} days` });
   }
+  // An expense in another currency: a typed rate that is far from the rate the CRM had that day
+  if (e.fx_rate && e.fx_ref && s.fx_tolerance > 0 && e.currency && e.currency !== s.currency) {
+    const off = Math.abs(Number(e.fx_rate) / Number(e.fx_ref) - 1) * 100;
+    if (off > s.fx_tolerance + 1e-9) {
+      out.push({ code: 'fx_rate', hard: true, text: `The rate used (1 ${e.currency} = ${fmt(e.fx_rate)}) is ${Math.round(off)}% away from the CRM's rate (${fmt(e.fx_ref)})` });
+    }
+  }
   if (s.duplicate_check) {
     // Of two that look the same, the later one carries the remark — and so does
     // an open one whose twin has already gone for approval, whichever came first.
@@ -271,10 +278,50 @@ function shape(input, owner, existing = null) {
   } else {
     e.amount = money(num('amount'));
   }
+  // --- the currency of the bill ---------------------------------------------
+  // Only a plain bill amount can be in another currency (km and daily rates are
+  // the company's own, in the CRM currency). What is sent then:
+  //   currency     "USD"
+  //   orig_amount  the amount on the bill, in that currency
+  //   orig_tax     the tax on the bill, in that currency (optional)
+  //   fx_rate      what one unit cost in the CRM currency (optional: the CRM's own rate is used)
+  // "amount" is then worked out here, never taken from the sender.
+  const asked = has('currency') ? (String(input.currency || '').trim().toUpperCase() || s.currency) : ((existing && existing.currency) || s.currency);
+  e.currency = s.currency; e.orig_amount = null; e.orig_tax = null; e.fx_rate = null; e.fx_ref = null;
+  const fixed = cat.kind !== 'amount';
+  if (asked !== s.currency && fixed) {
+    if (has('currency')) throw bad(`A ${cat.kind === 'mileage' ? 'km' : 'daily allowance'} expense is always in ${s.currency}.`);
+  } else if (asked !== s.currency) {
+    // "as before": the expense already was in this currency (it stays so even when the switch or the currency was taken away since)
+    const before = !!existing && existing.currency === asked && Number(existing.fx_rate) > 0;
+    if (!/^[A-Z]{3}$/.test(asked)) throw bad('Choose the currency of the bill.');
+    if (!s.multi_currency && !before) throw bad('Expenses in another currency are not switched on. Ask your administrator.');
+    const cur = store.listCurrencies().find((c) => c.code === asked);
+    if (!cur && !before) throw bad(`${asked} is not one of the currencies of the CRM. Ask your administrator to add it.`);
+    const ref = before ? Number(existing.fx_ref || existing.fx_rate) : cur.rate;
+    const orig = has('orig_amount') ? (blank(input.orig_amount) ? null : number(input.orig_amount, 'The amount')) : (before ? Number(existing.orig_amount) : null);
+    if (!Number.isFinite(orig) || !(orig > 0)) throw bad(`Give the amount in ${asked}.`);
+    let rate = before ? Number(existing.fx_rate) : ref;
+    if (has('fx_rate') && !blank(input.fx_rate)) {
+      const typed = store.rate6(number(input.fx_rate, 'The rate'));
+      if (!(typed > 0)) throw bad('The rate must be more than 0.');
+      // (when people may not type a rate, one that is sent is not an error — the CRM's own is used)
+      if (s.fx_rate_edit) {
+        if (typed > ref * 20 || typed < ref / 20) throw bad(`That rate cannot be right: the CRM has 1 ${asked} = ${fmt(ref)}.`);
+        rate = typed;
+      }
+    }
+    e.currency = asked; e.orig_amount = money(orig); e.fx_rate = store.rate6(rate); e.fx_ref = store.rate6(ref);
+    e.amount = money(e.orig_amount * e.fx_rate);
+    const tax = has('orig_tax') ? (blank(input.orig_tax) ? null : number(input.orig_tax, 'The tax')) : (before && existing.orig_tax !== null && existing.orig_tax !== undefined ? Number(existing.orig_tax) : null);
+    if (tax !== null && (tax < 0 || tax > e.orig_amount)) throw bad('The tax in the bill cannot be more than the amount.');
+    e.orig_tax = tax === null ? null : money(tax);
+  }
   if (!(e.amount > 0)) throw bad('Give the amount.');
   if (e.amount > 100000000) throw bad('That amount is too large.');
 
-  e.tax_amount = has('tax_amount') ? (blank(input.tax_amount) ? null : money(number(input.tax_amount, 'The tax'))) : keep('tax_amount');
+  if (e.fx_rate) e.tax_amount = e.orig_tax === null ? null : money(e.orig_tax * e.fx_rate);
+  else e.tax_amount = has('tax_amount') ? (blank(input.tax_amount) ? null : money(number(input.tax_amount, 'The tax'))) : (existing && existing.fx_rate ? null : keep('tax_amount'));
   if (e.tax_amount !== null && (e.tax_amount < 0 || e.tax_amount > e.amount)) throw bad('The tax in the bill cannot be more than the amount.');
   e.paid_by = (has('paid_by') ? input.paid_by : keep('paid_by')) === 'company' ? 'company' : 'self';
   e.merchant = has('merchant') ? text(input.merchant, 120) : keep('merchant');
@@ -305,7 +352,6 @@ function shape(input, owner, existing = null) {
 
   const coord = (k, max) => { let v = null; try { v = num(k); } catch { v = null; } return typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= max ? v : null; };
   e.lat = coord('lat', 90); e.lng = coord('lng', 180);
-  e.currency = s.currency;
   return e;
 }
 
@@ -401,6 +447,10 @@ function present(row, receipts) {
     claim_number: row.claim_number || null, claim_status: row.claim_status || null, client_ref: row.client_ref || null,
     expense_date: row.expense_date, category_id: Number(row.category_id), category_name: row.category_name || '', kind: row.category_kind || 'amount',
     amount: money(row.amount), tax_amount: row.tax_amount === null || row.tax_amount === undefined ? null : money(row.tax_amount), currency: row.currency || store.getSettings().currency,
+    // (in another currency: what the bill says, and the rate — "amount" above is always in the CRM currency)
+    foreign: Number(row.fx_rate) > 0, orig_amount: Number(row.fx_rate) > 0 ? money(row.orig_amount) : money(row.amount),
+    orig_tax: Number(row.fx_rate) > 0 ? (row.orig_tax === null || row.orig_tax === undefined ? null : money(row.orig_tax)) : (row.tax_amount === null || row.tax_amount === undefined ? null : money(row.tax_amount)),
+    fx_rate: Number(row.fx_rate) > 0 ? Number(row.fx_rate) : 1,
     paid_by: row.paid_by === 'company' ? 'company' : 'self', merchant: row.merchant || '', city: row.city || '', description: row.description || '',
     bill_number: row.bill_number || '', gstin: row.gstin || '',
     km: row.km === null || row.km === undefined ? null : Number(row.km), vehicle: row.vehicle || '', rate: row.rate === null || row.rate === undefined ? null : Number(row.rate),
@@ -493,7 +543,10 @@ function check(user, input = {}) {
   const existing = idOf(input.id) ? db.prepare('SELECT * FROM expenses WHERE id = ? AND user_id = ?').get(idOf(input.id), user.id) : null;
   const e = shape({ ...input, __viewer: user }, user, existing);
   const receipts = Number(input.receipts_count ?? (existing ? existing.receipts : 0)) || 0;
-  return { amount: e.amount, rate: e.rate, flags: evaluate({ ...e, user_id: user.id }, { roleId: user.role_id, excludeId: existing ? existing.id : null, receipts }) };
+  return {
+    amount: e.amount, rate: e.rate, currency: e.currency, orig_amount: e.fx_rate ? e.orig_amount : e.amount, fx_rate: e.fx_rate || 1,
+    flags: evaluate({ ...e, user_id: user.id }, { roleId: user.role_id, excludeId: existing ? existing.id : null, receipts }),
+  };
 }
 
 function createExpense(user, input = {}) {
@@ -519,10 +572,12 @@ function createExpense(user, input = {}) {
   const now = nowIso();
   const tx = db.transaction(() => {
     id = db.prepare(`INSERT INTO expenses (user_id, claim_id, client_ref, expense_date, category_id, amount, tax_amount, currency, paid_by, merchant, city, description,
-        bill_number, gstin, km, vehicle, rate, from_place, to_place, days, related_module, related_record_id, related_name, lat, lng, status, receipts, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open', 0, ?, ?)`).run(
+        bill_number, gstin, km, vehicle, rate, from_place, to_place, days, related_module, related_record_id, related_name, lat, lng, orig_amount, orig_tax, fx_rate, fx_ref,
+        status, receipts, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'open', 0, ?, ?)`).run(
       user.id, claim ? claim.id : null, ref, e.expense_date, e.category_id, e.amount, e.tax_amount, e.currency, e.paid_by, e.merchant, e.city, e.description,
-      e.bill_number, e.gstin, e.km, e.vehicle, e.rate, e.from_place, e.to_place, e.days, e.related_module, e.related_record_id, e.related_name, e.lat, e.lng, now, now,
+      e.bill_number, e.gstin, e.km, e.vehicle, e.rate, e.from_place, e.to_place, e.days, e.related_module, e.related_record_id, e.related_name, e.lat, e.lng,
+      e.orig_amount, e.orig_tax, e.fx_rate, e.fx_ref, now, now,
     ).lastInsertRowid;
     addReceipts(id, user.id, list);
     recheck(id);
@@ -546,9 +601,11 @@ function updateExpense(user, id, input = {}) {
   const bills = cleanReceipts(input.receipts);
   const tx = db.transaction(() => {
     db.prepare(`UPDATE expenses SET expense_date = ?, category_id = ?, amount = ?, tax_amount = ?, paid_by = ?, merchant = ?, city = ?, description = ?, bill_number = ?, gstin = ?,
-        km = ?, vehicle = ?, rate = ?, from_place = ?, to_place = ?, days = ?, related_module = ?, related_record_id = ?, related_name = ?, lat = ?, lng = ?, updated_at = ? WHERE id = ?`).run(
+        km = ?, vehicle = ?, rate = ?, from_place = ?, to_place = ?, days = ?, related_module = ?, related_record_id = ?, related_name = ?, lat = ?, lng = ?,
+        currency = ?, orig_amount = ?, orig_tax = ?, fx_rate = ?, fx_ref = ?, updated_at = ? WHERE id = ?`).run(
       e.expense_date, e.category_id, e.amount, e.tax_amount, e.paid_by, e.merchant, e.city, e.description, e.bill_number, e.gstin,
-      e.km, e.vehicle, e.rate, e.from_place, e.to_place, e.days, e.related_module, e.related_record_id, e.related_name, e.lat, e.lng, nowIso(), row.id,
+      e.km, e.vehicle, e.rate, e.from_place, e.to_place, e.days, e.related_module, e.related_record_id, e.related_name, e.lat, e.lng,
+      e.currency, e.orig_amount, e.orig_tax, e.fx_rate, e.fx_ref, nowIso(), row.id,
     );
     if (bills.length) addReceipts(row.id, user.id, bills);
     recheck(row.id);
@@ -608,6 +665,6 @@ module.exports = {
   RELATED, MAX_RECEIPTS, MAX_LINES, MIMES, isDate, today, dayOf, zone, dayDiff, fmt, text, mayUse, idOf,
   userRow, userName, isActive, isFinance, teamIds, manages, canSeeUser, can, scopeWhere, notify, history, tombstone,
   managerOf, firstApprover, financeUserIds, mail,
-  evaluate, shape, recheck, check, present, receiptsOf, parseFlags, rawExpense, seesThroughClaim, SELECT,
+  evaluate, shape, recheck, check, present, receiptsOf, parseFlags, rawExpense, seesThroughClaim, SELECT, cleanReceipt,
   getExpense, listExpenses, createExpense, updateExpense, deleteExpense, addBills, removeBill, billFile,
 };

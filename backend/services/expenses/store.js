@@ -13,6 +13,11 @@
 //   expense_advance_uses    how an advance was used up (claim / cash returned)
 //   expense_payouts         one payment run of the finance team
 //   expense_deletions       what was deleted (for the mobile app's sync)
+//   expense_people          a person's bank details (the account number encrypted) and Tally ledger
+//   expense_bank_batches    one payment through the bank: a bank file, or a payout service
+//   expense_bank_lines      one transfer of such a payment (one person)
+//   expense_reversals       a payment the bank sent back
+//   expense_tally_exports   one file made for Tally         expense_tally_items  what is in it
 //
 // Why the bill photos are in the database and not on the disk: on hosting
 // without a permanent disk (Render's free plan) files on the disk are lost at
@@ -259,6 +264,104 @@ function ensureSchema() {
       deleted_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_expense_deletions ON expense_deletions (user_id, deleted_at);
+    CREATE TABLE IF NOT EXISTS expense_people (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL UNIQUE,
+      holder_name TEXT,
+      account_enc TEXT,
+      account_last4 TEXT,
+      ifsc TEXT,
+      bank_name TEXT,
+      upi_id TEXT,
+      bank_status TEXT,
+      verified_by INTEGER,
+      verified_at TEXT,
+      bank_updated_by INTEGER,
+      bank_updated_at TEXT,
+      tally_ledger TEXT,
+      employee_code TEXT,
+      updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS expense_bank_batches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_number TEXT,
+      kind TEXT DEFAULT 'file',
+      status TEXT DEFAULT 'prepared',
+      mode TEXT,
+      total REAL DEFAULT 0,
+      lines INTEGER DEFAULT 0,
+      claims INTEGER DEFAULT 0,
+      paid_total REAL DEFAULT 0,
+      paid_on TEXT,
+      reference TEXT,
+      note TEXT,
+      payout_id INTEGER,
+      created_by INTEGER,
+      released_by INTEGER,
+      released_at TEXT,
+      closed_at TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS expense_bank_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      claims INTEGER DEFAULT 0,
+      holder_name TEXT,
+      account_enc TEXT,
+      account_last4 TEXT,
+      ifsc TEXT,
+      bank_name TEXT,
+      upi_id TEXT,
+      status TEXT DEFAULT 'ready',
+      idem_key TEXT,
+      provider_ref TEXT,
+      provider_status TEXT,
+      utr TEXT,
+      error TEXT,
+      sent_at TEXT,
+      done_at TEXT,
+      updated_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_expense_bank_lines_batch ON expense_bank_lines (batch_id);
+    CREATE INDEX IF NOT EXISTS idx_expense_bank_lines_ref ON expense_bank_lines (provider_ref);
+    CREATE TABLE IF NOT EXISTS expense_reversals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      claim_id INTEGER NOT NULL,
+      payout_id INTEGER,
+      line_id INTEGER,
+      user_id INTEGER,
+      amount REAL DEFAULT 0,
+      mode TEXT,
+      reversed_on TEXT,
+      note TEXT,
+      created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS expense_tally_exports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      export_number TEXT,
+      upto TEXT,
+      vouchers INTEGER DEFAULT 0,
+      total REAL DEFAULT 0,
+      xml TEXT,
+      undone INTEGER DEFAULT 0,
+      created_by INTEGER,
+      created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS expense_tally_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      export_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      ref_id INTEGER NOT NULL,
+      ref2_id INTEGER NOT NULL DEFAULT 0,
+      voucher_date TEXT,
+      voucher_number TEXT,
+      amount REAL DEFAULT 0
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_tally_items ON expense_tally_items (kind, ref_id, ref2_id);
+    CREATE INDEX IF NOT EXISTS idx_expense_tally_items_export ON expense_tally_items (export_id);
   `);
   // (a column added after the first version of a table)
   try {
@@ -269,6 +372,20 @@ function ensureSchema() {
     // sent_back: an approver sent it back once (such an expense never approves itself afterwards)
     if (!exp.has('sent_date')) db.exec('ALTER TABLE expenses ADD COLUMN sent_date TEXT');
     if (!exp.has('sent_back')) db.exec('ALTER TABLE expenses ADD COLUMN sent_back INTEGER DEFAULT 0');
+    // An expense in another currency: what the bill says (orig_amount, orig_tax, in "currency"), the rate it
+    // was changed with (fx_rate: one unit of that currency in the CRM currency) and the rate the CRM had on
+    // that day (fx_ref). "amount" is always in the CRM currency. All four are empty for an ordinary expense.
+    for (const col of ['orig_amount', 'orig_tax', 'fx_rate', 'fx_ref']) if (!exp.has(col)) db.exec(`ALTER TABLE expenses ADD COLUMN ${col} REAL`);
+    const cat = new Set(db.prepare('PRAGMA table_info(expense_categories)').all().map((c) => c.name));
+    if (!cat.has('tally_ledger')) db.exec('ALTER TABLE expense_categories ADD COLUMN tally_ledger TEXT');
+    const cl = new Set(db.prepare('PRAGMA table_info(expense_claims)').all().map((c) => c.name));
+    // batch_id / bank_line_id: the claim is in a payment through the bank.  reopened: it was paid once and the bank sent the money back
+    if (!cl.has('batch_id')) db.exec('ALTER TABLE expense_claims ADD COLUMN batch_id INTEGER');
+    if (!cl.has('bank_line_id')) db.exec('ALTER TABLE expense_claims ADD COLUMN bank_line_id INTEGER');
+    if (!cl.has('reopened')) db.exec('ALTER TABLE expense_claims ADD COLUMN reopened INTEGER DEFAULT 0');
+    const bb = new Set(db.prepare('PRAGMA table_info(expense_bank_batches)').all().map((c) => c.name));
+    // two_person: the "two people" rule as it was when a RazorpayX payment was prepared
+    if (!bb.has('two_person')) db.exec('ALTER TABLE expense_bank_batches ADD COLUMN two_person INTEGER DEFAULT 0');
   } catch (e) { console.warn('[expenses] columns:', e.message); }
   // "Reports to" and the email of a user are used for approvals. Older
   // databases get the columns here (the workflows module adds the same ones).
@@ -356,7 +473,47 @@ const DEFAULTS = {
   email_approver: false,         // also send the approver an email (needs email set up in the CRM)
   payment_modes: ['Bank transfer', 'UPI', 'Cash', 'Cheque', 'With salary'],
   max_receipt_mb: 4,
+  // --- reading a bill photo ---
+  bill_reading: 'device',        // 'off' | 'device' (read on the phone / computer, free) | 'ai' (the CRM assistant reads it)
+  // --- expenses in another currency ---
+  multi_currency: false,
+  fx_rate_edit: true,            // the person may type the rate their bank really used
+  fx_tolerance: 5,               // a typed rate further than this (%) from the CRM rate is pointed out (0 = never)
+  // --- paying through the bank ---
+  bank_payments: false,          // bank details of people, bank files, payout service
+  bank_self_edit: true,          // people enter their own bank details (the finance team checks them)
+  bank_debit_account: '',        // the company account the money leaves from (printed in the bank file)
+  bank_file_columns: null,       // the columns of the bank file, in order: [{ key, label }] (null = the usual ones)
+  bank_file_header: true,
+  bank_date_format: 'DD/MM/YYYY',
+  payout_provider: 'none',       // 'none' | 'razorpayx'
+  payout_account: '',            // the account number at the payout service
+  payout_mode: 'IMPS',           // IMPS | NEFT | RTGS | UPI
+  payout_max: 0,                 // the largest single transfer the CRM may send (0 = no limit)
+  payout_two_person: true,       // the person who prepared a payment cannot also release it
+  // --- Tally ---
+  tally: false,
+  tally_company: '',
+  tally_bank_ledger: 'Bank Account',
+  tally_cash_ledger: 'Cash',
+  tally_company_paid_ledger: 'Company Credit Card',
+  tally_mode_ledgers: {},        // a ledger for one way of paying: { "UPI": "HDFC Bank" }
+  tally_employee_group: 'Sundry Creditors',
+  tally_expense_group: 'Indirect Expenses',
+  tally_bank_group: 'Bank Accounts',
 };
+
+// The columns a bank file can have. Every bank wants its own order and its own
+// headings; an administrator sets them in Expense settings.
+const BANK_COLUMNS = {
+  serial: 'Sr No', beneficiary_name: 'Beneficiary Name', account_number: 'Beneficiary Account Number', ifsc: 'IFSC Code', bank_name: 'Bank Name',
+  amount: 'Amount', transfer_type: 'Transaction Type', narration: 'Narration', debit_account: 'Debit Account Number', payment_date: 'Payment Date',
+  email: 'Email', employee: 'Employee', employee_code: 'Employee Code', claims: 'Claim Numbers', batch: 'Batch Number', upi_id: 'UPI ID',
+};
+const BANK_DEFAULT_COLUMNS = ['beneficiary_name', 'account_number', 'ifsc', 'amount', 'narration', 'debit_account', 'payment_date', 'email'];
+const PAYOUT_MODES = ['IMPS', 'NEFT', 'RTGS', 'UPI'];
+const DATE_FORMATS = ['DD/MM/YYYY', 'DD-MM-YYYY', 'YYYY-MM-DD', 'DD-MMM-YYYY'];
+const SECRETS = ['payout_key_secret', 'payout_webhook_secret'];
 
 function readValue(name) {
   const row = db.prepare('SELECT value FROM expense_settings WHERE name = ?').get(name);
@@ -397,6 +554,37 @@ function getSettings() {
   s.max_receipt_mb = Math.min(5, Math.max(1, Number(s.max_receipt_mb) || 4));
   s.claim_prefix = String(s.claim_prefix || 'EXP-').slice(0, 10);
   s.advance_prefix = String(s.advance_prefix || 'ADV-').slice(0, 10);
+  s.bill_reading = ['off', 'device', 'ai'].includes(s.bill_reading) ? s.bill_reading : 'device';
+  s.multi_currency = !!s.multi_currency;
+  s.fx_rate_edit = s.fx_rate_edit !== false;
+  s.fx_tolerance = Math.min(100, Math.max(0, Number(s.fx_tolerance) || 0));
+  s.bank_payments = !!s.bank_payments;
+  s.bank_self_edit = s.bank_self_edit !== false;
+  s.bank_debit_account = String(s.bank_debit_account || '').slice(0, 34);
+  s.bank_file_columns = bankColumns(s.bank_file_columns);
+  s.bank_file_header = s.bank_file_header !== false;
+  s.bank_date_format = DATE_FORMATS.includes(s.bank_date_format) ? s.bank_date_format : 'DD/MM/YYYY';
+  s.payout_provider = s.payout_provider === 'razorpayx' ? 'razorpayx' : 'none';
+  s.payout_account = String(s.payout_account || '').slice(0, 34);
+  s.payout_mode = PAYOUT_MODES.includes(s.payout_mode) ? s.payout_mode : 'IMPS';
+  s.payout_max = Math.max(0, money(s.payout_max));
+  s.payout_two_person = s.payout_two_person !== false;
+  s.tally = !!s.tally;
+  for (const k of ['tally_company', 'tally_bank_ledger', 'tally_cash_ledger', 'tally_company_paid_ledger', 'tally_employee_group', 'tally_expense_group', 'tally_bank_group']) {
+    s[k] = String(s[k] === undefined || s[k] === null ? DEFAULTS[k] : s[k]).trim().slice(0, 100);
+  }
+  for (const k of ['tally_bank_ledger', 'tally_cash_ledger', 'tally_company_paid_ledger', 'tally_employee_group', 'tally_expense_group', 'tally_bank_group']) if (!s[k]) s[k] = DEFAULTS[k];
+  s.tally_mode_ledgers = s.tally_mode_ledgers && typeof s.tally_mode_ledgers === 'object' && !Array.isArray(s.tally_mode_ledgers)
+    ? Object.fromEntries(Object.entries(s.tally_mode_ledgers).map(([k, v]) => [String(k).slice(0, 40), String(v || '').trim().slice(0, 100)]).filter(([k, v]) => k && v).slice(0, 12)) : {};
+  // what is kept apart, encrypted: never sent to a screen — only whether it is there
+  s.payout_key_id = readValue('payout_key_id') || '';
+  s.has_payout_secret = !!readValue('payout_key_secret');
+  s.has_webhook_secret = !!readValue('payout_webhook_secret');
+  s.payout_ready = s.payout_provider !== 'none' && !!s.payout_key_id && s.has_payout_secret && !!s.payout_account;
+  let ai = false;
+  try { ai = !!require('../aiClient').anthropic; } catch { ai = false; }
+  s.ai_available = ai;
+  if (s.bill_reading === 'ai' && !ai) s.bill_reading = 'device';      // the assistant key was taken away since
   // the CRM's own currency (Settings → Taxes & Currencies)
   let cur = null;
   try { cur = db.prepare('SELECT code, symbol FROM currencies WHERE is_base = 1 LIMIT 1').get(); } catch { cur = null; }
@@ -406,13 +594,34 @@ function getSettings() {
   return s;
 }
 
+// The columns of the bank file: a list of { key, label } with keys the CRM knows.
+function bankColumns(list) {
+  const out = [];
+  for (const c of Array.isArray(list) ? list.slice(0, 20) : []) {
+    const key = c && typeof c === 'object' ? c.key : c;
+    if (typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(BANK_COLUMNS, key) || out.some((x) => x.key === key)) continue;
+    const label = c && typeof c === 'object' && typeof c.label === 'string' && c.label.trim() ? c.label.trim().slice(0, 60) : BANK_COLUMNS[key];
+    out.push({ key, label: label.replace(/[\r\n",]/g, ' ') });
+  }
+  return out.length ? out : BANK_DEFAULT_COLUMNS.map((key) => ({ key, label: BANK_COLUMNS[key] }));
+}
+/** A secret kept for the module (the key of the payout service). Empty when there is none, or it cannot be read. */
+function secret(name) {
+  if (!SECRETS.includes(name)) return '';
+  const packed = readValue(name);
+  if (!packed) return '';
+  try { return require('../secrets').decrypt(packed); } catch { return ''; }
+}
+
 function saveSettings(input = {}) {
   const cur = getSettings();
   const next = { ...cur };
   delete next.currency; delete next.symbol;
+  for (const k of ['payout_key_id', 'has_payout_secret', 'has_webhook_secret', 'payout_ready', 'ai_available']) delete next[k];
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw bad('Nothing to save.');
   const bool = (k) => { if (input[k] !== undefined) next[k] = flag(input[k], `"${k}"`); };
-  ['enabled', 'duplicate_check', 'advances', 'adjust_advance', 'email_approver'].forEach(bool);
+  ['enabled', 'duplicate_check', 'advances', 'adjust_advance', 'email_approver', 'multi_currency', 'fx_rate_edit', 'bank_payments', 'bank_self_edit', 'bank_file_header',
+    'payout_two_person', 'tally'].forEach(bool);
   // (a figure that is not a number is refused — it must never quietly switch a rule off)
   const figure = (k, what, max) => {
     if (input[k] === undefined) return;
@@ -467,8 +676,75 @@ function saveSettings(input = {}) {
     next[k] = p;
   };
   prefix('claim_prefix'); prefix('advance_prefix');
+
+  // --- reading a bill ---
+  if (input.bill_reading !== undefined) {
+    if (!['off', 'device', 'ai'].includes(input.bill_reading)) throw bad('Choose how a bill photo is read.');
+    if (input.bill_reading === 'ai' && !cur.ai_available) throw bad('The CRM assistant is not set up on this server (it needs its key), so it cannot read bills. Choose "on the phone or computer".');
+    next.bill_reading = input.bill_reading;
+  }
+  // --- another currency ---
+  figure('fx_tolerance', 'The allowed difference of the rate', 100);
+  // --- the bank ---
+  const line = (k, what, max, pattern) => {
+    if (input[k] === undefined) return;
+    const v = String(input[k] === null ? '' : input[k]).trim();
+    if (v.length > max) throw bad(`${what} is too long.`);
+    if (v && pattern && !pattern.test(v)) throw bad(`${what} has letters that are not allowed.`);
+    next[k] = v;
+  };
+  line('bank_debit_account', 'The company account number', 34, /^[A-Za-z0-9 -]+$/);
+  line('payout_account', 'The account number at the payout service', 34, /^[A-Za-z0-9]+$/);
+  if (input.bank_file_columns !== undefined) {
+    if (input.bank_file_columns !== null && !Array.isArray(input.bank_file_columns)) throw bad('Send the columns of the bank file as a list.');
+    const cols = bankColumns(input.bank_file_columns);
+    if (Array.isArray(input.bank_file_columns) && input.bank_file_columns.length && cols.length !== input.bank_file_columns.length) throw bad('One of the columns of the bank file is not known, or is there twice.');
+    if (!cols.some((c) => c.key === 'amount') || !cols.some((c) => c.key === 'account_number' || c.key === 'upi_id')) throw bad('The bank file needs at least the account number (or UPI ID) and the amount.');
+    next.bank_file_columns = cols;
+  }
+  if (input.bank_date_format !== undefined) {
+    if (!DATE_FORMATS.includes(input.bank_date_format)) throw bad('Choose a date format for the bank file.');
+    next.bank_date_format = input.bank_date_format;
+  }
+  if (input.payout_provider !== undefined) {
+    if (!['none', 'razorpayx'].includes(input.payout_provider)) throw bad('That payout service is not known.');
+    next.payout_provider = input.payout_provider;
+  }
+  if (input.payout_mode !== undefined) {
+    if (!PAYOUT_MODES.includes(input.payout_mode)) throw bad('Choose IMPS, NEFT, RTGS or UPI.');
+    next.payout_mode = input.payout_mode;
+  }
+  figure('payout_max', 'The largest transfer', 1e9);
+  // the keys of the payout service: kept encrypted, and only replaced when new ones are typed
+  const keep = [];
+  if (input.payout_key_id !== undefined) {
+    const v = String(input.payout_key_id || '').trim();
+    if (v && !/^[A-Za-z0-9_]{6,60}$/.test(v)) throw bad('That does not look like a key id.');
+    keep.push(['payout_key_id', v]);
+  }
+  for (const k of SECRETS) {
+    if (input[k] === undefined || input[k] === '') continue;        // nothing typed: what is kept stays
+    if (input[k] === null) { keep.push([k, '']); continue; }        // null: forget it
+    const v = String(input[k]).trim();
+    if (v.length < 6 || v.length > 200) throw bad('That key is too short or too long.');
+    keep.push([k, require('../secrets').encrypt(v)]);
+  }
+  if (next.payout_provider !== 'none' && cur.currency !== 'INR') throw bad('The payout service pays in rupees only. The CRM currency is not INR.');
+  // --- Tally ---
+  line('tally_company', 'The company name in Tally', 100);
+  for (const [k, what] of [['tally_bank_ledger', 'The bank ledger'], ['tally_cash_ledger', 'The cash ledger'], ['tally_company_paid_ledger', 'The ledger for company-paid expenses'],
+    ['tally_employee_group', 'The group of the employee ledgers'], ['tally_expense_group', 'The group of the expense ledgers'], ['tally_bank_group', 'The group of the bank ledgers']]) {
+    line(k, what, 100);
+    if (input[k] !== undefined && !next[k]) throw bad(`${what} cannot be empty.`);
+  }
+  if (input.tally_mode_ledgers !== undefined) {
+    const m = input.tally_mode_ledgers;
+    if (m !== null && (typeof m !== 'object' || Array.isArray(m))) throw bad('Send the ledgers of the ways of paying as a list of names.');
+    next.tally_mode_ledgers = Object.fromEntries(Object.entries(m || {}).map(([k, v]) => [String(k).trim().slice(0, 40), String(v || '').trim().slice(0, 100)]).filter(([k, v]) => k && v).slice(0, 12));
+  }
   if (next.approval_levels === 2 && next.second_approver === 'user' && !next.second_approver_user_id) throw bad('Choose the person who gives the second approval.');
   writeValue('settings', JSON.stringify(next));
+  for (const [k, v] of keep) writeValue(k, v);
   cache = null;
   return getSettings();
 }
@@ -516,6 +792,7 @@ function saveCategory(input = {}, id = null) {
     lim('receipt_above', 'The amount above which a bill is needed'),
     has('note_required') || !cur ? (soft(input.note_required) ? 1 : 0) : cur.note_required,
     has('active') || !cur ? (input.active === false || input.active === 0 || input.active === '0' || input.active === 'false' ? 0 : 1) : cur.active,
+    has('tally_ledger') || !cur ? (String(input.tally_ledger || '').trim().slice(0, 100) || null) : cur.tally_ledger,
   ];
   // the limits of a role: checked before anything is written
   let roleRows = null;
@@ -536,11 +813,11 @@ function saveCategory(input = {}, id = null) {
   const tx = db.transaction(() => {
     if (id) {
       db.prepare(`UPDATE expense_categories SET name = ?, code = ?, kind = ?, daily_rate = ?, max_per_expense = ?, max_per_day = ?, max_per_month = ?,
-        receipt_above = ?, note_required = ?, active = ? WHERE id = ?`).run(...vals, id);
+        receipt_above = ?, note_required = ?, active = ?, tally_ledger = ? WHERE id = ?`).run(...vals, id);
     } else {
       const last = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS n FROM expense_categories').get();
-      id = db.prepare(`INSERT INTO expense_categories (name, code, kind, daily_rate, max_per_expense, max_per_day, max_per_month, receipt_above, note_required, active, sort_order)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(...vals, Number(last.n) + 1).lastInsertRowid;
+      id = db.prepare(`INSERT INTO expense_categories (name, code, kind, daily_rate, max_per_expense, max_per_day, max_per_month, receipt_above, note_required, active, tally_ledger, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(...vals, Number(last.n) + 1).lastInsertRowid;
     }
     if (roleRows) {
       db.prepare('DELETE FROM expense_role_limits WHERE category_id = ?').run(id);
@@ -637,9 +914,27 @@ function saveVehicleRates(list) {
   return listVehicleRates({ all: true });
 }
 
+// ---------------------------------------------------------------------------
+// Other currencies (Settings → Taxes & Currencies keeps them)
+// ---------------------------------------------------------------------------
+// The CRM keeps "how much of the other currency one unit of the CRM currency
+// buys" (USD 0.012). People think the other way round ("1 USD = ₹83.33"), and
+// that is what an expense keeps and what the screens show.
+const rate6 = (v) => Math.round(Number(v) * 1e6) / 1e6;
+function listCurrencies() {
+  let rows = [];
+  try { rows = db.prepare('SELECT code, name, symbol, decimal_places, exchange_rate, is_base FROM currencies WHERE COALESCE(active, 1) = 1 ORDER BY is_base DESC, code').all(); } catch { rows = []; }
+  return rows.map((c) => {
+    const base = Number(c.is_base) === 1;
+    const x = Number(c.exchange_rate);
+    return { code: String(c.code).toUpperCase(), name: c.name || c.code, symbol: c.symbol || c.code, decimals: Number.isInteger(Number(c.decimal_places)) ? Number(c.decimal_places) : 2, is_base: base, rate: base ? 1 : (x > 0 ? rate6(1 / x) : null) };
+  }).filter((c) => c.rate !== null);
+}
+
 ensureSchema();
 
 module.exports = {
+  BANK_COLUMNS, PAYOUT_MODES, DATE_FORMATS, secret, bankColumns, listCurrencies, rate6, readValue, writeValue,
   ensureSchema, ensurePermissions, DEFAULTS, KINDS, nowIso, bad, money, limit, intOrNull, number, blank, flag, idOf,
   getSettings, saveSettings,
   listCategories, getCategory, saveCategory, removeCategory, orderCategories, limitsFor,

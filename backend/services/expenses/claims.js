@@ -39,12 +39,16 @@ const MAX_LINES = core.MAX_LINES;
 const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 const NAME = (a) => `COALESCE(NULLIF(${a}.full_name, ''), ${a}.username)`;
-const SELECT = `SELECT c.*, ${NAME('u')} AS user_name, ${NAME('ap')} AS approver_name, ${NAME('ab')} AS approved_by_name, ${NAME('pb')} AS paid_by_name
+const SELECT = `SELECT c.*, ${NAME('u')} AS user_name, ${NAME('ap')} AS approver_name, ${NAME('ab')} AS approved_by_name, ${NAME('pb')} AS paid_by_name,
+    bb.batch_number AS batch_number
   FROM expense_claims c
   LEFT JOIN users u ON u.id = c.user_id
   LEFT JOIN users ap ON ap.id = c.approver_id
   LEFT JOIN users ab ON ab.id = c.approved_by
-  LEFT JOIN users pb ON pb.id = c.paid_by`;
+  LEFT JOIN users pb ON pb.id = c.paid_by
+  LEFT JOIN expense_bank_batches bb ON bb.id = c.batch_id`;
+// in a payment through the bank that is not finished yet
+const inBank = (c) => c.status === 'approved' && !!c.batch_id;
 
 const raw = (id) => (idOf(id) ? db.prepare(`${SELECT} WHERE c.id = ?`).get(idOf(id)) : null) || null;
 function need(id) {
@@ -62,7 +66,9 @@ function stage(c) {
     case 'submitted':
       if (!c.approver_id) return 'Waiting for an approver to be chosen';
       return `With ${c.approver_name || 'the approver'}${Number(c.level) === 2 ? ' (second approval)' : ''}`;
-    case 'approved': return 'Approved — waiting for payment';
+    case 'approved':
+      if (inBank(c)) return `In bank payment ${c.batch_number || ''}`.trim();
+      return Number(c.reopened) === 1 ? 'The bank sent the money back — waiting to be paid again' : 'Approved — waiting for payment';
     case 'paid': return money(c.paid_amount) > 0 || money(c.advance_adjusted) > 0 ? 'Paid' : 'Closed — nothing to pay';
     case 'rejected': return 'Rejected';
     default: return c.status;
@@ -85,6 +91,8 @@ function present(c) {
     submitted_at: c.submitted_at || null, waiting_days: waiting, approved_at: c.approved_at || null, approved_by_name: c.approved_by_name || '',
     paid_at: c.paid_at || null, paid_on: c.paid_on || null, paid_by_name: c.paid_by_name || '', payment_mode: c.payment_mode || '', payment_reference: c.payment_reference || '',
     payout_id: c.payout_id ? Number(c.payout_id) : null, closed_at: c.closed_at || null, created_at: c.created_at, updated_at: c.updated_at,
+    // (a payment through the bank)
+    batch_id: c.batch_id ? Number(c.batch_id) : null, batch_number: c.batch_number || null, in_bank: inBank(c), reopened: Number(c.reopened) === 1,
   };
 }
 
@@ -120,7 +128,9 @@ function allowed(user, c) {
     remove: own && open && !c.submitted_at && core.can(user, 'delete'),
     withdraw: own && c.status === 'submitted',
     decide: c.status === 'submitted' && (sup || (!own && !!c.approver_id && Number(c.approver_id) === Number(user.id))),   // approve · reject · send back
-    finance: c.status === 'approved' && fin && (sup || !own),                                                             // correct · reject · send back · pay
+    finance: c.status === 'approved' && fin && (sup || !own) && !c.batch_id,                                              // pay
+    // correct · reject · send back: not once the claim was paid and the money came back (its figures are in the books by then)
+    amend: c.status === 'approved' && fin && (sup || !own) && !c.batch_id && Number(c.reopened) !== 1,
     reassign: c.status === 'submitted' && fin && (sup || !own),
   };
 }
@@ -133,7 +143,9 @@ function mayDecide(user, c) {
 function mayFinance(user, c) {
   if (c.status !== 'approved') throw bad('This claim is not waiting for payment.', 409);
   if (!core.isFinance(user)) throw bad('Only the finance team can do this.', 403);
+  if (c.batch_id) throw bad(`This claim is in bank payment ${c.batch_number || ''}. Take it out of that payment first.`, 409);
   if (!allowed(user, c).finance) throw bad('You cannot act on your own claim.', 403);
+  if (Number(c.reopened) === 1) throw bad('This claim was paid once and the bank sent the money back. It can only be paid again.', 409);
 }
 // The claim as the person saw it is the claim as it is now?
 function fresh(c, seen, needed) {
@@ -590,13 +602,19 @@ const oldestFirst = (a, b) => String(a.approved_at || '').localeCompare(String(b
 function payable(user) {
   if (!core.isFinance(user)) throw bad('Only the finance team can see this.', 403);
   const s = store.getSettings();
-  const rows = db.prepare(`${SELECT} WHERE c.status = 'approved' ORDER BY COALESCE(c.approved_at, ''), c.id LIMIT 2000`).all();
+  const rows = db.prepare(`${SELECT} WHERE c.status = 'approved' AND c.batch_id IS NULL ORDER BY COALESCE(c.approved_at, ''), c.id LIMIT 2000`).all();
   const balance = new Map();
+  // (with payments through the bank: whose bank details are there, and checked)
+  const bank = new Map();
+  if (s.bank_payments) {
+    db.prepare('SELECT user_id, bank_status, account_last4, upi_id FROM expense_people').all()
+      .forEach((p) => bank.set(Number(p.user_id), !p.account_last4 && !p.upi_id ? 'none' : (p.bank_status === 'verified' ? 'verified' : 'unverified')));
+  }
   const claims = allot(rows, s.adjust_advance).map(({ c, off, net }) => {
     const uid = Number(c.user_id);
     if (!balance.has(uid)) balance.set(uid, s.adjust_advance ? advances.balanceOf(uid) : 0);
     // advance_balance: everything the person holds — the screen works out a part selection from it
-    return { ...present(c), advance_to_adjust: off, net_payable: net, advance_balance: balance.get(uid), can: allowed(user, c) };
+    return { ...present(c), advance_to_adjust: off, net_payable: net, advance_balance: balance.get(uid), can: allowed(user, c), bank: s.bank_payments ? (bank.get(uid) || 'none') : undefined };
   });
   const adv = advances.toPay(user);
   return {
@@ -606,7 +624,43 @@ function payable(user) {
       net_payable: money(claims.reduce((a, c) => a + c.net_payable, 0)), advances: adv.length, advances_amount: money(adv.reduce((a, x) => a + x.amount, 0)),
     },
     payment_modes: s.payment_modes, adjust_advance: s.adjust_advance,
+    bank: { on: s.bank_payments, payout: s.bank_payments && s.payout_ready ? s.payout_provider : null, payout_mode: s.payout_mode, payout_max: s.payout_max },
   };
+}
+
+// One claim becomes "paid". Called INSIDE a transaction, once the claim is
+// locked for this payment. `off` is what the person's advance took.
+function settle(c, { off, now, paidOn, mode, reference, payoutId, byUserId, note }) {
+  const net = money(money(c.approved_amount) - off);
+  db.prepare(`UPDATE expense_claims SET status = 'paid', advance_adjusted = ?, paid_amount = ?, paid_at = ?, paid_on = ?, paid_by = ?, payment_mode = ?, payment_reference = ?, payout_id = ?,
+      closed_at = ?, updated_at = ? WHERE id = ?`).run(off, net, now, paidOn, byUserId || null, mode, reference, payoutId, now, now, c.id);
+  // (every line is touched, also a refused one: the mobile app then knows its claim is closed)
+  db.prepare("UPDATE expenses SET status = CASE WHEN status = 'approved' THEN 'paid' ELSE status END, updated_at = ? WHERE claim_id = ?").run(now, c.id);
+  core.history({
+    claim_id: c.id, user_id: byUserId || null, action: 'paid', amount: net,
+    note: [mode, reference, note, off > 0 ? `${core.fmt(off)} taken off the advance` : ''].filter(Boolean).join(' · '),
+  });
+  return net;
+}
+const paidMessage = (c, net, off, mode, reference) => (net > 0
+  ? `${c.claim_number}: ${core.fmt(net)} paid by ${mode}${reference ? ` (${reference})` : ''}${off > 0 ? `; ${core.fmt(off)} was taken off your advance` : ''}`
+  : `${c.claim_number}: ${core.fmt(off)} was taken off your advance — nothing more to pay`);
+
+/**
+ * A payment that happened is undone: the bank sent the money back. The claim
+ * waits for payment again, what was taken off the person's advance goes back,
+ * and from now on the claim can only be paid (its figures are in the books).
+ * Called INSIDE a transaction. Returns false when the claim was not paid.
+ */
+function unpay(c, { byUserId = null, note = '' } = {}) {
+  const now = nowIso();
+  const done = db.prepare(`UPDATE expense_claims SET status = 'approved', paid_amount = 0, advance_adjusted = 0, paid_at = NULL, paid_on = NULL, paid_by = NULL, payment_mode = NULL,
+      payment_reference = NULL, payout_id = NULL, closed_at = NULL, batch_id = NULL, bank_line_id = NULL, reopened = 1, updated_at = ? WHERE id = ? AND status = 'paid'`).run(now, c.id);
+  if (!done.changes) return false;
+  db.prepare("UPDATE expenses SET status = 'approved', updated_at = ? WHERE claim_id = ? AND status = 'paid'").run(now, c.id);
+  advances.releaseForClaim(c, byUserId, 'the bank sent the money back');
+  core.history({ claim_id: c.id, user_id: byUserId, action: 'payment_reversed', amount: money(c.paid_amount), note: note || 'The bank sent the money back' });
+  return true;
 }
 
 /**
@@ -634,6 +688,7 @@ function pay(user, input = {}) {
     const c = raw(id);
     if (!c) skipped.push({ id, reason: 'Claim not found' });
     else if (c.status !== 'approved') skipped.push({ id, claim_number: c.claim_number, reason: c.status === 'paid' ? 'Already paid' : 'Not approved yet' });
+    else if (c.batch_id) skipped.push({ id, claim_number: c.claim_number, reason: `In bank payment ${c.batch_number || ''}`.trim() });
     else if (Number(c.user_id) === Number(user.id) && !sup) skipped.push({ id, claim_number: c.claim_number, reason: 'You cannot pay your own claim' });
     else todo.push(c);
   }
@@ -653,19 +708,11 @@ function pay(user, input = {}) {
     payoutId = db.prepare('INSERT INTO expense_payouts (paid_on, mode, reference, total, claims, created_by, created_at) VALUES (?,?,?,0,0,?,?)').run(p.paidOn, p.mode, p.reference, user.id, now).lastInsertRowid;
     let total = 0;
     for (const c of todo) {
-      const lock = db.prepare("UPDATE expense_claims SET status = 'paid' WHERE id = ? AND status = 'approved'").run(c.id);
+      const lock = db.prepare("UPDATE expense_claims SET status = 'paid' WHERE id = ? AND status = 'approved' AND batch_id IS NULL").run(c.id);
       if (!lock.changes) { skipped.push({ id: Number(c.id), claim_number: c.claim_number, reason: 'Already paid' }); continue; }
       const approved = money(c.approved_amount);
       const off = adjust ? advances.adjustForClaim(c.user_id, c, approved, user.id) : 0;
-      const net = money(approved - off);
-      db.prepare(`UPDATE expense_claims SET advance_adjusted = ?, paid_amount = ?, paid_at = ?, paid_on = ?, paid_by = ?, payment_mode = ?, payment_reference = ?, payout_id = ?,
-          closed_at = ?, updated_at = ? WHERE id = ?`).run(off, net, now, p.paidOn, user.id, p.mode, p.reference, payoutId, now, now, c.id);
-      // (every line is touched, also a refused one: the mobile app then knows its claim is closed)
-      db.prepare("UPDATE expenses SET status = CASE WHEN status = 'approved' THEN 'paid' ELSE status END, updated_at = ? WHERE claim_id = ?").run(now, c.id);
-      core.history({
-        claim_id: c.id, user_id: user.id, action: 'paid', amount: net,
-        note: [p.mode, p.reference, off > 0 ? `${core.fmt(off)} taken off the advance` : ''].filter(Boolean).join(' · '),
-      });
+      const net = settle(c, { off, now, paidOn: p.paidOn, mode: p.mode, reference: p.reference, payoutId, byUserId: user.id });
       total = money(total + net);
       paid.push({ c, off, net });
     }
@@ -673,12 +720,7 @@ function pay(user, input = {}) {
     db.prepare('UPDATE expense_payouts SET payout_number = ?, total = ?, claims = ? WHERE id = ?').run(`PAY-${pad(payoutId)}`, total, paid.length, payoutId);
   });
   tx();
-  for (const x of paid) {
-    const msg = x.net > 0
-      ? `${x.c.claim_number}: ${core.fmt(x.net)} paid by ${p.mode}${p.reference ? ` (${p.reference})` : ''}${x.off > 0 ? `; ${core.fmt(x.off)} was taken off your advance` : ''}`
-      : `${x.c.claim_number}: ${core.fmt(x.off)} was taken off your advance — nothing more to pay`;
-    core.notify(x.c.user_id, 'Expense claim paid', msg, link(x.c.id));
-  }
+  for (const x of paid) core.notify(x.c.user_id, 'Expense claim paid', paidMessage(x.c, x.net, x.off, p.mode, p.reference), link(x.c.id));
   const payout = db.prepare('SELECT * FROM expense_payouts WHERE id = ?').get(payoutId);
   return {
     payout: { id: Number(payout.id), payout_number: payout.payout_number, paid_on: payout.paid_on, mode: payout.mode, reference: payout.reference || '', total: money(payout.total), claims: Number(payout.claims) },
@@ -804,11 +846,12 @@ function summary(user) {
     is_finance: fin, has_team: core.teamIds(user).length > 1,
   };
   if (fin) {
-    const pay1 = one("SELECT COUNT(*) AS n, COALESCE(SUM(approved_amount), 0) AS a FROM expense_claims WHERE status = 'approved'");
+    const pay1 = one("SELECT COUNT(*) AS n, COALESCE(SUM(approved_amount), 0) AS a FROM expense_claims WHERE status = 'approved' AND batch_id IS NULL");
+    const bank1 = one("SELECT COUNT(*) AS n, COALESCE(SUM(approved_amount - COALESCE(advance_adjusted, 0)), 0) AS a FROM expense_claims WHERE status = 'approved' AND batch_id IS NOT NULL");
     const adv1 = one("SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS a FROM expense_advances WHERE status = 'approved'");
     const open = one("SELECT COALESCE(SUM(amount - COALESCE(adjusted_amount, 0) - COALESCE(returned_amount, 0)), 0) AS a FROM expense_advances WHERE status = 'paid'");
     out.finance = {
-      to_pay: { count: Number(pay1.n) || 0, amount: money(pay1.a) }, advances_to_give: { count: Number(adv1.n) || 0, amount: money(adv1.a) }, advances_open: money(open.a),
+      to_pay: { count: Number(pay1.n) || 0, amount: money(pay1.a) }, in_bank: { count: Number(bank1.n) || 0, amount: money(bank1.a) }, advances_to_give: { count: Number(adv1.n) || 0, amount: money(adv1.a) }, advances_open: money(open.a),
     };
   }
   return out;
@@ -866,4 +909,6 @@ function sync(user, since) {
 module.exports = {
   recount, present, stage, getClaim, listClaims, createClaim, updateClaim, deleteClaim, submit, withdraw,
   approve, reject, giveBack, reassign, correct, payable, pay, payouts, payoutClaims, approvals, summary, sync,
+  // (for payments through the bank and for Tally)
+  SELECT, raw, link, allot, adjusting, oldestFirst, settle, unpay, paidMessage, allowed, pad,
 };
