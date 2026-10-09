@@ -1,0 +1,104 @@
+# Builds the iCRM Android app (the "mobile" folder) on GitHub — no Android Studio needed.
+# Runs when something in mobile/ changes, or by hand: Actions → "Android app" → Run workflow.
+# The APK is under the run → "Artifacts" → icrm-android.
+#
+# Signed release (for the Play Store or for sharing): add these repository secrets
+# (Settings → Secrets and variables → Actions). Without them a debug APK is made (fine to install by hand).
+#   ICRM_KEYSTORE_BASE64     your .jks key file, as base64
+#   ICRM_KEYSTORE_PASSWORD   its password
+#   ICRM_KEY_ALIAS           the key alias
+#   ICRM_KEY_PASSWORD        the key password
+name: Android app
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/android-app.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the screens
+        run: npm run build
+
+      - name: Make the Android project
+        run: '[ -d android ] || npx cap add android'
+
+      - name: App icon and splash
+        run: npx --yes @capacitor/assets@3.0.5 generate --android --assetPath assets || echo "icons skipped (the default icon is used)"
+
+      - name: The key (when given)
+        env:
+          KEY_B64: ${{ secrets.ICRM_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEY_B64" ]; then
+            echo "$KEY_B64" | base64 -d > "$RUNNER_TEMP/icrm.jks"
+            echo "ICRM_KEYSTORE=$RUNNER_TEMP/icrm.jks" >> "$GITHUB_ENV"
+          fi
+
+      - name: Android settings for iCRM
+        run: node scripts/android-setup.mjs
+
+      - name: Copy the screens into Android
+        run: npx cap sync android
+
+      - name: Build the APK
+        working-directory: mobile/android
+        env:
+          ICRM_KEYSTORE_PASSWORD: ${{ secrets.ICRM_KEYSTORE_PASSWORD }}
+          ICRM_KEY_ALIAS: ${{ secrets.ICRM_KEY_ALIAS }}
+          ICRM_KEY_PASSWORD: ${{ secrets.ICRM_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ -n "$ICRM_KEYSTORE" ]; then
+            ./gradlew --no-daemon assembleRelease bundleRelease
+          else
+            ./gradlew --no-daemon assembleDebug
+          fi
+
+      - name: Name the files
+        run: |
+          mkdir -p out
+          V=$(node -p "require('./package.json').version")
+          for f in $(find android/app/build/outputs -name "*.apk" -o -name "*.aab"); do
+            case "$f" in
+              *debug*.apk) cp "$f" "out/iCRM-$V-$BUILD_NUMBER-debug.apk" ;;
+              *.apk) cp "$f" "out/iCRM-$V-$BUILD_NUMBER.apk" ;;
+              *.aab) cp "$f" "out/iCRM-$V-$BUILD_NUMBER.aab" ;;
+            esac
+          done
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icrm-android
+          path: mobile/out/*
+          retention-days: 30
+
