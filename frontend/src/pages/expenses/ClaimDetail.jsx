@@ -310,6 +310,7 @@ export default function ClaimDetail() {
                     </div>
                     <div className="text-right shrink-0 w-full sm:w-auto">
                       <div className="font-bold text-ink">{money(e.amount)}</div>
+                      {e.foreign && <div className="t-meta whitespace-nowrap" data-testid="foreign-amount">{e.currency} {Number(e.orig_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })} × {e.fx_rate}</div>}
                       {!deciding && e.approved_amount !== null && e.approved_amount !== e.amount && <div className="text-xs mt-0.5" style={{ color: e.approved_amount > 0 ? 'var(--color-teal-strong)' : 'var(--color-danger-strong)' }}>{e.approved_amount > 0 ? `Approved ${money(e.approved_amount)}` : 'Not approved'}</div>}
                       {deciding && (
                         <div className="mt-2 flex flex-wrap sm:flex-col items-end justify-end gap-2">

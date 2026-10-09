@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Banknote, Loader2, Check, HandCoins, History, Plus, Undo2, X } from 'lucide-react';
+import { Banknote, Loader2, Check, HandCoins, History, Plus, Undo2, X, FileSpreadsheet, Zap } from 'lucide-react';
 import { api } from '../../api';
 import { EmptyState } from '../../components/ui';
 import { Modal, ErrorNote, PaymentFields, ReasonBox } from '../../components/expenses/parts';
@@ -16,6 +16,7 @@ import { money, niceDate, today, dayOf, useExpensesChanged, expensesChanged } fr
 import { AskAdvanceBox, GiveAdvanceBox, HandBackBox } from './AdvanceBoxes';
 import { FlagCount } from './ClaimList';
 import { tableHead, tableCell } from './shared';
+import { BankPeople, BankPayments, MakeBankBox, BankStatusMark } from './Bank';
 
 /**
  * What each of these claims gets when exactly THESE are paid: the advance a
@@ -110,7 +111,29 @@ export function PayBox({ claims, modes, adjustOn, onClose }) {
   );
 }
 
-export default function FinanceDesk({ meta }) {
+// With payments through the bank: To pay · Bank payments · Bank details of people
+export default function FinanceDesk({ meta, view = 'pay', batch = '', go }) {
+  const bankOn = !!(meta.bank && meta.bank.on);
+  const views = bankOn ? [['pay', 'To pay'], ['bank', 'Bank payments'], ['people', 'Bank details of people']] : [];
+  const current = bankOn && ['bank', 'people'].includes(view) ? view : 'pay';
+  return (
+    <>
+      {views.length > 0 && (
+        <div className="inline-flex rounded-lg overflow-hidden mb-4" style={{ border: '1px solid var(--color-line)' }} role="radiogroup" aria-label="Finance" data-testid="finance-views">
+          {views.map(([v, label]) => (
+            <button key={v} type="button" role="radio" aria-checked={current === v} onClick={() => go && go(v)} className="px-3 py-1.5 text-sm" data-testid={`finance-view-${v}`}
+              style={current === v ? { background: 'var(--color-brand)', color: '#fff' } : { background: 'var(--color-surface)', color: 'var(--color-ink)' }}>{label}</button>
+          ))}
+        </div>
+      )}
+      {current === 'pay' && <PayDesk meta={meta} onBatch={(id) => go && go('bank', { batch: String(id) })} />}
+      {current === 'bank' && <BankPayments openId={batch ? Number(batch) : null} />}
+      {current === 'people' && <BankPeople />}
+    </>
+  );
+}
+
+function PayDesk({ meta, onBatch }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(null);       // advances people still hold
   const [runs, setRuns] = useState(null);
@@ -123,6 +146,7 @@ export default function FinanceDesk({ meta }) {
   const [refuse, setRefuse] = useState(null);
   const [back, setBack] = useState(null);
   const [enter, setEnter] = useState(false);
+  const [toBank, setToBank] = useState(null);     // 'file' | 'payout'
 
   const seq = useRef(0);
   const load = useCallback(() => {
@@ -147,6 +171,9 @@ export default function FinanceDesk({ meta }) {
   const chosen = useMemo(() => allot(claims.filter((c) => picked.has(c.id)), adjustOn), [claims, picked, adjustOn]);
   const shown = useMemo(() => new Map((picked.size ? chosen : []).map((c) => [c.id, c])), [chosen, picked]);
   const allPicked = payable.length > 0 && payable.slice(0, 300).every((c) => picked.has(c.id));
+  // what can go to the bank among the chosen: people whose bank details are verified
+  const bank = (data && data.bank) || { on: false };
+  const forBank = useMemo(() => allot(claims.filter((c) => picked.has(c.id) && c.bank === 'verified'), adjustOn), [claims, picked, adjustOn]);
   const MOST = 300;          // claims in one payment
   const toggle = (id) => setPicked((s) => {
     const n = new Set(s);
@@ -166,7 +193,13 @@ export default function FinanceDesk({ meta }) {
         <div className="p-3 flex items-center gap-3 flex-wrap" style={{ borderBottom: '1px solid var(--color-line)' }}>
           <h2 className="t-section">Claims to pay ({claims.length})</h2>
           <span className="t-meta">Approved {money(data.totals.approved)}{data.totals.advance_to_adjust > 0 ? ` · advances to take off ${money(data.totals.advance_to_adjust)} · to pay ${money(data.totals.net_payable)}` : ''}</span>
-          <button type="button" className="btn btn-primary ml-auto" disabled={!chosen.length} onClick={() => { setNotice(''); setPaying(chosen); }} data-testid="pay-picked">
+          {bank.on && (
+            <span className="ml-auto flex gap-2">
+              <button type="button" className="btn btn-secondary" disabled={!chosen.length} onClick={() => { setNotice(''); setToBank('file'); }} data-testid="bank-file-picked" title="Make the bank's upload file for the chosen claims"><FileSpreadsheet className="w-4 h-4" /> Bank file</button>
+              {bank.payout && <button type="button" className="btn btn-secondary" disabled={!chosen.length} onClick={() => { setNotice(''); setToBank('payout'); }} data-testid="payout-picked"><Zap className="w-4 h-4" /> RazorpayX</button>}
+            </span>
+          )}
+          <button type="button" className={`btn btn-primary ${bank.on ? '' : 'ml-auto'}`} disabled={!chosen.length} onClick={() => { setNotice(''); setPaying(chosen); }} data-testid="pay-picked">
             <Banknote className="w-4 h-4" /> {chosen.length ? `Pay ${chosen.length} · ${money(sumOf(chosen, 'net_payable'))}` : 'Pay the chosen claims'}
           </button>
         </div>
@@ -191,7 +224,7 @@ export default function FinanceDesk({ meta }) {
                   return (
                   <tr key={c.id} style={{ borderTop: '1px solid var(--color-line-soft)', ...(picked.has(c.id) ? { background: 'var(--color-brand-faint)' } : {}) }} data-testid="payable-row">
                     <td className={tableCell}>{c.can.finance ? <input type="checkbox" checked={picked.has(c.id)} onChange={() => toggle(c.id)} aria-label={`Choose ${c.claim_number}`} /> : <span title="Your own claim: another finance person pays it" className="t-meta">—</span>}</td>
-                    <td className={`${tableCell} whitespace-nowrap text-ink font-medium`}>{c.user_name}</td>
+                    <td className={`${tableCell} whitespace-nowrap text-ink font-medium`}>{c.user_name}{bank.on && <BankStatusMark status={c.bank} />}</td>
                     <td className={tableCell}>
                       <Link to={`/expenses/claims/${c.id}`} className="hover:underline" style={{ color: 'var(--color-brand)' }}>{c.claim_number}</Link>
                       <span className="t-meta"> · {c.lines} {c.lines === 1 ? 'expense' : 'expenses'}</span> <FlagCount n={c.flags} />
@@ -290,6 +323,10 @@ export default function FinanceDesk({ meta }) {
       )}
 
       {paying && <PayBox claims={paying} modes={data.payment_modes} adjustOn={adjustOn} onClose={(done, staleText) => { setPaying(null); if (staleText) { setNotice(staleText); load(); window.scrollTo({ top: 0, behavior: 'smooth' }); } }} />}
+      {toBank && (
+        <MakeBankBox claims={chosen} kind={toBank} payout={bank.payout} total={sumOf(forBank, 'net_payable')}
+          onClose={(made) => { setToBank(null); if (made) { setPicked(new Set()); onBatch(made.id); } }} />
+      )}
       {give && <GiveAdvanceBox advance={give} modes={data.payment_modes} onClose={() => setGive(null)} />}
       {back && <HandBackBox advance={back} meta={meta} onClose={() => setBack(null)} />}
       {enter && <AskAdvanceBox meta={meta} forSomeone onClose={() => setEnter(false)} />}

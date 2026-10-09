@@ -22,6 +22,8 @@ import Approvals from './Approvals';
 import FinanceDesk from './FinanceDesk';
 import Advances from './Advances';
 import Reports from './Reports';
+import { MyBank } from './Bank';
+import Tally from './Tally';
 
 function Figure({ icon: Icon, label, value, sub, tint, onClick, testid }) {
   const body = (
@@ -90,6 +92,8 @@ export default function Expenses() {
     // (also when asking for new ones is switched off, as long as this person still holds one)
     (meta.rules.advances || tab === 'advances' || (!!sum && sum.advance_balance > 0)) && ['advances', 'Advances', 0],
     ['reports', 'Reports', 0],
+    meta.tally && ['tally', 'Tally', 0],
+    meta.bank && meta.bank.on && ['bank', 'Bank details', 0],
   ].filter(Boolean);
   const current = tabs.some((t) => t[0] === tab) ? tab : 'expenses';
 
@@ -136,9 +140,11 @@ export default function Expenses() {
       {current === 'expenses' && <ExpenseList meta={meta} summary={sum} show={params.get('show') || ''} nonce={location.key} />}
       {current === 'claims' && <ClaimList meta={meta} status={params.get('status') || ''} nonce={location.key} />}
       {current === 'approvals' && <Approvals meta={meta} />}
-      {current === 'finance' && <FinanceDesk meta={meta} />}
+      {current === 'finance' && <FinanceDesk meta={meta} view={params.get('view') || 'pay'} batch={params.get('batch') || ''} go={(view, extra) => go('finance', { view: view === 'pay' ? '' : view, ...(extra || {}) })} />}
       {current === 'advances' && <Advances meta={meta} />}
       {current === 'reports' && <Reports meta={meta} />}
+      {current === 'tally' && <Tally />}
+      {current === 'bank' && <MyBank />}
     </div>
   );
 }

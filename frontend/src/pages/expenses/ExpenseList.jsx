@@ -139,6 +139,7 @@ export default function ExpenseList({ meta, summary, show, nonce }) {
                         <td className={tableCell}>{e.receipt_list && e.receipt_list.length ? <BillStrip bills={e.receipt_list} size={34} max={3} /> : <span className="t-meta">—</span>}</td>
                         <td className={`${tableCell} text-right whitespace-nowrap`}>
                           <div className="font-semibold text-ink">{money(e.amount)}</div>
+                          {e.foreign && <div className="t-meta whitespace-nowrap" data-testid="foreign-amount">{e.currency} {Number(e.orig_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>}
                           {e.paid_by === 'company' && <div className="t-meta">company card</div>}
                           {['approved', 'paid'].includes(e.status) && e.approved_amount !== null && e.approved_amount !== e.amount && <div className="t-meta">approved {money(e.approved_amount)}</div>}
                         </td>
@@ -163,6 +164,7 @@ export default function ExpenseList({ meta, summary, show, nonce }) {
                       <div className="flex items-start justify-between gap-2">
                         <button type="button" className="font-medium text-ink text-sm truncate text-left" onClick={(ev) => { ev.stopPropagation(); askOpenExpense(e.id); }}>{e.category_name}</button>
                         <div className="font-semibold text-ink text-sm whitespace-nowrap">{money(e.amount)}</div>
+                        {e.foreign && <div className="t-meta whitespace-nowrap" data-testid="foreign-amount">{e.currency} {Number(e.orig_amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>}
                       </div>
                       <div className="t-meta truncate">{niceDate(e.expense_date)}{showPerson ? ` · ${e.user_name}` : ''}{expenseLine(e) ? ` · ${expenseLine(e)}` : ''}</div>
                       <div className="flex items-center gap-1.5 flex-wrap mt-1.5">

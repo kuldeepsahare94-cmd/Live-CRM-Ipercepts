@@ -127,6 +127,8 @@ export const HISTORY_WORDS = {
   approved: 'Approved', rejected: 'Rejected', returned: 'Sent back for correction', reassigned: 'Changed the approver', adjusted: 'Corrected the amounts',
   paid: 'Paid', closed: 'Closed', auto_approved: 'Approved automatically', no_approver: 'No approver',
   requested: 'Asked for the advance', entered: 'Entered the advance', cancelled: 'Cancelled',
+  in_bank: 'Put into a bank payment', bank_failed: 'The bank transfer failed', bank_cancelled: 'Taken out of the bank payment',
+  payment_reversed: 'The bank sent the money back', put_back: 'Put back on the advance',
 };
 
 /** What an expense is, in one line (for lists). */

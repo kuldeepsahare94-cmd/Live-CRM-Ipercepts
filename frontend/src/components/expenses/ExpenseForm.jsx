@@ -16,11 +16,12 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Camera, Paperclip, Loader2, Search, X, ChevronDown, ChevronUp, Trash2, Info } from 'lucide-react';
+import { Camera, Paperclip, Loader2, Search, X, ChevronDown, ChevronUp, Trash2, Info, ScanText, Check } from 'lucide-react';
 import { api } from '../../api';
 import { usePermissions } from '../../context/usePermissions';
 import { Modal, Field, ErrorNote, Flags, BillTile, BillViewer, Chip } from './parts';
-import { useExpenseMeta, money, today, dayOf, niceDate, shrinkPhoto, expensesChanged, newRef, EXPENSE_STATUS } from './expenses';
+import { useExpenseMeta, money, today, dayOf, niceDate, shrinkPhoto, expensesChanged, newRef, billUrl, EXPENSE_STATUS } from './expenses';
+import { readText } from './ocr';
 
 const KIND_LABEL = { leads: 'Lead', contacts: 'Contact', accounts: 'Account', opportunities: 'Deal' };
 
@@ -92,12 +93,22 @@ function CustomerPick({ value, onChange, disabled }) {
 
 const EMPTY = {
   expense_date: '', category_id: '', amount: '', paid_by: 'self', merchant: '', city: '', description: '', bill_number: '', gstin: '', tax_amount: '',
-  km: '', vehicle: '', from_place: '', to_place: '', days: '1',
+  km: '', vehicle: '', from_place: '', to_place: '', days: '1', currency: '', fx_rate: '',
 };
+// (in another currency the boxes hold what the BILL says; "amount" from the server is then in the CRM currency)
 const fromExpense = (e) => ({
-  expense_date: e.expense_date, category_id: String(e.category_id), amount: String(e.amount ?? ''), paid_by: e.paid_by, merchant: e.merchant || '', city: e.city || '',
-  description: e.description || '', bill_number: e.bill_number || '', gstin: e.gstin || '', tax_amount: e.tax_amount === null || e.tax_amount === undefined ? '' : String(e.tax_amount),
+  expense_date: e.expense_date, category_id: String(e.category_id), amount: String((e.foreign ? e.orig_amount : e.amount) ?? ''), paid_by: e.paid_by, merchant: e.merchant || '', city: e.city || '',
+  description: e.description || '', bill_number: e.bill_number || '', gstin: e.gstin || '',
+  tax_amount: (e.foreign ? e.orig_tax : e.tax_amount) === null || (e.foreign ? e.orig_tax : e.tax_amount) === undefined ? '' : String(e.foreign ? e.orig_tax : e.tax_amount),
   km: e.km === null || e.km === undefined ? '' : String(e.km), vehicle: e.vehicle || '', from_place: e.from_place || '', to_place: e.to_place || '', days: e.days === null || e.days === undefined ? '1' : String(e.days),
+  currency: e.foreign ? e.currency : '', fx_rate: e.foreign ? String(e.fx_rate) : '',
+});
+const FOUND_LABEL = { amount: 'Amount', expense_date: 'Date', merchant: 'Paid to', bill_number: 'Bill number', gstin: 'GSTIN', tax_amount: 'Tax', currency: 'Currency', category_id: 'Category' };
+const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).slice(String(r.result).indexOf(',') + 1));
+  r.onerror = () => reject(new Error('The bill could not be read.'));
+  r.readAsDataURL(blob);
 });
 
 export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }) {
@@ -116,6 +127,7 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
   const [viewer, setViewer] = useState(null);
   const [savedCount, setSavedCount] = useState(0);
   const [failed, setFailed] = useState('');             // the expense could not be opened at all
+  const [scan, setScan] = useState(null);               // reading a bill: { busy, progress, result, error }
   const clean = useRef(null);                           // the form as it was opened / last saved
   const ref = useRef(newRef());
   const fileIn = useRef(null);
@@ -156,6 +168,21 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
   const rate = rates.find((r) => r.name === f.vehicle);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
 
+  // --- another currency (only a plain bill amount) ---
+  const base = (meta && meta.currency) || 'INR';
+  const currencies = (meta && meta.currencies) || [];
+  const foreign = kind === 'amount' && !!f.currency && f.currency !== base;
+  const showCurrency = kind === 'amount' && ((meta && meta.multi_currency && currencies.length > 1) || (expense && expense.foreign));
+  const crmRate = useMemo(() => {
+    if (!foreign) return null;
+    if (expense && expense.foreign && expense.currency === f.currency) return expense.fx_rate;   // (the rate it was saved with)
+    const c = currencies.find((x) => x.code === f.currency);
+    return c ? c.rate : null;
+  }, [foreign, f.currency, expense, currencies]);
+  const rateNow = foreign ? (Number(f.fx_rate) > 0 ? Number(f.fx_rate) : crmRate) : null;
+  const inBase = foreign && rateNow && Number(f.amount) > 0 ? Math.round(Number(f.amount) * rateNow * 100) / 100 : null;
+  const curLabel = foreign ? f.currency : (meta ? meta.symbol : '₹');
+
   // the amount the CRM will work out (the server has the last word)
   const worked = useMemo(() => {
     if (kind === 'mileage') {
@@ -173,11 +200,16 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
 
   const payload = () => ({
     expense_date: f.expense_date, category_id: f.category_id ? Number(f.category_id) : null, paid_by: f.paid_by,
-    amount: kind === 'amount' || (kind === 'per_day' && !(cat && cat.daily_rate)) ? f.amount : undefined,
+    amount: !foreign && (kind === 'amount' || (kind === 'per_day' && !(cat && cat.daily_rate))) ? f.amount : undefined,
+    // (another currency: what the bill says, and the rate — the CRM works out the amount)
+    currency: showCurrency ? (f.currency || base) : undefined,
+    orig_amount: foreign ? f.amount : undefined,
+    orig_tax: foreign ? f.tax_amount : undefined,
+    fx_rate: foreign && meta && meta.fx_rate_edit && f.fx_rate !== '' ? f.fx_rate : undefined,
     km: kind === 'mileage' ? f.km : undefined, vehicle: kind === 'mileage' ? f.vehicle : undefined,
     from_place: kind === 'mileage' ? f.from_place : undefined, to_place: kind === 'mileage' ? f.to_place : undefined,
     days: kind === 'per_day' ? f.days : undefined,
-    merchant: f.merchant, city: f.city, description: f.description, bill_number: f.bill_number, gstin: f.gstin, tax_amount: f.tax_amount,
+    merchant: f.merchant, city: f.city, description: f.description, bill_number: f.bill_number, gstin: f.gstin, tax_amount: foreign ? undefined : f.tax_amount,
     related_module: customer ? customer.module : null, related_record_id: customer ? customer.id : null,
   });
 
@@ -197,7 +229,7 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
     }, 450);
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [f.expense_date, f.category_id, f.amount, f.km, f.vehicle, f.days, !!f.description.trim(), billCount, readOnly, loading, !!meta]);
+  }, [f.expense_date, f.category_id, f.amount, f.km, f.vehicle, f.days, f.currency, f.fx_rate, !!f.description.trim(), billCount, readOnly, loading, !!meta]);
 
   const pickFiles = async (files) => {
     const list = [...(files || [])];
@@ -218,6 +250,51 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
   const removeSaved = async (bill) => {
     if (!window.confirm('Remove this bill from the expense?')) return;
     try { const e = await api.deleteExpenseBill(bill.id); setExpense(e); setFlags(e.flags || []); expensesChanged(); } catch (e) { setError(e.message); }
+  };
+
+  // --- reading a bill: the newest photo (or PDF, when the assistant reads) ---
+  const mode = (meta && meta.bill_reading) || 'off';
+  const readable = (b) => (mode === 'ai' ? true : !/pdf/.test(b.mime || ''));
+  const toRead = [...allBillsNow()].reverse().find(readable) || null;
+  function allBillsNow() { return [...((expense && expense.receipt_list) || []), ...fresh]; }
+  const readBill = async () => {
+    if (!toRead) return;
+    setScan({ busy: true, progress: 0 });
+    try {
+      let body;
+      if (mode === 'ai') {
+        const data = toRead.data || await blobToBase64(await (await fetch((await billUrl(toRead.id)).url)).blob());
+        body = { image: { mime: toRead.mime || 'image/jpeg', data } };
+      } else {
+        const src = toRead.data ? `data:${toRead.mime || 'image/jpeg'};base64,${toRead.data}` : (await billUrl(toRead.id)).url;
+        const text = await readText(src, (st, p) => setScan((x) => (x && x.busy ? { ...x, progress: /recogniz/i.test(st) ? p : x.progress, status: st } : x)));
+        if (!text.trim()) { setScan({ result: { found: 0, fields: {}, sure: {} } }); return; }
+        body = { text };
+      }
+      const r = await api.readExpenseBill(body);
+      setScan({ result: r });
+    } catch (e) {
+      setScan({ error: e.message || 'The bill could not be read.' });
+    }
+  };
+  const useFound = () => {
+    const r = scan && scan.result;
+    if (!r) return;
+    const x = r.fields || {};
+    setF((cur) => {
+      const n = { ...cur };
+      if (x.expense_date) n.expense_date = x.expense_date;
+      if (x.merchant) n.merchant = x.merchant;
+      if (x.bill_number) n.bill_number = x.bill_number;
+      if (x.gstin) n.gstin = x.gstin;
+      if (x.category_id && !cur.category_id && cats.some((c) => Number(c.id) === Number(x.category_id))) n.category_id = String(x.category_id);
+      if (x.currency && meta.multi_currency && currencies.some((c) => c.code === x.currency)) { n.currency = x.currency; n.fx_rate = ''; }
+      if (x.amount) n.amount = String(x.amount);
+      if (x.tax_amount !== undefined && x.tax_amount !== null) n.tax_amount = String(x.tax_amount);
+      return n;
+    });
+    if (x.bill_number || x.gstin || x.tax_amount) setMore(true);
+    setScan(null);
   };
 
   const save = async (another = false) => {
@@ -325,7 +402,33 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
               <Field label="Days" required hint="Half days can be entered as 0.5"><input type="number" inputMode="decimal" min="0.5" step="0.5" className="input" value={f.days} onChange={(e) => set('days', e.target.value)} /></Field>
             )}
             {(kind === 'amount' || (kind === 'per_day' && !(cat && cat.daily_rate))) ? (
-              <Field label={`Amount (${meta.symbol})`} required><input type="number" inputMode="decimal" min="0" step="0.01" className="input text-lg font-semibold" value={f.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0" data-testid="amount" /></Field>
+              <>
+                <div className={showCurrency ? 'grid grid-cols-[1fr_auto] gap-3' : ''}>
+                  <Field label={`Amount (${curLabel})`} required><input type="number" inputMode="decimal" min="0" step="0.01" className="input text-lg font-semibold" value={f.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0" data-testid="amount" /></Field>
+                  {showCurrency && (
+                    <Field label="Currency">
+                      <select className="input w-auto" value={f.currency || base} onChange={(e) => setF((x) => ({ ...x, currency: e.target.value === base ? '' : e.target.value, fx_rate: '' }))} aria-label="Currency" data-testid="currency">
+                        {(currencies.some((c) => c.code === base) ? currencies : [{ code: base }, ...currencies]).map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
+                        {f.currency && !currencies.some((c) => c.code === f.currency) && <option value={f.currency}>{f.currency}</option>}
+                      </select>
+                    </Field>
+                  )}
+                </div>
+                {foreign && (
+                  <div className="rounded-xl px-3 py-2.5 flex items-center gap-3 flex-wrap" style={{ background: 'var(--color-brand-faint)', border: '1px solid var(--color-brand-border)' }} data-testid="fx-box">
+                    <label className="flex items-center gap-1.5 text-sm text-ink whitespace-nowrap">
+                      1 {f.currency} =
+                      {meta.fx_rate_edit ? (
+                        <input type="number" inputMode="decimal" min="0" step="0.0001" className="input w-24 py-1" value={f.fx_rate} placeholder={crmRate ? String(crmRate) : ''}
+                          onChange={(e) => set('fx_rate', e.target.value)} aria-label={`Rate of 1 ${f.currency}`} data-testid="fx-rate" />
+                      ) : <b>{crmRate ? money(crmRate) : '—'}</b>}
+                      {meta.fx_rate_edit && <span>{meta.symbol}</span>}
+                    </label>
+                    <span className="ml-auto text-lg font-bold text-ink" data-testid="fx-amount">{inBase !== null ? money(inBase) : '—'}</span>
+                    <p className="t-meta w-full">{meta.fx_rate_edit ? `Leave the rate empty for the CRM rate${crmRate ? ` (${money(crmRate)})` : ''}, or type the rate your bank or card used.` : 'Changed at the CRM rate.'} Claims are paid in {base}.</p>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="rounded-xl px-3 py-2.5 flex items-center justify-between" style={{ background: 'var(--color-brand-faint)', border: '1px solid var(--color-brand-border)' }} data-testid="worked-out">
                 <span className="t-meta">{worked ? worked.text : 'The amount is worked out by the CRM'}</span>
@@ -378,6 +481,52 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
                 {readOnly && !allBills.length && <span className="t-meta">No bill attached.</span>}
               </div>
               {!readOnly && <p className="t-meta mt-1.5">A photo or a PDF. Photos are made smaller before they are sent.</p>}
+              {!readOnly && mode !== 'off' && allBills.length > 0 && (
+                <div className="mt-2">
+                  {!scan && (
+                    <button type="button" className="btn btn-secondary" onClick={readBill} disabled={!toRead || reading || busy} data-testid="read-bill"
+                      title={!toRead ? 'A PDF can only be read by the CRM assistant. Type the details in.' : ''}>
+                      <ScanText className="w-4 h-4" /> Read the bill
+                    </button>
+                  )}
+                  {!scan && !toRead && <p className="t-meta mt-1">A PDF cannot be read on this device — type the details in.</p>}
+                  {scan && scan.busy && (
+                    <p className="t-meta flex items-center gap-2" data-testid="read-busy"><Loader2 className="w-4 h-4 animate-spin" />
+                      {mode === 'ai' ? 'The assistant is reading the bill…' : `Reading the bill on this device…${scan.progress ? ` ${Math.round(scan.progress * 100)}%` : ' (the first time takes a little longer)'}`}
+                    </p>
+                  )}
+                  {scan && scan.error && (
+                    <div className="flex items-center gap-2"><ErrorNote>{scan.error}</ErrorNote><button type="button" className="btn btn-ghost" onClick={() => setScan(null)}>OK</button></div>
+                  )}
+                  {scan && scan.result && (
+                    <div className="rounded-xl p-3 mt-1" style={{ background: 'var(--color-canvas)', border: '1px solid var(--color-line)' }} data-testid="read-result">
+                      {scan.result.found ? (
+                        <>
+                          <p className="text-xs font-medium text-ink mb-1.5">Found in the bill — check before saving</p>
+                          <ul className="text-sm space-y-0.5">
+                            {Object.entries(scan.result.fields).map(([k, v]) => (
+                              <li key={k} className="flex items-center gap-2">
+                                <span className="t-meta w-24 shrink-0">{FOUND_LABEL[k] || k}</span>
+                                <span className="text-ink font-medium truncate">{k === 'expense_date' ? niceDate(v) : k === 'category_id' ? (cats.find((c) => Number(c.id) === Number(v)) || {}).name || v : k === 'amount' || k === 'tax_amount' ? (scan.result.fields.currency && scan.result.fields.currency !== base ? `${scan.result.fields.currency} ${v}` : money(v)) : v}</span>
+                                {scan.result.sure && scan.result.sure[k] === 'low' && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--color-warning-soft)', color: 'var(--color-warning-strong)' }}>check</span>}
+                              </li>
+                            ))}
+                          </ul>
+                          <div className="flex gap-2 mt-2">
+                            <button type="button" className="btn btn-primary" onClick={useFound} data-testid="use-found"><Check className="w-4 h-4" /> Fill these in</button>
+                            <button type="button" className="btn btn-secondary" onClick={() => setScan(null)}>Ignore</button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm text-ink">Nothing could be read from this bill. Type the details in.</span>
+                          <button type="button" className="btn btn-ghost" onClick={() => setScan(null)}>OK</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {!readOnly && (
@@ -392,7 +541,7 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
                 <Field label="Bill number"><input className="input" maxLength={60} value={f.bill_number} onChange={(e) => set('bill_number', e.target.value)} /></Field>
                 <Field label="City"><input className="input" maxLength={80} value={f.city} onChange={(e) => set('city', e.target.value)} /></Field>
                 <Field label="GSTIN of the seller"><input className="input" maxLength={15} value={f.gstin} onChange={(e) => set('gstin', e.target.value.toUpperCase())} placeholder="15 letters and digits" /></Field>
-                <Field label={`Tax in the bill (${meta.symbol})`}><input type="number" inputMode="decimal" min="0" step="0.01" className="input" value={f.tax_amount} onChange={(e) => set('tax_amount', e.target.value)} /></Field>
+                <Field label={`Tax in the bill (${curLabel})`}><input type="number" inputMode="decimal" min="0" step="0.01" className="input" value={f.tax_amount} onChange={(e) => set('tax_amount', e.target.value)} /></Field>
               </div>
             )}
           </fieldset>

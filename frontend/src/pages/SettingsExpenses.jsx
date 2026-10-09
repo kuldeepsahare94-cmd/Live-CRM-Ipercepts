@@ -9,19 +9,30 @@
  *   Approval       how many steps, who approves when there is no manager,
  *                  small claims that approve themselves
  *   Finance        which roles check and pay, the ways of paying
+ *   Bills          how a bill photo is read; expenses in other currencies
+ *   Bank           bank details of people, the bank file, RazorpayX
+ *   Tally          the ledgers the vouchers for Tally use
  *
  * Who approves a person's claim is their "Reports to" on the Users page.
  */
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ReceiptText, ArrowLeft, Check, Plus, Trash2, Pencil, ChevronUp, ChevronDown, Loader2, AlertTriangle, X } from 'lucide-react';
-import { api } from '../api';
+import { api, absoluteApiBase } from '../api';
 import { usePermissions } from '../context/usePermissions';
 import { PageHeader } from '../components/ui';
 import { Modal, Field, ErrorNote } from '../components/expenses/parts';
 import { settingsChanged } from '../components/expenses/expenses';
 
-const TABS = [['general', 'General'], ['categories', 'Categories & limits'], ['rates', 'Km rates'], ['approval', 'Approval'], ['finance', 'Finance & payment']];
+const TABS = [['general', 'General'], ['categories', 'Categories & limits'], ['rates', 'Km rates'], ['approval', 'Approval'], ['finance', 'Finance & payment'],
+  ['bills', 'Bills & currencies'], ['bank', 'Bank payments'], ['tally', 'Tally']];
+// the columns a bank file can have (the server knows the same list)
+const BANK_COLUMNS = {
+  serial: 'Sr No', beneficiary_name: 'Beneficiary Name', account_number: 'Beneficiary Account Number', ifsc: 'IFSC Code', bank_name: 'Bank Name',
+  amount: 'Amount', transfer_type: 'Transaction Type', narration: 'Narration', debit_account: 'Debit Account Number', payment_date: 'Payment Date',
+  email: 'Email', employee: 'Employee', employee_code: 'Employee Code', claims: 'Claim Numbers', batch: 'Batch Number', upi_id: 'UPI ID',
+};
+const DATE_FORMATS = ['DD/MM/YYYY', 'DD-MM-YYYY', 'YYYY-MM-DD', 'DD-MMM-YYYY'];
 const KIND = { amount: 'Amount of the bill', mileage: 'Own vehicle: km × rate', per_day: 'Per day: days × rate' };
 
 function Toggle({ on, onChange, label, disabled }) {
@@ -49,12 +60,12 @@ const sym = (s) => (s && s.symbol) || '₹';
 // ---------------------------------------------------------------------------
 // One category
 // ---------------------------------------------------------------------------
-function CategoryBox({ category, roles, symbol, onClose, onSaved }) {
+function CategoryBox({ category, roles, symbol, tally, onClose, onSaved }) {
   const c = category || {};
   const [f, setF] = useState({
     name: c.name || '', code: c.code || '', kind: c.kind || 'amount', daily_rate: numOrBlank(c.daily_rate), max_per_expense: numOrBlank(c.max_per_expense),
     max_per_day: numOrBlank(c.max_per_day), max_per_month: numOrBlank(c.max_per_month), bill: c.receipt_above === null || c.receipt_above === undefined ? 'never' : (Number(c.receipt_above) === 0 ? 'always' : 'above'),
-    receipt_above: c.receipt_above ? String(c.receipt_above) : '', note_required: !!c.note_required, active: c.active !== false,
+    receipt_above: c.receipt_above ? String(c.receipt_above) : '', note_required: !!c.note_required, active: c.active !== false, tally_ledger: c.tally_ledger || '',
   });
   const [limits, setLimits] = useState(() => (c.role_limits || []).map((l) => ({ role_id: String(l.role_id), max_per_expense: numOrBlank(l.max_per_expense), max_per_day: numOrBlank(l.max_per_day), max_per_month: numOrBlank(l.max_per_month), daily_rate: numOrBlank(l.daily_rate) })));
   const [busy, setBusy] = useState(false);
@@ -68,7 +79,7 @@ function CategoryBox({ category, roles, symbol, onClose, onSaved }) {
     try {
       await api.saveExpenseCategory({
         name: f.name, code: f.code, kind: f.kind, daily_rate: f.daily_rate, max_per_expense: f.max_per_expense, max_per_day: f.max_per_day, max_per_month: f.max_per_month,
-        receipt_above: f.bill === 'never' ? '' : (f.bill === 'always' ? 0 : f.receipt_above), note_required: f.note_required, active: f.active,
+        receipt_above: f.bill === 'never' ? '' : (f.bill === 'always' ? 0 : f.receipt_above), note_required: f.note_required, active: f.active, tally_ledger: f.tally_ledger,
         role_limits: limits.filter((l) => l.role_id).map((l) => ({ ...l, role_id: Number(l.role_id) })),
       }, c.id);
       onSaved();
@@ -84,6 +95,11 @@ function CategoryBox({ category, roles, symbol, onClose, onSaved }) {
           <Field label="Name" required className="sm:col-span-2"><input className="input" maxLength={80} value={f.name} onChange={(e) => set('name', e.target.value)} data-testid="category-name" data-autofocus /></Field>
           <Field label="Account code" hint="For your accounts; shown in the export."><input className="input" maxLength={30} value={f.code} onChange={(e) => set('code', e.target.value)} /></Field>
         </div>
+        {tally && (
+          <Field label="Tally ledger" hint="The expense ledger in Tally. Left empty, the category name is used.">
+            <input className="input" maxLength={100} value={f.tally_ledger} onChange={(e) => set('tally_ledger', e.target.value)} placeholder={f.name || 'Ledger name'} data-testid="category-tally" />
+          </Field>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="How the amount is worked out" hint={c.id ? 'Cannot change once expenses use this category.' : null}>
             <select className="input" value={f.kind} onChange={(e) => set('kind', e.target.value)} aria-label="How the amount is worked out">
@@ -160,6 +176,7 @@ export default function SettingsExpenses() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(null);     // a category, or {} for a new one
   const [modes, setModes] = useState('');
+  const [keys, setKeys] = useState({ payout_key_secret: '', payout_webhook_secret: '' });   // typed now; never shown back
 
   // Each tab is saved by itself, and a save on one tab never throws away what
   // is being typed on another: only what that save was about is taken from the
@@ -181,16 +198,21 @@ export default function SettingsExpenses() {
     general: ['max_age_days', 'over_limit', 'duplicate_check', 'advances', 'adjust_advance', 'max_receipt_mb', 'claim_prefix', 'advance_prefix'],
     approval: ['approval_levels', 'second_approver', 'second_approver_user_id', 'second_level_above', 'fallback_approver_id', 'auto_approve_below', 'auto_approve_month_limit', 'email_approver'],
     finance: ['finance_role_ids', 'payment_modes'],
+    bills: ['bill_reading', 'multi_currency', 'fx_rate_edit', 'fx_tolerance'],
+    bank: ['bank_payments', 'bank_self_edit', 'bank_debit_account', 'bank_file_columns', 'bank_file_header', 'bank_date_format', 'payout_provider', 'payout_key_id', 'payout_account', 'payout_mode', 'payout_max', 'payout_two_person'],
+    tally: ['tally', 'tally_company', 'tally_bank_ledger', 'tally_cash_ledger', 'tally_company_paid_ledger', 'tally_employee_group', 'tally_expense_group', 'tally_bank_group', 'tally_mode_ledgers'],
   };
+  // what the server works out after a save of the bank tab (whether the keys are there…)
+  const AFTER = { bank: ['has_payout_secret', 'has_webhook_secret', 'payout_ready'] };
   const same = (a, b) => (Array.isArray(a) || Array.isArray(b) ? JSON.stringify(a) === JSON.stringify(b) : String(a ?? '') === String(b ?? ''));
-  const save = async (next = s, { modesToo = false } = {}) => {
+  const save = async (next = s, { modesToo = false, extra = {} } = {}) => {
     const keys = TAB_KEYS[tab] || [];
-    const patch = Object.fromEntries(keys.filter((k) => !same(next[k], data.settings[k])).map((k) => [k, next[k]]));
+    const patch = { ...Object.fromEntries(keys.filter((k) => !same(next[k], data.settings[k])).map((k) => [k, next[k]])), ...extra };
     if (!Object.keys(patch).length) { setSaved('Saved'); setError(''); return true; }
     setBusy(true); setError('');
     try {
       const d = await api.saveExpenseSettings(patch);
-      const fresh = Object.fromEntries(keys.map((k) => [k, d.settings[k]]));
+      const fresh = Object.fromEntries([...keys, ...(AFTER[tab] || [])].map((k) => [k, d.settings[k]]));
       setData((old) => ({ ...old, settings: { ...old.settings, ...fresh }, without_manager: d.without_manager }));
       setS((cur) => ({ ...cur, ...fresh }));
       if (modesToo) setModes(d.settings.payment_modes.join(', '));
@@ -441,7 +463,181 @@ export default function SettingsExpenses() {
         </div>
       )}
 
-      {editing && <CategoryBox category={editing.id ? editing : null} roles={data.roles} symbol={symbol} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await loadCategories(); done(); }} />}
+      {tab === 'bills' && (
+        <div className="card p-5">
+          <p className="text-sm font-medium text-ink">Reading a bill photo</p>
+          <p className="t-meta mt-0.5 mb-3">"Read the bill" fills in the amount, date, GSTIN, bill number and shop from the photo. People check it before saving; nothing is saved by itself.</p>
+          <div className="space-y-2" role="radiogroup" aria-label="How a bill is read" data-testid="bill-reading">
+            {[
+              ['device', 'On the phone or computer (free)', 'The photo is read in the browser or the app; only its text comes to the CRM. Clear, printed bills read well.'],
+              ['ai', 'By the CRM assistant', s.ai_available ? 'Better with crumpled or hand-written bills and PDFs. Each bill read costs a little on your AI account.' : 'Not available: the assistant has no key on this server (ANTHROPIC_API_KEY).'],
+              ['off', 'Off', 'People type every detail.'],
+            ].map(([v, label, hint]) => (
+              <label key={v} className="flex items-start gap-2 rounded-lg px-3 py-2 text-sm" style={{ border: '1px solid var(--color-line)', opacity: v === 'ai' && !s.ai_available ? 0.55 : 1 }}>
+                <input type="radio" name="bill_reading" className="mt-1" checked={s.bill_reading === v} disabled={!editable || (v === 'ai' && !s.ai_available)} onChange={() => set('bill_reading', v)} />
+                <span><span className="font-medium text-ink">{label}</span><span className="block t-meta">{hint}</span></span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-5">
+            <Row title="Expenses in another currency" hint={`A bill in USD, AED, EUR… is entered in that currency and changed to ${s.currency} at the rate of the day (Settings → Taxes & Currencies keeps the currencies and rates). Claims, limits and payments stay in ${s.currency}.`}>
+              <Toggle on={s.multi_currency} onChange={(v) => set('multi_currency', v)} label="Expenses in another currency" disabled={!editable} />
+            </Row>
+            {s.multi_currency && (
+              <>
+                <Row title="People may type the rate their bank or card used" hint="Otherwise the CRM rate is always used.">
+                  <Toggle on={s.fx_rate_edit} onChange={(v) => set('fx_rate_edit', v)} label="People may type the rate" disabled={!editable} />
+                </Row>
+                {s.fx_rate_edit && (
+                  <Row title="Point out a rate that is far from the CRM rate" hint="Further than this, the expense is outside the rules (the approver is warned). 0 = never.">
+                    <span className="flex items-center gap-2"><input type="number" min="0" max="100" className="input" style={{ width: 80 }} value={s.fx_tolerance} onChange={(e) => set('fx_tolerance', e.target.value)} aria-label="Allowed difference in percent" disabled={!editable} /><span className="t-meta">%</span></span>
+                  </Row>
+                )}
+              </>
+            )}
+          </div>
+          {saveBar()}
+        </div>
+      )}
+
+      {tab === 'bank' && (
+        <div className="card p-5">
+          <Row title="Pay claims through the bank" hint="Keep each person's bank account (encrypted) and make the bank's upload file for many claims at once — or send them through RazorpayX.">
+            <Toggle on={s.bank_payments} onChange={(v) => set('bank_payments', v)} label="Pay claims through the bank" disabled={!editable} />
+          </Row>
+          {s.bank_payments && (
+            <>
+              <Row title="People enter their own bank details" hint="Off: only the finance team enters them. Either way, someone of the finance team who did not enter the details has to verify them before anything is paid to them.">
+                <Toggle on={s.bank_self_edit} onChange={(v) => set('bank_self_edit', v)} label="People enter their own bank details" disabled={!editable} />
+              </Row>
+              <p className="text-sm font-medium text-ink mt-5">The bank file</p>
+              <p className="t-meta mt-0.5 mb-3">Upload it in your net banking (bulk payment). Choose the columns your bank asks for, in its order, with its headings.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <Field label="Company account the money leaves from"><input className="input" maxLength={34} value={s.bank_debit_account} onChange={(e) => set('bank_debit_account', e.target.value)} disabled={!editable} data-testid="debit-account" /></Field>
+                <Field label="Date in the file">
+                  <select className="input" value={s.bank_date_format} onChange={(e) => set('bank_date_format', e.target.value)} disabled={!editable} aria-label="Date in the file">
+                    {DATE_FORMATS.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <div className="rounded-xl" style={{ border: '1px solid var(--color-line)' }} data-testid="bank-columns">
+                {(() => {
+                  const chosen = s.bank_file_columns || [];
+                  const rest = Object.keys(BANK_COLUMNS).filter((k) => !chosen.some((c) => c.key === k));
+                  const setCols = (list) => set('bank_file_columns', list);
+                  return (
+                    <>
+                      {chosen.map((c, i) => (
+                        <div key={c.key} className="flex items-center gap-2 px-3 py-1.5" style={{ borderBottom: '1px solid var(--color-line-soft)' }}>
+                          <span className="t-meta w-6 text-right">{i + 1}</span>
+                          <span className="text-sm text-ink w-48 truncate">{BANK_COLUMNS[c.key]}</span>
+                          <input className="input flex-1 py-1" maxLength={60} value={c.label} onChange={(e) => setCols(chosen.map((x) => (x.key === c.key ? { ...x, label: e.target.value } : x)))} aria-label={`Heading of ${BANK_COLUMNS[c.key]}`} disabled={!editable} />
+                          {editable && (
+                            <>
+                              <button type="button" className="btn btn-ghost" style={{ padding: '2px 6px' }} disabled={i === 0} onClick={() => { const l = [...chosen]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; setCols(l); }} aria-label="Move up"><ChevronUp className="w-4 h-4" /></button>
+                              <button type="button" className="btn btn-ghost" style={{ padding: '2px 6px' }} disabled={i === chosen.length - 1} onClick={() => { const l = [...chosen]; [l[i + 1], l[i]] = [l[i], l[i + 1]]; setCols(l); }} aria-label="Move down"><ChevronDown className="w-4 h-4" /></button>
+                              <button type="button" className="btn btn-ghost" style={{ padding: '2px 6px' }} onClick={() => setCols(chosen.filter((x) => x.key !== c.key))} aria-label={`Remove ${BANK_COLUMNS[c.key]}`}><X className="w-4 h-4" /></button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                      {editable && rest.length > 0 && (
+                        <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
+                          <span className="t-meta">Add a column:</span>
+                          {rest.map((k) => <button key={k} type="button" className="text-xs px-2 py-1 rounded-md" style={{ border: '1px solid var(--color-line)' }} onClick={() => setCols([...chosen, { key: k, label: BANK_COLUMNS[k] }])}>+ {BANK_COLUMNS[k]}</button>)}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+              <label className="flex items-center gap-2 text-sm text-ink mt-2"><input type="checkbox" checked={s.bank_file_header} onChange={(e) => set('bank_file_header', e.target.checked)} disabled={!editable} /> First line has the headings</label>
+
+              <p className="text-sm font-medium text-ink mt-6">RazorpayX (optional)</p>
+              <p className="t-meta mt-0.5 mb-3">With a RazorpayX account the CRM sends each transfer itself, and RazorpayX reports back when the money arrived or failed. Without it, use the bank file.</p>
+              <Row title="Payout service">
+                <select className="input w-auto" value={s.payout_provider} onChange={(e) => set('payout_provider', e.target.value)} disabled={!editable} aria-label="Payout service" data-testid="payout-provider">
+                  <option value="none">None — bank file only</option>
+                  <option value="razorpayx">RazorpayX</option>
+                </select>
+              </Row>
+              {s.payout_provider === 'razorpayx' && (
+                <div className="space-y-3 mt-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field label="Key id" hint="RazorpayX → Settings → API keys"><input className="input" maxLength={60} value={s.payout_key_id || ''} onChange={(e) => set('payout_key_id', e.target.value.trim())} disabled={!editable} placeholder="rzp_live_…" data-testid="payout-key-id" /></Field>
+                    <Field label="Key secret" hint={s.has_payout_secret ? 'Kept (encrypted). Type a new one only to replace it.' : 'Kept encrypted; never shown again.'}>
+                      <input type="password" autoComplete="new-password" className="input" value={keys.payout_key_secret} onChange={(e) => setKeys((k) => ({ ...k, payout_key_secret: e.target.value }))} disabled={!editable} placeholder={s.has_payout_secret ? '•••••••• (kept)' : ''} data-testid="payout-key-secret" />
+                    </Field>
+                    <Field label="Your RazorpayX account number" hint="The account the money is paid from (RazorpayX → My Account)."><input className="input" maxLength={34} value={s.payout_account} onChange={(e) => set('payout_account', e.target.value.trim())} disabled={!editable} data-testid="payout-account" /></Field>
+                    <Field label="Transfer by">
+                      <select className="input" value={s.payout_mode} onChange={(e) => set('payout_mode', e.target.value)} disabled={!editable} aria-label="Transfer by">
+                        {['IMPS', 'NEFT', 'RTGS', 'UPI'].map((m) => <option key={m} value={m}>{m}{m === 'UPI' ? ' (to the UPI ID)' : ''}</option>)}
+                      </select>
+                    </Field>
+                    <Field label={`Largest transfer to one person (${symbol})`} hint="0 = no limit. Anything larger is left out of a RazorpayX payment."><input type="number" min="0" className="input" value={s.payout_max} onChange={(e) => set('payout_max', e.target.value)} disabled={!editable} /></Field>
+                    <Field label="Webhook secret" hint={s.has_webhook_secret ? 'Kept (encrypted). Type a new one only to replace it.' : 'The secret you type when adding the webhook in RazorpayX.'}>
+                      <input type="password" autoComplete="new-password" className="input" value={keys.payout_webhook_secret} onChange={(e) => setKeys((k) => ({ ...k, payout_webhook_secret: e.target.value }))} disabled={!editable} placeholder={s.has_webhook_secret ? '•••••••• (kept)' : ''} data-testid="payout-webhook-secret" />
+                    </Field>
+                  </div>
+                  <div className="rounded-xl px-3 py-2.5 text-[12.5px]" style={{ background: 'var(--color-canvas)', border: '1px solid var(--color-line)' }}>
+                    <b>Webhook in RazorpayX</b> (Settings → Webhooks → Add): URL <code className="break-all" data-testid="webhook-url">{`${absoluteApiBase()}/expenses-webhook/razorpayx`}</code>, events <i>payout.processed, payout.failed, payout.reversed, payout.rejected, payout.updated</i>, and the same secret as above.
+                  </div>
+                  <Row title="Two people for every RazorpayX payment" hint="The person who prepares a payment cannot also release it.">
+                    <Toggle on={s.payout_two_person} onChange={(v) => set('payout_two_person', v)} label="Two people for every RazorpayX payment" disabled={!editable} />
+                  </Row>
+                  <p className="t-meta" data-testid="payout-ready">{s.payout_ready ? 'RazorpayX is ready to use.' : 'Not ready yet: the key id, the key secret and the account number are all needed.'} {s.currency !== 'INR' && 'RazorpayX pays in rupees only.'}</p>
+                </div>
+              )}
+            </>
+          )}
+          {saveBar(async () => {
+            const extra = {};
+            if (keys.payout_key_secret.trim()) extra.payout_key_secret = keys.payout_key_secret.trim();
+            if (keys.payout_webhook_secret.trim()) extra.payout_webhook_secret = keys.payout_webhook_secret.trim();
+            if (await save(s, { extra })) setKeys({ payout_key_secret: '', payout_webhook_secret: '' });
+          })}
+        </div>
+      )}
+
+      {tab === 'tally' && (
+        <div className="card p-5">
+          <Row title="Vouchers for Tally" hint="The finance team makes an XML file of vouchers (claims, payments, advances) and imports it in Tally: Gateway of Tally → Import → Vouchers. Each voucher goes into a file once.">
+            <Toggle on={s.tally} onChange={(v) => set('tally', v)} label="Vouchers for Tally" disabled={!editable} />
+          </Row>
+          {s.tally && (
+            <div className="space-y-3 mt-4">
+              <Field label="Company name in Tally" hint="Exactly as in Tally. Left empty, the vouchers go into the company that is open."><input className="input" maxLength={100} value={s.tally_company} onChange={(e) => set('tally_company', e.target.value)} disabled={!editable} data-testid="tally-company" /></Field>
+              <p className="text-sm font-medium text-ink pt-2">Ledgers that must already be in Tally</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Field label="Bank ledger"><input className="input" maxLength={100} value={s.tally_bank_ledger} onChange={(e) => set('tally_bank_ledger', e.target.value)} disabled={!editable} data-testid="tally-bank" /></Field>
+                <Field label="Cash ledger"><input className="input" maxLength={100} value={s.tally_cash_ledger} onChange={(e) => set('tally_cash_ledger', e.target.value)} disabled={!editable} /></Field>
+                <Field label="Company card / account" hint="For expenses paid by the company."><input className="input" maxLength={100} value={s.tally_company_paid_ledger} onChange={(e) => set('tally_company_paid_ledger', e.target.value)} disabled={!editable} /></Field>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-ink mb-1">A different ledger for a way of paying <span className="t-meta font-normal">— empty: the bank ledger (cash: the cash ledger)</span></p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[...new Set([...(s.payment_modes || []), 'Bank transfer', ...(s.payout_provider !== 'none' ? [`RazorpayX ${s.payout_mode}`] : [])])].map((m) => (
+                    <label key={m} className="flex items-center gap-2 text-sm">
+                      <span className="w-36 truncate text-ink">{m}</span>
+                      <input className="input flex-1 py-1" maxLength={100} value={(s.tally_mode_ledgers || {})[m] || ''} placeholder={/cash/i.test(m) ? s.tally_cash_ledger : s.tally_bank_ledger}
+                        onChange={(e) => set('tally_mode_ledgers', { ...(s.tally_mode_ledgers || {}), [m]: e.target.value })} disabled={!editable} aria-label={`Ledger for ${m}`} />
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <p className="text-sm font-medium text-ink pt-2">Ledgers the CRM can create for you (the "Ledgers file")</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Group of the expense ledgers" hint="One ledger per category (its Tally ledger, or its name)."><input className="input" maxLength={100} value={s.tally_expense_group} onChange={(e) => set('tally_expense_group', e.target.value)} disabled={!editable} /></Field>
+                <Field label="Group of the employee ledgers" hint="One ledger per person (set on their bank details, or their name)."><input className="input" maxLength={100} value={s.tally_employee_group} onChange={(e) => set('tally_employee_group', e.target.value)} disabled={!editable} /></Field>
+              </div>
+              <p className="t-meta">The ledger of each category is set on the Categories tab; the ledger of each person by the finance team, on their bank details.</p>
+            </div>
+          )}
+          {saveBar()}
+        </div>
+      )}
+
+      {editing && <CategoryBox category={editing.id ? editing : null} roles={data.roles} symbol={symbol} tally={s.tally} onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await loadCategories(); done(); }} />}
     </div>
   );
 }

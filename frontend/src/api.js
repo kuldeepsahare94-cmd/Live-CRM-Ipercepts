@@ -991,6 +991,28 @@ export const api = {
   deleteExpenseCategory: (id) => req('DELETE', `/expenses/categories/${id}`),
   orderExpenseCategories: (ids) => req('PUT', '/expenses/categories-order', { ids }),
   saveExpenseVehicleRates: (rates) => req('PUT', '/expenses/vehicle-rates', { rates }),
+  // reading a bill: { text } read on this device, or { image: { mime, data } } for the assistant
+  readExpenseBill: (body) => ask('/expenses/bill-reading', body),
+  // bank details and payments through the bank
+  myExpenseBank: () => req('GET', '/expenses/bank/me'),
+  saveMyExpenseBank: (body) => req('PUT', '/expenses/bank/me', body),
+  expenseBankPeople: (params) => req('GET', `/expenses/bank/people${qs(params)}`),
+  saveExpenseBankPerson: (userId, body) => req('PUT', `/expenses/bank/people/${userId}`, body),
+  verifyExpenseBankPerson: (userId, body) => req('POST', `/expenses/bank/people/${userId}/verify`, body || {}),
+  expenseBankBatches: (params) => req('GET', `/expenses/bank/batches${qs(params)}`),
+  expenseBankBatch: (id) => req('GET', `/expenses/bank/batches/${id}`),
+  makeExpenseBankBatch: (body) => req('POST', '/expenses/bank/batches', body),
+  expenseBankBatchAction: (id, action, body) => req('POST', `/expenses/bank/batches/${id}/${action}`, body || {}),
+  expenseBankLineReturned: (id, lineId, body) => req('POST', `/expenses/bank/batches/${id}/lines/${lineId}/returned`, body || {}),
+  downloadExpenseBankFile: (id, name, again) => downloadFile(`/expenses/bank/batches/${id}/file${again ? '?again=1' : ''}`, name || 'bank-file.csv'),
+  // Tally
+  expenseTallyPreview: (params) => req('GET', `/expenses/tally/preview${qs(params)}`),
+  expenseTallyExports: (params) => req('GET', `/expenses/tally/exports${qs(params)}`),
+  expenseTallyExport: (id) => req('GET', `/expenses/tally/exports/${id}`),
+  makeExpenseTallyExport: (body) => req('POST', '/expenses/tally/exports', body),
+  undoExpenseTallyExport: (id) => req('POST', `/expenses/tally/exports/${id}/undo`, { confirm: true }),
+  downloadExpenseTallyFile: (id, name) => downloadFile(`/expenses/tally/exports/${id}/file`, name || 'tally.xml'),
+  downloadExpenseTallyLedgers: () => downloadFile('/expenses/tally/ledgers-file', 'expense-ledgers.xml'),
 
   // Follow-ups: exact date + time, lifecycle, reminders
   followUpsFor: (module, recordId) => req('GET', `/follow-ups${qs({ module, record_id: recordId })}`),
