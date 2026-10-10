@@ -81,13 +81,14 @@ router.post('/', requirePermission('leads', 'create'), (req, res) => {
   const info = db.prepare(`
     INSERT INTO leads (student_name, account_name, mobile, alternate_mobile, email, gender, date_of_birth, address, city,
       qualification, source, interested_course_id, status, follow_up_date, assigned_counselor, remarks,
-      lead_rating, lead_score, campaign, product_interest, service_interest)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      lead_rating, lead_score, campaign, product_interest, service_interest, state, country)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     b.student_name, b.account_name || null, b.mobile || null, b.alternate_mobile || null, b.email || null, b.gender || null,
     b.date_of_birth || null, b.address || null, b.city || null, b.qualification || null, b.source || null,
     b.interested_course_id || null, b.status || 'New', b.follow_up_date || null, b.assigned_counselor || null, b.remarks || null,
-    b.lead_rating || null, b.lead_score ?? null, b.campaign || null, b.product_interest || null, b.service_interest || null
+    b.lead_rating || null, b.lead_score ?? null, b.campaign || null, b.product_interest || null, b.service_interest || null,
+    b.state || null, b.country || null
   );
   const lead = db.prepare('SELECT * FROM leads WHERE id=?').get(info.lastInsertRowid);
   duplicates.noteCreated('leads', lead.id, { channel: req.createdVia || 'manual', source: lead.source, user: req.user });
@@ -115,12 +116,12 @@ router.put('/:id', requirePermission('leads', 'edit'), (req, res) => {
   db.prepare(`
     UPDATE leads SET student_name=?, account_name=?, mobile=?, alternate_mobile=?, email=?, gender=?, date_of_birth=?, address=?, city=?,
       qualification=?, source=?, interested_course_id=?, status=?, follow_up_date=?, assigned_counselor=?, remarks=?,
-      lead_rating=?, lead_score=?, campaign=?, product_interest=?, service_interest=?
+      lead_rating=?, lead_score=?, campaign=?, product_interest=?, service_interest=?, state=?, country=?
     WHERE id=?
   `).run(
     m.student_name, m.account_name, m.mobile, m.alternate_mobile, m.email, m.gender, m.date_of_birth, m.address, m.city,
     m.qualification, m.source, m.interested_course_id, m.status, m.follow_up_date, m.assigned_counselor, m.remarks,
-    m.lead_rating, m.lead_score, m.campaign, m.product_interest, m.service_interest,
+    m.lead_rating, m.lead_score, m.campaign, m.product_interest, m.service_interest, m.state ?? null, m.country ?? null,
     req.params.id
   );
   if (req.body.status && req.body.status !== existing.status) {
@@ -226,8 +227,8 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
       accountId = existingAccount.id;
       accountReused = true;
     } else {
-      accountId = db.prepare(`INSERT INTO accounts (account_name, city, lead_source, status, owner_id) VALUES (?,?,?,'Active',?)`)
-        .run(accountName, lead.city || null, lead.source || null, ownerId).lastInsertRowid;
+      accountId = db.prepare(`INSERT INTO accounts (account_name, city, state, country, lead_source, status, owner_id) VALUES (?,?,?,?,?,'Active',?)`)
+        .run(accountName, lead.city || null, lead.state || null, lead.country || null, lead.source || null, ownerId).lastInsertRowid;
     }
 
     // Person name. The two sources (the first_name/last_name columns, and
@@ -278,10 +279,10 @@ router.post('/:id/convert', requirePermission('leads', 'edit'), (req, res) => {
 
     if (!contactId) {
       const contactInfo = db.prepare(`
-        INSERT INTO contacts (first_name, last_name, account_id, email, mobile, city, lead_source, contact_status, owner_id)
-        VALUES (?,?,?,?,?,?,?,'Active',?)
+        INSERT INTO contacts (first_name, last_name, account_id, email, mobile, city, state, country, lead_source, contact_status, owner_id)
+        VALUES (?,?,?,?,?,?,?,?,?,'Active',?)
       `).run(firstName, lastName || null, accountId,
-        lead.email || null, lead.mobile || null, lead.city || null, lead.source || null, ownerId);
+        lead.email || null, lead.mobile || null, lead.city || null, lead.state || null, lead.country || null, lead.source || null, ownerId);
       contactId = contactInfo.lastInsertRowid;
     }
 

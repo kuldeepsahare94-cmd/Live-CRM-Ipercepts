@@ -18,6 +18,7 @@
 //   GET  /nearby?lat=&lng=&radius_km=  leads, contacts, accounts near me
 //   GET|PUT|DELETE /places/:module/:id   POST /places/:module/:id/geocode
 //
+//   POST /calls/match  GET /calls/today  POST /call-recordings  GET /calls/:id/recording  POST /calls/:id/transcribe
 //   GET  /live   GET /trail?user_id=&day=   GET /register?from=&to=[&format=csv]   GET /people
 //   GET|PUT /settings
 //   (no sign-in: GET /api/app/info — mounted in server.js)
@@ -30,6 +31,7 @@ const { requirePermission } = require('../middleware/auth');
 const store = require('../services/sfa/store');
 const field = require('../services/sfa/field');
 const mobile = require('../services/sfa/mobile');
+const calls = require('../services/sfa/calls');
 
 const router = express.Router();
 
@@ -74,8 +76,12 @@ function settingsPayload() {
   try { vehicles = db.prepare('SELECT name, rate_per_km, active FROM expense_vehicle_rates ORDER BY sort_order, id').all().map((v) => ({ name: v.name, rate_per_km: Number(v.rate_per_km), active: v.active !== 0 })); } catch { vehicles = []; }
   let expenses = false;
   try { expenses = !!require('../services/expenses/store').getSettings().enabled; } catch { expenses = false; }
+  const settings = store.getSettings();
   return {
-    settings: store.getSettings(), km_categories: categories, vehicles, expenses_on: expenses,
+    // (the speech service key never leaves the server: only whether one is set)
+    settings: { ...settings, transcribe_key: undefined, transcribe_key_set: !!settings.transcribe_key },
+    ai_summary_ready: (() => { try { return !!require('../services/aiClient').anthropic; } catch { return false; } })(),
+    km_categories: categories, vehicles, expenses_on: expenses,
     roles: db.prepare('SELECT id, name FROM roles ORDER BY id').all().map((r) => ({ id: Number(r.id), name: r.name })),
   };
 }
@@ -136,6 +142,33 @@ router.put('/places/:module/:id', run((req) => field.setPlace(req.user, req.para
 router.delete('/places/:module/:id', run((req) => field.clearPlace(req.user, req.params.module, req.params.id)));
 router.post('/places/:module/:id/geocode', run((req) => field.geocode(req.user, req.params.module, req.params.id)));
 
+// --- calls from the app ---------------------------------------------------------
+// who the numbers of the phone's call log are (and which of those calls are already in the CRM)
+// (calls are part of the CRM, not of Field force: they work also when Field force is off)
+const needCalls = (user, action = 'view') => { if (!require('../services/recordAccess').isSuper(user) && !(user.permissions && user.permissions.calls && user.permissions.calls[action])) throw store.bad('Your role cannot use calls.', 403); };
+router.post('/calls/match', run((req) => { needCalls(req.user); return calls.match(req.user, req.body || {}); }));
+// my calls today and the day's target (the app's Home, also without Field force)
+router.get('/calls/today', run((req) => {
+  needCalls(req.user);
+  const d = field.today();
+  const mine = calls.callsOfDay([Number(req.user.id)], field.dayRange(d)).get(Number(req.user.id)) || { calls: 0, connected: 0, seconds: 0 };
+  return { day: d, ...mine, target: store.getSettings().call_daily_target };
+}));
+// the recording of a call (the phone's own recording file)
+const serverBase = (req) => `${req.protocol}://${req.get('host')}`;
+router.post('/call-recordings', run((req) => { needCalls(req.user, 'create'); return calls.saveRecording(req.user, req.body || {}, serverBase(req)); }, 201));
+router.get('/calls/:id/recording', run((req) => calls.recordingOf(req.user, req.params.id)));
+// write the text again (after the speech service was set up, or when it failed)
+router.post('/calls/:id/transcribe', run(async (req) => {
+  needCalls(req.user, 'edit');
+  const info = calls.recordingOf(req.user, req.params.id);
+  if (!info.recording) throw store.bad('This call has no recording.', 404);
+  if (!store.getSettings().transcribe_on) throw store.bad('Call transcription is switched off (Settings → Field force → Calls & app).', 409);
+  if (calls.busyWriting(info.recording.id)) throw store.bad('The text of this call is being written now. Look again in a minute.', 409);
+  await calls.transcribe(info.recording.id);
+  return calls.recordingOf(req.user, req.params.id);
+}));
+
 // --- managers ----------------------------------------------------------------
 router.get('/people', run((req) => { field.needOn(req.user); return { people: field.people(req.user) }; }));
 router.get('/live', run((req) => field.live(req.user)));
@@ -152,6 +185,11 @@ router.get('/register', (req, res) => {
 });
 
 module.exports = router;
+// recordings older than the days they are kept are removed (every 6 hours, and soon after a start)
+setTimeout(() => calls.cleanup(), 60000).unref();
+setInterval(() => calls.cleanup(), 6 * 3600000).unref();
+
+module.exports.serveRecording = (req, res) => { try { calls.serveRecording(req, res); } catch (e) { fail(res, e); } };
 module.exports.appInfo = (req, res) => {
   try { res.setHeader('Cache-Control', 'no-store'); res.json(mobile.appInfo()); } catch (e) { fail(res, e); }
 };

@@ -38,8 +38,26 @@ const hhmmss = (totalSeconds) => {
 //
 // Older clients that send only follow_up_date (a plain date) still work: that
 // schedules a date-only follow-up and leaves everything else as it was.
+// POST /dispose with mode "facts": only the phone's facts of a call this person saved from the app.
+function phoneFacts(req, res, b) {
+  const ref = typeof b.client_ref === 'string' ? b.client_ref.trim().slice(0, 120) : '';
+  const own = ref ? db.prepare('SELECT * FROM calls WHERE created_by = ? AND client_ref = ?').get(req.user.id, ref) : null;
+  if (!own) return res.status(404).json({ error: 'Call not found' });
+  if (own.provider || !['app', 'phone'].includes(own.call_source)) return res.json({ ...own, already_saved: true });
+  const iso = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
+  const seconds = Math.max(0, Math.min(86400, Math.round(Number(b.duration_seconds) || 0)));
+  const connected = b.connected ? 1 : 0;
+  const status = connected ? 'Completed' : (own.direction === 'Inbound' ? 'Missed' : 'No Answer');
+  db.prepare(`UPDATE calls SET start_time = COALESCE(?, start_time), end_time = COALESCE(?, end_time), duration_seconds = ?, duration_minutes = ?,
+      connected = ?, status = ?, updated_at = datetime('now') WHERE id = ?`).run(iso(b.start_time), iso(b.end_time), seconds, Math.round(seconds / 60), connected, status, own.id);
+  return res.json(db.prepare('SELECT * FROM calls WHERE id = ?').get(own.id));
+}
+
 router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
   const b = req.body || {};
+  // The phone's own facts of a call already saved from the app (the person saved it during the
+  // call, before the phone's call history had it): the real start, end, length and answer.
+  if (b.mode === 'facts') return phoneFacts(req, res, b);
   if (b.connected === undefined || b.connected === null) {
     return res.status(400).json({ error: 'connected (true/false) is required' });
   }
@@ -56,6 +74,15 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
   const recordId = b.related_record_id ? Number(b.related_record_id) : null;
   // a call cannot be logged on a record this person is not allowed to see
   if (!access.parentVisible(req.user, module, recordId)) return res.status(403).json(access.denial(req.user, module));
+
+  // A call from the mobile app carries its own reference (the phone's call): sent twice, it is
+  // saved once; sent again with mode "update", the remark, outcome and follow-up are added to it.
+  const clientRef = typeof b.client_ref === 'string' && b.client_ref.trim() ? b.client_ref.trim().slice(0, 120) : null;
+  const own = clientRef ? db.prepare('SELECT * FROM calls WHERE created_by = ? AND client_ref = ?').get(req.user.id, clientRef) : null;
+  if (own && b.mode !== 'update') return res.json({ ...own, already_saved: true });
+  // (the same outcome sent twice — a retry — is added once)
+  const updateRef = typeof b.update_ref === 'string' && b.update_ref.trim() ? b.update_ref.trim().slice(0, 120) : null;
+  if (own && updateRef && own.update_ref === updateRef) return res.json({ ...own, already_saved: true });
 
   // Validate the follow-up BEFORE anything is written, so a bad time never
   // leaves a half-logged call behind.
@@ -88,7 +115,7 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
     if (tel && tel.taken) return res.status(409).json({ error: 'Another agent answered this call, so it is theirs to dispose.' });
     if (tel && !tel.call && !tel.session) tel = null;
   }
-  const ivr = tel && tel.call ? tel.call : null;
+  const ivr = own || (tel && tel.call ? tel.call : null);
 
   const durationSeconds = ivr ? Number(ivr.duration_seconds || 0) : Math.max(0, Math.round(Number(b.duration_seconds) || 0));
   const formSeconds = Math.max(0, Math.round(Number(b.form_seconds) || 0));
@@ -117,11 +144,11 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
     const tx = db.transaction(() => {
       if (ivr) {
         db.prepare(`UPDATE calls SET call_subject = ?, call_outcome = ?, notes = ?, follow_up_date = ?, next_action = ?,
-            disposed_at = datetime('now'), form_seconds = ?, assigned_user_id = COALESCE(assigned_user_id, ?),
+            disposed_at = datetime('now'), form_seconds = ?, assigned_user_id = COALESCE(assigned_user_id, ?), update_ref = COALESCE(?, update_ref),
             related_module = COALESCE(related_module, ?), related_record_id = COALESCE(related_record_id, ?),
             updated_at = datetime('now') WHERE id = ?`).run(
           subject, b.disposition, b.notes || null, callFollowUp, b.next_action_text || (nextAction === 'close' ? 'No further follow-up' : null),
-          formSeconds, req.user.id, module, recordId, ivr.id,
+          formSeconds, req.user.id, own ? updateRef : null, module, recordId, ivr.id,
         );
       }
       // (a call that is still going on has no row yet: it is made here, and
@@ -131,8 +158,9 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
         INSERT INTO calls (
           call_subject, related_module, related_record_id, phone_number, call_type, direction,
           start_time, duration_seconds, duration_minutes, connected, status, call_outcome,
-          notes, follow_up_date, next_action, assigned_user_id, created_by, disposed_at, form_seconds
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)
+          notes, follow_up_date, next_action, assigned_user_id, created_by, disposed_at, form_seconds,
+          client_ref, end_time, call_source
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,?,?,?)
       `).run(
         subject, module, recordId, b.phone_number || null,
         b.call_type || 'Sales Call', b.direction || 'Outbound',
@@ -140,10 +168,12 @@ router.post('/dispose', requirePermission('calls', 'create'), (req, res) => {
         durationSeconds,
         Math.round(durationSeconds / 60),          // kept in sync for existing readers
         connected,
-        connected ? 'Completed' : 'No Answer',
+        connected ? 'Completed' : (b.direction === 'Inbound' ? 'Missed' : 'No Answer'),
         b.disposition,
         b.notes || null, callFollowUp, b.next_action_text || (nextAction === 'close' ? 'No further follow-up' : null),
-        req.user.id, req.user.id, formSeconds
+        req.user.id, req.user.id, formSeconds,
+        clientRef, typeof b.end_time === 'string' && !Number.isNaN(Date.parse(b.end_time)) ? new Date(b.end_time).toISOString() : null,
+        typeof b.call_source === 'string' ? b.call_source.slice(0, 20) : null
       );
       const callId = info.lastInsertRowid;
       if (pending) {

@@ -40,6 +40,7 @@ require('./db-phase47-filter-layouts');
 require('./db-phase48-option-management');
 require('./db-phase49-follow-ups');
 require('./db-phase50-settings-cleanup');
+require('./db-phase51-geo');
 
 
 const app = express();
@@ -111,7 +112,7 @@ app.use('/api/expenses-webhook/razorpayx', express.raw({ type: () => true, limit
 // app sends selfies and photos inside the request, so a bigger body is read
 // (after the sign-in is checked).
 {
-  const readSfaBody = express.json({ limit: '25mb' });
+  const readSfaBody = express.json({ limit: '30mb' });   // (a call recording can be 20 MB)
   app.use('/api/sfa', requireAuth, (req, res, next) => readSfaBody(req, res, (err) => {
     if (!err) return next();
     const tooBig = err.status === 413 || err.type === 'entity.too.large';
@@ -120,6 +121,14 @@ app.use('/api/expenses-webhook/razorpayx', express.raw({ type: () => true, limit
 }
 // What the mobile app asks before signing in: which company this server is, what is switched on.
 app.get('/api/app/info', require('./routes/sfa').appInfo);
+// Countries, their states, and India's cities (the Country → State → City dropdowns). The same for
+// everyone and every company: no sign-in, cached by the browser for a day.
+app.get('/api/geo', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.type('application/json').send(require('./services/geo').json());
+});
+// a call recording: the link carries its own secret (an <audio> player cannot send the sign-in)
+app.get('/api/call-recordings/:file', require('./routes/sfa').serveRecording);
 
 // Expense management — field expenses with bill photos, claims, approvals,
 // advances and payment (also what the mobile app talks to). A bill photo

@@ -738,8 +738,10 @@ function myDay(user) {
       return { ...m, id: Number(m.id), related_record_id: m.related_record_id ? Number(m.related_record_id) : null, related_name: m.related_module ? recordName(m.related_module, m.related_record_id) || '' : '', visit_id: v ? v.id : null, visit_status: v ? v.status : null };
     });
   }
+  const callsToday = require('./calls').callsOfDay([Number(user.id)], dayRange(d)).get(Number(user.id)) || { calls: 0, connected: 0, seconds: 0 };
   return {
     day: d, server_time: nowIso(), time_zone: zone(),
+    calls_today: callsToday, call_target: s.call_daily_target,
     session: open ? presentSession(db.prepare(`${SESSION_SELECT} WHERE s.id = ?`).get(open.id)) : null,
     sessions, km_today: kmOfDay(user.id, d), visits, open_visit: visits.find((v) => v.status === 'open') || presentVisit(openVisit(user.id)),
     meetings,
@@ -769,6 +771,7 @@ function live(user) {
   const visits = new Map(db.prepare(`SELECT * FROM sfa_visits WHERE user_id IN (${marks}) AND status = 'open'`).all(...ids).map((v) => [Number(v.user_id), v]));
   const visitCount = new Map(db.prepare(`SELECT user_id, COUNT(*) AS n FROM sfa_visits WHERE user_id IN (${marks}) AND in_at >= ? AND in_at < ? GROUP BY user_id`).all(...ids, ...dayRange(d)).map((r) => [Number(r.user_id), Number(r.n)]));
   const s = store.getSettings();
+  const callMap = require('./calls').callsOfDay(ids, dayRange(d));
   const out = list.map((p) => {
     const mine = sessions.filter((x) => Number(x.user_id) === p.id);
     const open = mine.find((x) => x.status === 'in');
@@ -788,9 +791,11 @@ function live(user) {
       at: lv ? lv.at : null, minutes_ago: minutes, lat: lv ? Number(lv.lat) : null, lng: lv ? Number(lv.lng) : null, accuracy: lv && lv.accuracy !== null ? Number(lv.accuracy) : null,
       battery: lv && lv.battery !== null ? Number(lv.battery) : null, charging: lv ? Number(lv.charging) === 1 : false, mock: lv ? Number(lv.is_mock) === 1 : false,
       visit: v ? { id: Number(v.id), name: v.related_name || '', since: v.in_at, since_time: clockOf(v.in_at), far: Number(v.far) === 1 } : null,
+      calls_today: (callMap.get(p.id) || { calls: 0 }).calls, calls_connected: (callMap.get(p.id) || { connected: 0 }).connected,
+      talk_seconds: (callMap.get(p.id) || { seconds: 0 }).seconds,
     };
   });
-  return { people: out, server_time: nowIso(), day: d };
+  return { people: out, server_time: nowIso(), day: d, call_target: s.call_daily_target };
 }
 
 /** A person's day: the route, the punches, the visits, and km between them. @param q { user_id, day } */

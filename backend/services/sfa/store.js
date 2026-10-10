@@ -125,6 +125,32 @@ function ensureSchema() {
     if (!files.has('ref')) db.exec('ALTER TABLE sfa_files ADD COLUMN ref TEXT');
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_sfa_files_ref ON sfa_files (visit_id, ref)');
   } catch (e) { console.warn('[sfa] files:', e.message); }
+  // calls made from the app: the phone's own facts of the call, and its recording
+  try {
+    const calls = new Set(db.prepare('PRAGMA table_info(calls)').all().map((c) => c.name));
+    if (calls.size) {
+      if (!calls.has('client_ref')) db.exec('ALTER TABLE calls ADD COLUMN client_ref TEXT');
+      if (!calls.has('end_time')) db.exec('ALTER TABLE calls ADD COLUMN end_time TEXT');
+      if (!calls.has('call_source')) db.exec('ALTER TABLE calls ADD COLUMN call_source TEXT');
+      if (!calls.has('recording_id')) db.exec('ALTER TABLE calls ADD COLUMN recording_id INTEGER');
+      if (!calls.has('update_ref')) db.exec('ALTER TABLE calls ADD COLUMN update_ref TEXT');
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_calls_client_ref ON calls (created_by, client_ref)');
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS call_recordings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        call_id INTEGER,
+        user_id INTEGER,
+        file_name TEXT, mime TEXT, size INTEGER, duration_seconds INTEGER,
+        data TEXT,
+        token TEXT,
+        transcript TEXT, summary TEXT, ai_status TEXT, ai_error TEXT,
+        created_at TEXT, expires_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_call_recordings_call ON call_recordings (call_id);
+      CREATE INDEX IF NOT EXISTS idx_call_recordings_expires ON call_recordings (expires_at);
+    `);
+  } catch (e) { console.warn('[sfa] calls:', e.message); }
   // one open working day and one open visit per person, even with two servers
   try {
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sfa_sessions_one_open ON sfa_sessions (user_id) WHERE status = 'in'");
@@ -184,6 +210,23 @@ const DEFAULTS = {
   map_attribution: '',
   // who sees everyone (besides Super Admin): these roles
   viewer_role_ids: [],
+  // calls from the app
+  call_auto_log: true,         // a call made from the app is saved by itself (start, end, duration, connected)
+  call_scan_phone: true,       // calls with customers made outside the app (and missed calls) are found in the phone's call log
+  call_daily_target: 0,        // calls a day each person should make (0 = no target)
+  call_recordings: true,       // the phone's own recording of a call is attached to it
+  call_recording_days: 90,     // recordings are kept this many days (0 = for ever)
+  call_whatsapp_text: '',      // a WhatsApp message offered after a call ({name} = the customer)
+  // a written text and a short summary of a recording (a paid speech service; off by default)
+  transcribe_on: false,
+  transcribe_base_url: 'https://api.openai.com/v1',
+  transcribe_model: 'whisper-1',
+  transcribe_language: '',
+  transcribe_key: '',          // kept encrypted; never sent back
+  call_summary: true,          // a short summary by the CRM's AI assistant (when it is set up)
+  // a new version of the app: the app shows "New version available" with this link
+  app_latest_version: '',
+  app_download_url: '',
 };
 
 function readValue(name) {
@@ -227,6 +270,20 @@ function getSettings() {
   s.geocode = !!s.geocode;
   s.map_tiles_url = String(s.map_tiles_url || '');
   s.map_attribution = String(s.map_attribution || '');
+  s.call_auto_log = s.call_auto_log !== false;
+  s.call_scan_phone = s.call_scan_phone !== false;
+  s.call_daily_target = Math.round(clamp(s.call_daily_target, 0, 1000, 0));
+  s.call_recordings = s.call_recordings !== false;
+  s.call_recording_days = Math.round(clamp(s.call_recording_days, 0, 3650, 90));
+  s.call_whatsapp_text = String(s.call_whatsapp_text || '').slice(0, 1000);
+  s.transcribe_on = !!s.transcribe_on;
+  s.transcribe_base_url = String(s.transcribe_base_url || DEFAULTS.transcribe_base_url);
+  s.transcribe_model = String(s.transcribe_model || DEFAULTS.transcribe_model);
+  s.transcribe_language = String(s.transcribe_language || '');
+  s.transcribe_key = String(s.transcribe_key || '');
+  s.call_summary = s.call_summary !== false;
+  s.app_latest_version = String(s.app_latest_version || '');
+  s.app_download_url = String(s.app_download_url || '');
   s.viewer_role_ids = (Array.isArray(s.viewer_role_ids) ? s.viewer_role_ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
   cache = { at: Date.now(), version, value: s };
   return s;
@@ -241,7 +298,8 @@ function saveSettings(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw bad('Nothing to save.');
   const cur = getSettings();
   const next = { ...cur };
-  for (const k of ['enabled', 'track', 'selfie_in', 'selfie_out', 'selfie_visit', 'save_place_on_visit', 'close_meeting_on_checkout', 'km_expense', 'geocode']) {
+  for (const k of ['enabled', 'track', 'selfie_in', 'selfie_out', 'selfie_visit', 'save_place_on_visit', 'close_meeting_on_checkout', 'km_expense', 'geocode',
+    'call_auto_log', 'call_scan_phone', 'call_recordings', 'transcribe_on', 'call_summary']) {
     if (input[k] !== undefined) next[k] = flag(input[k], `"${k}"`);
   }
   const fig = (k, what, lo, hi) => {
@@ -259,6 +317,41 @@ function saveSettings(input = {}) {
   fig('auto_out_hours', 'The hours after which a day is closed', 4, 24);
   fig('visit_radius_m', 'The distance of a visit (m)', 20, 20000);
   fig('km_expense_min', 'The least km for an expense', 0, 1000);
+  fig('call_daily_target', 'The calls a day', 0, 1000);
+  fig('call_recording_days', 'The days recordings are kept', 0, 3650);
+  if (input.call_whatsapp_text !== undefined) next.call_whatsapp_text = String(input.call_whatsapp_text || '').trim().slice(0, 1000);
+  if (input.transcribe_base_url !== undefined) {
+    const u = String(input.transcribe_base_url || '').trim().replace(/\/+$/, '');
+    // (https; a plain http address only on this computer, for testing)
+    if (u && !/^https:\/\/[^\s"'<>]+$/.test(u) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/[^\s"'<>]*)?$/.test(u)) throw bad('The speech service address must start with https://');
+    // (a saved key goes only to the service it was given for: a new address needs the key again)
+    if ((u || DEFAULTS.transcribe_base_url) !== cur.transcribe_base_url && cur.transcribe_key && !(input.transcribe_key && String(input.transcribe_key).trim() && String(input.transcribe_key).trim() !== '-')) {
+      next.transcribe_key = '';
+    }
+    next.transcribe_base_url = u || DEFAULTS.transcribe_base_url;
+  }
+  if (input.transcribe_model !== undefined) next.transcribe_model = String(input.transcribe_model || '').trim().slice(0, 80) || DEFAULTS.transcribe_model;
+  if (input.transcribe_language !== undefined) {
+    const l = String(input.transcribe_language || '').trim();
+    if (l && !/^[a-z]{2,3}(-[A-Za-z]{2})?$/.test(l)) throw bad('The language is a code like hi, mr or en.');
+    next.transcribe_language = l;
+  }
+  // the key: a new one replaces the old; an empty one leaves it; "-" removes it
+  if (input.transcribe_key !== undefined && String(input.transcribe_key).trim() !== '') {
+    const k = String(input.transcribe_key).trim();
+    next.transcribe_key = k === '-' ? '' : require('../secrets').encrypt(k.slice(0, 500));
+  }
+  if (next.transcribe_on && !next.transcribe_key) throw bad('For call transcription give the speech service key.');
+  if (input.app_latest_version !== undefined) {
+    const v = String(input.app_latest_version || '').trim();
+    if (v && !/^\d+\.\d+\.\d+$/.test(v)) throw bad('The app version looks like 1.2.0');
+    next.app_latest_version = v;
+  }
+  if (input.app_download_url !== undefined) {
+    const u = String(input.app_download_url || '').trim();
+    if (u && !/^https:\/\/[^\s"'<>]+$/.test(u)) throw bad('The download link must start with https://');
+    next.app_download_url = u.slice(0, 500);
+  }
   for (const k of ['work_start', 'work_end']) {
     if (input[k] === undefined) continue;
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(input[k]))) throw bad('Give the time as HH:MM (24 hours).');

@@ -78,6 +78,7 @@ function appInfo() {
     app: 'icrm', api_level: API_LEVEL, server_version: APP_VERSION, min_app_version: '1.0.0',
     name: companyName(), server_time: new Date().toISOString(),
     features: { sfa: s.enabled, expenses: expensesOn() },
+    latest_app_version: s.app_latest_version || null, app_download_url: s.app_download_url || null,
   };
 }
 
@@ -104,6 +105,8 @@ const LEAD_CORE = [
   { api_name: 'mobile', label: 'Mobile', type: 'phone' },
   { api_name: 'alternate_mobile', label: 'Alternate mobile', type: 'phone' },
   { api_name: 'email', label: 'Email', type: 'email' },
+  { api_name: 'country', label: 'Country', type: 'text' },
+  { api_name: 'state', label: 'State', type: 'text' },
   { api_name: 'city', label: 'City', type: 'text' },
   { api_name: 'address', label: 'Address', type: 'textarea' },
   { api_name: 'date_of_birth', label: 'Date of birth', type: 'date' },
@@ -144,6 +147,11 @@ function bootstrap(user) {
       geocode: s.geocode, can_punch: can(user, 'sfa', 'create'), map_tiles_url: s.map_tiles_url, map_attribution: s.map_attribution,
     } : { enabled: false },
     expenses: expensesOn() && can(user, 'expenses', 'view'),
+    // calls from the app (Settings → Field force → Calls)
+    calls: can(user, 'calls', 'create') ? {
+      enabled: true, auto_log: s.call_auto_log, scan_phone: s.call_scan_phone, daily_target: s.call_daily_target,
+      recordings: s.call_recordings, whatsapp_text: s.call_whatsapp_text,
+    } : { enabled: false },
   };
 }
 
