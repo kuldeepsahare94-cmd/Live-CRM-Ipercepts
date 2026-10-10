@@ -38,7 +38,7 @@ const SOURCES = [
 /**
  * Who these numbers are (only records this person may open).
  * @param input { numbers: [...], refs: [client_ref…] }
- * @returns { matches: { "9876543210": { module, id, name } }, logged: [client_ref…] }
+ * @returns { matches: { "9876543210": { module, id, name } }, logged: [client_ref…], recorded: [client_ref…] }
  */
 function match(user, input = {}) {
   if (!isObject(input)) input = {};
@@ -68,10 +68,14 @@ function match(user, input = {}) {
   }
   const refs = (Array.isArray(input.refs) ? input.refs : []).map((r) => text(r, 120)).filter(Boolean).slice(0, 500);
   let logged = [];
+  let recorded = [];
   if (refs.length) {
-    logged = db.prepare(`SELECT client_ref FROM calls WHERE created_by = ? AND client_ref IN (${refs.map(() => '?').join(',')})`).all(user.id, ...refs).map((r) => r.client_ref);
+    const rows = db.prepare(`SELECT client_ref, recording_id FROM calls WHERE created_by = ? AND client_ref IN (${refs.map(() => '?').join(',')})`).all(user.id, ...refs);
+    logged = rows.map((r) => r.client_ref);
+    // (the calls that already have their recording — also one added by hand)
+    recorded = rows.filter((r) => r.recording_id).map((r) => r.client_ref);
   }
-  return { matches, logged };
+  return { matches, logged, recorded };
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 //   GET  /meta                         for the web menu: is it on, may I look, am I a manager
 //   GET  /m/bootstrap                  the app starts with this
 //   GET  /m/list/:module               a page of a list (leads, accounts, quotations…)
+//   GET  /m/related/:module/:id        everything linked to a lead / contact / account / deal
 //   POST /m/renew                      a fresh sign-in token (the app asks once a day)
 //
 //   GET  /me/today                     my day: punched in?, km, visits, today's meetings
@@ -103,6 +104,8 @@ router.get('/meta', run((req) => {
 // --- the app -----------------------------------------------------------------
 router.get('/m/bootstrap', run((req) => mobile.bootstrap(req.user)));
 router.get('/m/list/:module', run((req) => mobile.list(req.user, req.params.module, req.query)));
+// everything linked to a lead / contact / account / deal (the app's record page)
+router.get('/m/related/:module/:id', run((req) => require('../services/sfa/related').related(req.user, req.params.module, req.params.id)));
 // a fresh sign-in for the app (it asks once a day): a phone in daily use is not signed out every 7 days.
 // The old one keeps working until it ends. A user who was switched off gets nothing (requireAuth stops them).
 router.post('/m/renew', run((req) => {

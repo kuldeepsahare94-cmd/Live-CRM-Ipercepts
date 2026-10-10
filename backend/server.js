@@ -143,6 +143,16 @@ app.get('/api/call-recordings/:file', require('./routes/sfa').serveRecording);
   }), require('./routes/expenses'));
 }
 
+// Visiting cards: the photo of a card (front and back) travels inside the request.
+{
+  const readCardBody = express.json({ limit: '16mb' });
+  app.use('/api/cards', requireAuth, (req, res, next) => readCardBody(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.status === 413 || err.type === 'entity.too.large';
+    return res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'The card photo is too large. Take it again.' : 'The request could not be read.' });
+  }), require('./routes/cards'));
+}
+
 // A product photo (two small, already-sized JPEGs) is bigger than the
 // standard 100 KB body limit, so only that one route reads up to 1 MB.
 {
