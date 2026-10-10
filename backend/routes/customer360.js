@@ -40,7 +40,7 @@ function nextBestActions({ accountId, tickets, tasks, quotations, invoices = [],
 
   const overdue = tasks.filter((t) => t.due_date && t.due_date.slice(0, 10) < today)
     .sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
-  if (overdue) out.push({ priority: 2, action: `Complete "${overdue.task_title}"`, reason: `Overdue since ${overdue.due_date.slice(0, 10)}`, link: null });
+  if (overdue) out.push({ priority: 2, action: `Complete "${overdue.task_title}"`, reason: `Overdue since ${overdue.due_date.slice(0, 10)}`, link: overdue.id ? `/records/tasks/${overdue.id}` : null });
 
   const sentQuote = quotations.find((q) => q.status === 'Sent');
   if (sentQuote) {

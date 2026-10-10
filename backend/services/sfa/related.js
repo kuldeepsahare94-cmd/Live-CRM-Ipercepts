@@ -72,7 +72,7 @@ function related(user, module, idIn) {
       const v = require('./field').listVisits(user, { related_module: module, related_record_id: id }).rows;
       out.visits = {
         total: v.length,
-        rows: v.slice(0, LIMIT).map((x) => ({ id: x.id, at: x.in_at, out_at: x.out_at, user_name: x.user_name, outcome: x.outcome, notes: x.notes, photos: x.files ? x.files.length : (x.photo_count || 0), status: x.status })),
+        rows: v.slice(0, LIMIT).map((x) => ({ id: x.id, at: x.in_at, out_at: x.out_at, user_name: x.user_name, outcome: x.outcome, notes: x.notes, photos: x.files ? x.files.length : (x.photo_count || 0), status: x.status, recording: x.recording_id ? 1 : 0 })),
       };
     }
   } catch { /* Field force off for this person */ }

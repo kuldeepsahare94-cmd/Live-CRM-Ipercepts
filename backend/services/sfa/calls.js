@@ -38,7 +38,8 @@ const SOURCES = [
 /**
  * Who these numbers are (only records this person may open).
  * @param input { numbers: [...], refs: [client_ref…] }
- * @returns { matches: { "9876543210": { module, id, name } }, logged: [client_ref…], recorded: [client_ref…] }
+ * @returns { matches: { "9876543210": { module, id, name } }, logged: [client_ref…], recorded: [client_ref…],
+ *            saved: { client_ref: { call_id, module, record_id, recording_url } } }
  */
 function match(user, input = {}) {
   if (!isObject(input)) input = {};
@@ -69,13 +70,21 @@ function match(user, input = {}) {
   const refs = (Array.isArray(input.refs) ? input.refs : []).map((r) => text(r, 120)).filter(Boolean).slice(0, 500);
   let logged = [];
   let recorded = [];
+  const saved = {};
   if (refs.length) {
-    const rows = db.prepare(`SELECT client_ref, recording_id FROM calls WHERE created_by = ? AND client_ref IN (${refs.map(() => '?').join(',')})`).all(user.id, ...refs);
+    const rows = db.prepare(`SELECT id, client_ref, recording_id, call_recording_url, related_module, related_record_id FROM calls WHERE created_by = ? AND client_ref IN (${refs.map(() => '?').join(',')})`).all(user.id, ...refs);
     logged = rows.map((r) => r.client_ref);
     // (the calls that already have their recording — also one added by hand)
     recorded = rows.filter((r) => r.recording_id).map((r) => r.client_ref);
+    // each saved call: where it is in the CRM, and its recording to play in the app (v1.3.1)
+    for (const r of rows) {
+      saved[r.client_ref] = {
+        call_id: Number(r.id), module: r.related_module || null, record_id: r.related_record_id ? Number(r.related_record_id) : null,
+        recording_url: r.recording_id ? (r.call_recording_url || null) : null,
+      };
+    }
   }
-  return { matches, logged, recorded };
+  return { matches, logged, recorded, saved };
 }
 
 // ---------------------------------------------------------------------------

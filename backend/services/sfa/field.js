@@ -735,7 +735,14 @@ function addVisitFiles(user, id, files) {
 function getVisit(user, id) {
   const v = idOf(id) ? db.prepare(`${VISIT_SELECT} WHERE v.id = ?`).get(idOf(id)) : null;
   if (!v) throw bad('Visit not found', 404);
-  if (!mayLookAt(user, v.user_id)) throw bad('This visit belongs to someone else.', 403);
+  if (!mayLookAt(user, v.user_id)) {
+    // (a visit at a customer this person may open: shown as in the customer's visit list —
+    // who and when, not where to the metre, not the notes, not the recording)
+    let ok = false;
+    if (v.related_module && v.related_record_id) { try { needRecord(user, v.related_module, v.related_record_id); ok = true; } catch { ok = false; } }
+    if (!ok) throw bad('This visit belongs to someone else.', 403);
+    return { ...presentVisit(v, []), in_lat: null, in_lng: null, out_lat: null, out_lng: null, in_accuracy: null, in_distance_m: null, out_distance_m: null, notes: '', next_action: '', recording_id: null, others: true };
+  }
   const files = db.prepare('SELECT id, kind, file_name, mime, size, thumb, created_at FROM sfa_files WHERE visit_id = ? ORDER BY id').all(v.id).map(fileInfo);
   return presentVisit(v, files);
 }
