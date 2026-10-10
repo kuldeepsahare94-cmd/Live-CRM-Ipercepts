@@ -4,14 +4,14 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download, ScanLine } from 'lucide-react';
+import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download, ScanLine, ClipboardList, CalendarOff, CheckCheck, ChevronRight } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 import { useApp, listen } from '../lib/app';
 import { GET } from '../lib/api';
 import { onOutbox } from '../lib/outbox';
 import { canReadPhone, phoneStatus, askCallLog, recentWithMatches, autoLogMissing, callBacks, pendingCall, markPendingShown, scanDue, recordingsLater } from '../lib/calls';
 import { openOutside } from '../lib/location';
-import { get } from '../lib/store';
+import { get, set } from '../lib/store';
 import { punchIn, punchOut } from '../lib/fieldwork';
 import { takePhoto } from '../lib/media';
 import { km, niceTime, since, talk } from '../lib/format';
@@ -179,6 +179,63 @@ function CallsCard() {
 }
 
 /** A newer app is out (the CRM says so in Settings → Field force → Calls). */
+/** Today's visit plan: how far, and the best route (v1.3). */
+function PlanCard() {
+  const { boot, day } = useApp();
+  const [plan, setPlan] = useState(() => get('plan_today'));
+  const visits = day && day.visits ? day.visits.length : 0;
+  useEffect(() => {
+    if (!boot.sfa.plan_on) return;
+    GET('/sfa/plans/day').then((x) => { setPlan(x.plan ? { ...x.plan, items: undefined, count: x.plan.items.length } : null); set('plan_today', x.plan ? { ...x.plan, items: undefined, count: x.plan.items.length } : null); }).catch(() => {});
+  }, [boot, visits]);
+  if (!boot.sfa.enabled || !boot.sfa.plan_on) return null;
+  const t = (day && day.day) || '';
+  if (!plan || (plan.day && t && plan.day !== t)) {
+    return (
+      <Link to="/plans" className="card flex plan-card" data-testid="plan-card">
+        <ClipboardList size={22} color="var(--brand)" />
+        <div className="grow"><div className="strong">No plan for today</div><div className="small muted">Plan your visits: the app finds the best route.</div></div>
+        <ChevronRight size={18} className="faint" />
+      </Link>
+    );
+  }
+  const p = plan.progress || {};
+  return (
+    <div className="card col plan-card" data-testid="plan-card">
+      <div className="flex between">
+        <Link to={`/plans/${plan.day}`} className="flex" style={{ color: 'inherit', gap: 10 }}>
+          <ClipboardList size={22} color="var(--brand)" />
+          <div><div className="strong">Today's plan</div><div className="small muted" data-testid="plan-card-progress">{p.done || 0} of {p.planned || plan.count || 0} visited{plan.status === 'submitted' ? ' · waiting for approval' : plan.status === 'rejected' ? ' · not approved' : ''}</div></div>
+        </Link>
+        <span className="score good">{p.score ?? 0}%</span>
+      </div>
+      <div className="bar"><i style={{ width: `${p.score || 0}%` }} /></div>
+      <Link to="/route" className="btn outline small" data-testid="plan-card-route"><Route size={16} /> Best route</Link>
+    </div>
+  );
+}
+
+/** A manager: plans and leave waiting (v1.3). */
+function ApprovalsCard() {
+  const { boot } = useApp();
+  const [n, setN] = useState(null);
+  useEffect(() => {
+    if (!boot.me.is_manager || (!boot.sfa.plan_on && !boot.sfa.leave_on)) return;
+    Promise.all([
+      boot.sfa.plan_on ? GET('/sfa/plans/team?status=submitted').then((x) => x.waiting).catch(() => 0) : 0,
+      boot.sfa.leave_on ? GET('/sfa/leaves/team?status=pending').then((x) => x.waiting).catch(() => 0) : 0,
+    ]).then(([a, b]) => setN({ plans: a, leaves: b }));
+  }, [boot]);
+  if (!n || !(n.plans + n.leaves)) return null;
+  return (
+    <Link to="/approvals" className="card flex appr-card" data-testid="approvals-card">
+      <CheckCheck size={22} color="var(--brand)" />
+      <div className="grow"><div className="strong">Waiting for you</div><div className="small muted">{[n.plans && `${n.plans} plan${n.plans === 1 ? '' : 's'}`, n.leaves && `${n.leaves} leave`].filter(Boolean).join(' · ')}</div></div>
+      <span className="seg-n">{n.plans + n.leaves}</span>
+    </Link>
+  );
+}
+
 function UpdateBanner() {
   const { boot } = useApp();
   const [mine, setMine] = useState('');
@@ -208,6 +265,8 @@ export default function Home() {
     has('calls', 'create') && { label: 'Log a call', icon: PhoneCall, color: '#EA580C', go: () => nav(canReadPhone() ? '/calls/phone' : `/m/${has('leads') ? 'leads' : 'accounts'}`), id: 'call' },
     boot.expenses && { label: 'Expense', icon: ReceiptText, color: '#0D9488', go: () => nav('/expenses?add=1'), id: 'expense' },
     sfaOn && { label: 'Nearby', icon: Navigation, color: '#16A34A', go: () => nav('/nearby'), id: 'nearby' },
+    sfaOn && boot.sfa.plan_on && { label: 'My plan', icon: ClipboardList, color: '#4F46E5', go: () => nav('/plans'), id: 'plan' },
+    sfaOn && boot.sfa.leave_on && { label: 'Leave', icon: CalendarOff, color: '#DB2777', go: () => nav('/leave'), id: 'leave' },
   ].filter(Boolean);
   const hour = new Date().getHours();
   // Android closed the app during a call: the call is filled in now
@@ -224,8 +283,11 @@ export default function Home() {
       <StatusBars />
       <div className="body lift">
         <UpdateBanner />
+        {sfaOn && day && day.leave_today && <div className="note info" data-testid="leave-today"><CalendarOff size={16} /> You are on leave today{day.leave_today.half ? ' (half day)' : ''}: {day.leave_today.type}.</div>}
         {sfaOn && <DutyCard />}
         <OpenVisit />
+        {sfaOn && <ApprovalsCard />}
+        {sfaOn && <PlanCard />}
         {quick.length > 0 && (
           <div className="tiles" data-testid="quick">
             {quick.map((q) => (

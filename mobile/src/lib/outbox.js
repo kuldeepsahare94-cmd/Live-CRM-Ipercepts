@@ -27,6 +27,11 @@ export const list = () => get('outbox', []);
 // some items make what they send only when sent (a call recording is read from the phone then)
 const preparers = {};
 export const setPreparer = (kind, fn) => { preparers[kind] = fn; };
+// …and some clean up after they reached the server (a meeting recording is removed from the phone)
+const afterSend = {};
+export const setAfterSend = (kind, fn) => { afterSend[kind] = fn; };
+// the big ones (sound files) go last, with more time
+const BIG = new Set(['call-recording', 'meeting-recording']);
 const save = (items, info) => { set('outbox', items); tell(info); };
 const me = () => { const m = get('me'); return m ? m.id : null; };
 
@@ -63,7 +68,7 @@ export function flush() {
       const items = list();
       // (call recordings are big: they go after everything else, so they never hold the rest up)
       const waiting = mine(items).filter((x) => x.state === 'waiting');
-      const next = waiting.find((x) => x.kind !== 'call-recording') || waiting[0];
+      const next = waiting.find((x) => !BIG.has(x.kind)) || waiting[0];
       if (!next) break;
       // a visit's number, once its check-in has reached the server
       let path = next.path;
@@ -80,8 +85,9 @@ export function flush() {
       try {
         let body = get(`ob.${next.id}`) ?? undefined;
         if (preparers[next.kind]) body = await preparers[next.kind](body);
-        const out = await req(next.method, path, body, { timeout: next.kind === 'call-recording' ? 180000 : ['visit-files', 'expense', 'punch-in'].includes(next.kind) ? 90000 : 30000 });
+        const out = await req(next.method, path, body, { timeout: BIG.has(next.kind) ? 300000 : ['visit-files', 'expense', 'punch-in'].includes(next.kind) ? 90000 : 30000 });
         if (next.kind === 'check-in' && out && out.id) set('refs', { ...(get('refs', {}) || {}), [next.ref]: out.id });
+        if (afterSend[next.kind]) { try { await afterSend[next.kind](get(`ob.${next.id}`), out); } catch { /* cleaning only */ } }
         set(`ob.${next.id}`, null);
         save(list().filter((x) => x.id !== next.id), { done: next, answer: out });
         sent += 1;
@@ -89,7 +95,7 @@ export function flush() {
         if (e.status === 401) break;                     // signed out: kept until this person signs in again
         if (e.permanent) { markFailed(next.id, e.message); continue; }
         // a recording that does not get through on a working connection (too slow): a few tries, then given up
-        if (next.kind === 'call-recording' && e.offline) {
+        if (BIG.has(next.kind) && e.offline) {
           const up = await Network.getStatus().then((x) => x.connected).catch(() => false);
           if (up) {
             const tries = next.tries + 1;
@@ -108,6 +114,11 @@ export function flush() {
         if (e.status === 409 && (next.kind === 'punch-in' || next.kind === 'punch-out')) { remove(next.id); continue; }
         // a call that the CRM already has (the same phone call) is not lost work either
         if (e.status === 409 && next.kind === 'call') { remove(next.id); continue; }
+        // a meeting recording the visit already has (sent before): not lost either
+        if (e.status === 409 && next.kind === 'meeting-recording' && /already has a recording/.test(e.message || '')) {
+          if (afterSend[next.kind]) { try { await afterSend[next.kind](get(`ob.${next.id}`), null); } catch { /* */ } }
+          remove(next.id); continue;
+        }
         markFailed(next.id, e.message);
       }
     }

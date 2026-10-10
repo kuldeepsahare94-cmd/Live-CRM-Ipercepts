@@ -8,6 +8,7 @@ import { checkOut, addVisitFiles } from '../lib/fieldwork';
 import { takePhoto, pickFiles } from '../lib/media';
 import { since, niceTime } from '../lib/format';
 import { TopBar, Empty, Field, StatusBars, VoiceArea } from '../components/ui';
+import MeetingRecorder from '../components/MeetingRecorder';
 
 const OUTCOMES = ['Interested', 'Order taken', 'Follow-up needed', 'Not interested', 'Customer not there'];
 
@@ -69,6 +70,7 @@ export default function VisitOpen() {
             </div>
           )}
         </div>
+        <MeetingRecorder visit={v} />
         <div className="card col" style={{ gap: 12 }}>
           <div className="card-title">How did it go?</div>
           <div className="chips" data-testid="outcomes">

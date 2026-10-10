@@ -71,6 +71,10 @@ const perms = [
   'android.permission.READ_MEDIA_AUDIO',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.RECORD_AUDIO',
+  // (v1.3) recording a meeting in the app: the web view's microphone needs this too
+  'android.permission.MODIFY_AUDIO_SETTINGS',
+  // (v1.3) reminders at an exact time (punch in / out)
+  'android.permission.SCHEDULE_EXACT_ALARM',
 ];
 for (const p of perms) {
   if (!manifest.includes(`"${p}"`)) manifest = manifest.replace('</manifest>', `    <uses-permission android:name="${p}" />\n</manifest>`);

@@ -318,3 +318,24 @@ body {
 .scan-done { gap: 10px; padding: 22px 14px; }
 .scan-done .row { border-radius: 12px; border: 1px solid var(--line); }
 @media (prefers-reduced-motion: reduce) { .scan-beam::after { animation: none; top: 50%; } }
+
+/* v1.3: plans, route, leave, approvals, meeting recording */
+.day-badge { width: 44px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; padding: 4px 0; background: linear-gradient(135deg, rgba(79, 70, 229, .1), rgba(6, 182, 212, .1)); color: var(--brand); }
+.day-badge b { font-size: 17px; line-height: 1.1; } .day-badge span { font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.score { font-weight: 800; font-size: 14px; padding: 3px 9px; border-radius: 999px; background: rgba(79, 70, 229, .1); color: var(--brand); }
+.score.good { background: var(--ok-soft); color: var(--ok); } .score.mid { background: var(--warn-soft); color: var(--warn); } .score.low { background: var(--bad-soft); color: var(--bad); }
+.plan-head { display: flex; flex-direction: column; gap: 8px; }
+.plan-item { align-items: flex-start; }
+.plan-item .map-badge { margin-top: 2px; }
+.small-input { height: 36px; font-size: 13px; padding: 0 10px; }
+.plan-card .bar, .plan-head .bar { height: 7px; border-radius: 6px; background: var(--line-soft); overflow: hidden; }
+.plan-card .bar i, .plan-head .bar i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--brand-3, #06B6D4), var(--brand), var(--brand-2, #7C3AED)); box-shadow: 0 0 10px rgba(79, 70, 229, .55); }
+.appr-card { border: 1px solid rgba(79, 70, 229, .25); }
+.meet-rec .consent-text { font-size: 15px; font-weight: 600; line-height: 1.4; padding: 12px 14px; border-radius: 14px; background: linear-gradient(135deg, rgba(79, 70, 229, .08), rgba(124, 58, 237, .08)); border: 1px dashed rgba(79, 70, 229, .35); }
+.rec-dot { width: 22px; height: 22px; border-radius: 50%; background: #DC2626; box-shadow: 0 0 0 0 rgba(220, 38, 38, .6); animation: recpulse 1.4s infinite; }
+.rec-dot.paused { background: var(--faint); animation: none; }
+@keyframes recpulse { 0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .55); } 70% { box-shadow: 0 0 0 14px rgba(220, 38, 38, 0); } 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); } }
+.rec-clock { font-size: 34px; font-weight: 800; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
+.grid2 > .field { min-width: 0; }
+.grid2 input[type="date"] { min-width: 0; width: 100%; }

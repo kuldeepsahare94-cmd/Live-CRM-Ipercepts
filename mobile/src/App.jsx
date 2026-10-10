@@ -10,6 +10,8 @@ import { get } from './lib/store';
 import { renewIfOld } from './lib/api';
 import { AppProvider, useApp, listen } from './lib/app';
 import { Toast } from './components/ui';
+// (a meeting recording waiting in the outbox is read from the phone when it is sent: registered at the start)
+import './lib/meetrec';
 import Connect from './screens/Connect';
 import Login from './screens/Login';
 import Home from './screens/Home';
@@ -25,6 +27,10 @@ import CallLog from './screens/CallLog';
 import PhoneCalls from './screens/PhoneCalls';
 import RecordingsCheck from './screens/RecordingsCheck';
 import ScanCard from './screens/ScanCard';
+import Plans from './screens/Plans';
+import TodayRoute from './screens/TodayRoute';
+import Leave from './screens/Leave';
+import Approvals from './screens/Approvals';
 import Expenses from './screens/Expenses';
 import More from './screens/More';
 import MyDay from './screens/MyDay';
@@ -90,6 +96,11 @@ export default function App() {
           <Route path="/calls/phone" element={<Signed><PhoneCalls /></Signed>} />
           <Route path="/calls/recordings" element={<Signed><RecordingsCheck /></Signed>} />
           <Route path="/scan-card" element={<Signed><ScanCard /></Signed>} />
+          <Route path="/plans" element={<Signed><Plans /></Signed>} />
+          <Route path="/plans/:day" element={<Signed><Plans /></Signed>} />
+          <Route path="/route" element={<Signed><TodayRoute /></Signed>} />
+          <Route path="/leave" element={<Signed><Leave /></Signed>} />
+          <Route path="/approvals" element={<Signed><Approvals /></Signed>} />
           <Route path="/expenses" element={<Signed><Expenses /></Signed>} />
           <Route path="/more" element={<Signed><More /></Signed>} />
           <Route path="*" element={<Navigate to="/" replace />} />

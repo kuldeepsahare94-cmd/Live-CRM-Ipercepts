@@ -9,6 +9,7 @@ import { get, set, forgetPerson } from './store';
 import { GET, onSignedOut, renewIfOld } from './api';
 import { flush, flushPoints, onOutbox, list as outboxList, mine } from './outbox';
 import { startTracking, stopTracking, onTracking, trackingStatus } from './location';
+import { refreshReminders } from './reminders';
 
 const Ctx = createContext(null);
 // a Capacitor listener: removed even when the screen goes away before it was ready
@@ -73,6 +74,11 @@ export function AppProvider({ children }) {
     if (info && info.done && ['punch-in', 'punch-out', 'check-in', 'check-out'].includes(info.done.kind)) refreshDay();
   }), [refreshDay]);
   useEffect(() => onTracking((s) => setTracking(s)), []);
+  // the phone's reminders follow the day (punch in / out, a long visit) — v1.3
+  useEffect(() => {
+    if (!boot || !get('token')) return;
+    refreshReminders(boot, day).then((list) => set('reminders', list.map((x) => ({ id: x.id, at: x.at.toISOString(), title: x.title })))).catch(() => {});
+  }, [boot, day]);
   useEffect(() => onSignedOut((msg) => setSignedOut(msg || 'Please sign in again.')), []);
 
   // the internet comes and goes
