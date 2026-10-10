@@ -145,6 +145,12 @@ function bootstrap(user) {
       enabled: true, track: s.track, interval_seconds: s.interval_seconds, distance_filter_m: s.distance_filter_m, max_accuracy_m: s.max_accuracy_m,
       selfie_in: s.selfie_in, selfie_out: s.selfie_out, selfie_visit: s.selfie_visit, visit_radius_m: s.visit_radius_m, work_start: s.work_start, work_end: s.work_end,
       geocode: s.geocode, can_punch: can(user, 'sfa', 'create'), map_tiles_url: s.map_tiles_url, map_attribution: s.map_attribution,
+      // (v1.3) plans, reminders, closing by itself, leave, meeting recordings
+      plan_on: s.plan_on, plan_approval: s.plan_approval, route_speed_kmh: s.route_speed_kmh,
+      remind_punch_in: s.remind_punch_in, remind_punch_out: s.remind_punch_out, remind_visit_minutes: s.remind_visit_minutes,
+      auto_out_time: s.auto_out_time, visit_auto_out_m: s.visit_auto_out_m, visit_auto_out_hours: s.visit_auto_out_hours,
+      leave_on: s.leave_on, leave_types: s.leave_types,
+      meeting_rec_on: s.meeting_rec_on, meeting_consent: s.meeting_consent, meeting_consent_text: s.meeting_consent_text, meeting_max_minutes: s.meeting_max_minutes,
     } : { enabled: false },
     expenses: expensesOn() && can(user, 'expenses', 'view'),
     // calls from the app (Settings → Field force → Calls)

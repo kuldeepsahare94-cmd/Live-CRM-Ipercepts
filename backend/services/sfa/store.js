@@ -9,6 +9,11 @@
 //   sfa_files        selfies, photos and files of a punch or a visit (kept IN the database:
 //                    the server's disk is wiped at every deploy)
 //   sfa_places       where a lead / contact / account is (for "nearby" and to check a visit)
+//   sfa_plans        a person's visit plan for one day (beat plan): draft → sent → approved / rejected
+//   sfa_plan_items   the customers in a plan, in the order of the route
+//   sfa_leaves       leave requests: asked → approved / rejected / cancelled
+//   sfa_otps         the code a customer is sent to agree that a meeting is recorded
+//   (call_recordings also keeps the recordings of face-to-face meetings: visit_id)
 //
 // Everything is created on first use; there is nothing to run by hand.
 // ============================================================================
@@ -151,6 +156,72 @@ function ensureSchema() {
       CREATE INDEX IF NOT EXISTS idx_call_recordings_expires ON call_recordings (expires_at);
     `);
   } catch (e) { console.warn('[sfa] calls:', e.message); }
+  // beat plans, leave, the consent codes of meeting recordings (v1.3)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sfa_plans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        day TEXT NOT NULL,
+        status TEXT DEFAULT 'draft',
+        note TEXT,
+        submitted_at TEXT,
+        decided_by INTEGER, decided_at TEXT, decision_note TEXT,
+        created_at TEXT, updated_at TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sfa_plans_user_day ON sfa_plans (user_id, day);
+      CREATE INDEX IF NOT EXISTS idx_sfa_plans_day ON sfa_plans (day, status);
+      CREATE TABLE IF NOT EXISTS sfa_plan_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id INTEGER NOT NULL,
+        related_module TEXT NOT NULL, related_record_id INTEGER NOT NULL, related_name TEXT,
+        position INTEGER DEFAULT 0,
+        purpose TEXT, at_time TEXT,
+        created_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_sfa_plan_items_plan ON sfa_plan_items (plan_id, position);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sfa_plan_items_one ON sfa_plan_items (plan_id, related_module, related_record_id);
+      CREATE TABLE IF NOT EXISTS sfa_leaves (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        leave_type TEXT,
+        from_day TEXT NOT NULL, to_day TEXT NOT NULL,
+        half_day INTEGER DEFAULT 0,
+        days REAL,
+        reason TEXT,
+        status TEXT DEFAULT 'pending',
+        decided_by INTEGER, decided_at TEXT, decision_note TEXT,
+        ref TEXT,
+        created_at TEXT, updated_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_sfa_leaves_user ON sfa_leaves (user_id, from_day);
+      CREATE INDEX IF NOT EXISTS idx_sfa_leaves_days ON sfa_leaves (from_day, to_day, status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sfa_leaves_ref ON sfa_leaves (user_id, ref);
+      CREATE TABLE IF NOT EXISTS sfa_otps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        visit_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        phone TEXT,
+        code_hash TEXT,
+        tries INTEGER DEFAULT 0,
+        sent_at TEXT, verified_at TEXT, expires_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_sfa_otps_visit ON sfa_otps (visit_id);
+    `);
+    const rec = new Set(db.prepare('PRAGMA table_info(call_recordings)').all().map((c) => c.name));
+    if (rec.size) {
+      if (!rec.has('visit_id')) db.exec('ALTER TABLE call_recordings ADD COLUMN visit_id INTEGER');
+      if (!rec.has('consent')) db.exec('ALTER TABLE call_recordings ADD COLUMN consent TEXT');
+      if (!rec.has('consent_phone')) db.exec('ALTER TABLE call_recordings ADD COLUMN consent_phone TEXT');
+      if (!rec.has('consent_at')) db.exec('ALTER TABLE call_recordings ADD COLUMN consent_at TEXT');
+      if (!rec.has('ref')) db.exec('ALTER TABLE call_recordings ADD COLUMN ref TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_call_recordings_visit ON call_recordings (visit_id)');
+    }
+    const vis = new Set(db.prepare('PRAGMA table_info(sfa_visits)').all().map((c) => c.name));
+    if (!vis.has('recording_id')) db.exec('ALTER TABLE sfa_visits ADD COLUMN recording_id INTEGER');
+    if (!vis.has('auto_out')) db.exec('ALTER TABLE sfa_visits ADD COLUMN auto_out INTEGER DEFAULT 0');
+    if (!vis.has('away_at')) db.exec('ALTER TABLE sfa_visits ADD COLUMN away_at TEXT');
+  } catch (e) { console.warn('[sfa] plans / leave / meeting recordings:', e.message); }
   // one open working day and one open visit per person, even with two servers
   try {
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sfa_sessions_one_open ON sfa_sessions (user_id) WHERE status = 'in'");
@@ -224,6 +295,27 @@ const DEFAULTS = {
   transcribe_language: '',
   transcribe_key: '',          // kept encrypted; never sent back
   call_summary: true,          // a short summary by the CRM's AI assistant (when it is set up)
+  // beat plans (v1.3)
+  plan_on: true,               // people make visit plans for a day (or a week)
+  plan_approval: true,         // a plan is sent to the person's manager to approve
+  route_speed_kmh: 25,         // the average speed in town, for the travel time between stops
+  // reminders on the phone, and closing by itself (v1.3)
+  remind_punch_in: true,       // at the start of work, when not punched in
+  remind_punch_out: true,      // at the end of work, when still punched in
+  remind_visit_minutes: 120,   // a reminder when checked in at a customer this long (0 = never)
+  auto_out_time: '',           // a day still open at this time is punched out by itself ('' = never)
+  visit_auto_out_m: 0,         // a visit is checked out by itself when the person is this far from it (0 = never)
+  visit_auto_out_hours: 0,     // …or after this many hours (0 = never)
+  // leave (v1.3)
+  leave_on: true,
+  leave_types: ['Casual leave', 'Sick leave', 'Earned leave', 'Unpaid leave'],
+  // recording a face-to-face meeting at a visit (v1.3)
+  meeting_rec_on: false,
+  meeting_consent: 'spoken',   // 'spoken' (the customer says yes on the recording) | 'otp' (a code on WhatsApp) | 'either' | 'none'
+  meeting_consent_text: 'This meeting will be recorded for our records. Do you agree?',
+  meeting_otp_template: '',    // the WhatsApp template (approved) that carries the code as {{1}}
+  meeting_otp_language: 'en',
+  meeting_max_minutes: 60,
   // a new version of the app: the app shows "New version available" with this link
   app_latest_version: '',
   app_download_url: '',
@@ -284,6 +376,24 @@ function getSettings() {
   s.call_summary = s.call_summary !== false;
   s.app_latest_version = String(s.app_latest_version || '');
   s.app_download_url = String(s.app_download_url || '');
+  s.plan_on = s.plan_on !== false;
+  s.plan_approval = s.plan_approval !== false;
+  s.route_speed_kmh = Math.round(clamp(s.route_speed_kmh, 5, 80, 25));
+  s.remind_punch_in = s.remind_punch_in !== false;
+  s.remind_punch_out = s.remind_punch_out !== false;
+  s.remind_visit_minutes = Math.round(clamp(s.remind_visit_minutes, 0, 1440, 120));
+  s.auto_out_time = /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s.auto_out_time || '')) ? String(s.auto_out_time) : '';
+  s.visit_auto_out_m = Math.round(clamp(s.visit_auto_out_m, 0, 50000, 0));
+  s.visit_auto_out_hours = clamp(s.visit_auto_out_hours, 0, 24, 0);
+  s.leave_on = s.leave_on !== false;
+  s.leave_types = (Array.isArray(s.leave_types) ? s.leave_types : DEFAULTS.leave_types).map((x) => String(x || '').trim().slice(0, 40)).filter(Boolean).slice(0, 20);
+  if (!s.leave_types.length) s.leave_types = [...DEFAULTS.leave_types];
+  s.meeting_rec_on = !!s.meeting_rec_on;
+  s.meeting_consent = ['spoken', 'otp', 'either', 'none'].includes(s.meeting_consent) ? s.meeting_consent : 'spoken';
+  s.meeting_consent_text = String(s.meeting_consent_text || DEFAULTS.meeting_consent_text).slice(0, 400);
+  s.meeting_otp_template = String(s.meeting_otp_template || '').slice(0, 120);
+  s.meeting_otp_language = String(s.meeting_otp_language || 'en').slice(0, 10);
+  s.meeting_max_minutes = Math.round(clamp(s.meeting_max_minutes, 5, 180, 60));
   s.viewer_role_ids = (Array.isArray(s.viewer_role_ids) ? s.viewer_role_ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
   cache = { at: Date.now(), version, value: s };
   return s;
@@ -299,7 +409,8 @@ function saveSettings(input = {}) {
   const cur = getSettings();
   const next = { ...cur };
   for (const k of ['enabled', 'track', 'selfie_in', 'selfie_out', 'selfie_visit', 'save_place_on_visit', 'close_meeting_on_checkout', 'km_expense', 'geocode',
-    'call_auto_log', 'call_scan_phone', 'call_recordings', 'transcribe_on', 'call_summary']) {
+    'call_auto_log', 'call_scan_phone', 'call_recordings', 'transcribe_on', 'call_summary',
+    'plan_on', 'plan_approval', 'remind_punch_in', 'remind_punch_out', 'leave_on', 'meeting_rec_on']) {
     if (input[k] !== undefined) next[k] = flag(input[k], `"${k}"`);
   }
   const fig = (k, what, lo, hi) => {
@@ -319,6 +430,36 @@ function saveSettings(input = {}) {
   fig('km_expense_min', 'The least km for an expense', 0, 1000);
   fig('call_daily_target', 'The calls a day', 0, 1000);
   fig('call_recording_days', 'The days recordings are kept', 0, 3650);
+  fig('route_speed_kmh', 'The average speed (km/h)', 5, 80);
+  fig('remind_visit_minutes', 'The minutes at a customer before a reminder', 0, 1440);
+  fig('visit_auto_out_m', 'The distance for checking out by itself (m)', 0, 50000);
+  fig('visit_auto_out_hours', 'The hours for checking out by itself', 0, 24);
+  fig('meeting_max_minutes', 'The longest meeting recording (minutes)', 5, 180);
+  if (input.visit_auto_out_m !== undefined && next.visit_auto_out_m > 0 && next.visit_auto_out_m < 100) throw bad('Checking out by itself needs 100 m or more (GPS is not more precise).');
+  if (input.auto_out_time !== undefined) {
+    const t = String(input.auto_out_time || '').trim();
+    if (t && !/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) throw bad('Give the time as HH:MM (24 hours).');
+    next.auto_out_time = t;
+  }
+  if (input.leave_types !== undefined) {
+    if (!Array.isArray(input.leave_types)) throw bad('Send the kinds of leave as a list.');
+    const list = [...new Set(input.leave_types.map((x) => String(x || '').trim().slice(0, 40)).filter(Boolean))];
+    if (!list.length) throw bad('Keep at least one kind of leave.');
+    if (list.length > 20) throw bad('20 kinds of leave at most.');
+    next.leave_types = list;
+  }
+  if (input.meeting_consent !== undefined) {
+    if (!['spoken', 'otp', 'either', 'none'].includes(input.meeting_consent)) throw bad('Choose how the customer agrees to the recording.');
+    next.meeting_consent = input.meeting_consent;
+  }
+  if (input.meeting_consent_text !== undefined) next.meeting_consent_text = String(input.meeting_consent_text || '').trim().slice(0, 400) || DEFAULTS.meeting_consent_text;
+  if (input.meeting_otp_template !== undefined) next.meeting_otp_template = String(input.meeting_otp_template || '').trim().slice(0, 120);
+  if (input.meeting_otp_language !== undefined) {
+    const l = String(input.meeting_otp_language || '').trim() || 'en';
+    if (!/^[a-z]{2,3}(_[A-Z]{2})?$/.test(l)) throw bad('The template language is a code like en or en_US.');
+    next.meeting_otp_language = l;
+  }
+  if (next.meeting_rec_on && ['otp', 'either'].includes(next.meeting_consent) && !next.meeting_otp_template) throw bad('For a code on WhatsApp choose the WhatsApp template that carries the code.');
   if (input.call_whatsapp_text !== undefined) next.call_whatsapp_text = String(input.call_whatsapp_text || '').trim().slice(0, 1000);
   if (input.transcribe_base_url !== undefined) {
     const u = String(input.transcribe_base_url || '').trim().replace(/\/+$/, '');

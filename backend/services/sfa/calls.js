@@ -214,9 +214,10 @@ function recordingOf(user, callId) {
 /** Recordings older than their days are removed (with their link). */
 function cleanup() {
   try {
-    const old = db.prepare('SELECT id, call_id FROM call_recordings WHERE expires_at IS NOT NULL AND expires_at < ?').all(nowIso());
+    const old = db.prepare('SELECT id, call_id, visit_id FROM call_recordings WHERE expires_at IS NOT NULL AND expires_at < ?').all(nowIso());
     for (const r of old) {
-      db.prepare('UPDATE calls SET recording_id = NULL, call_recording_url = NULL WHERE id = ? AND recording_id = ?').run(r.call_id, r.id);
+      if (r.call_id) db.prepare('UPDATE calls SET recording_id = NULL, call_recording_url = NULL WHERE id = ? AND recording_id = ?').run(r.call_id, r.id);
+      if (r.visit_id) db.prepare('UPDATE sfa_visits SET recording_id = NULL WHERE id = ? AND recording_id = ?').run(r.visit_id, r.id);
       db.prepare('DELETE FROM call_recordings WHERE id = ?').run(r.id);
     }
     return old.length;
@@ -261,7 +262,8 @@ async function transcribe(recordingId) {
         if (anthropic) {
           const out = await anthropic.messages.create({
             model: MODEL, max_tokens: 400,
-            messages: [{ role: 'user', content: `This is the text of a sales phone call (it may be in Hindi, Marathi, English or a mix). In simple English, write 3 to 5 short bullet points: what the customer needs, what was agreed, and the next step with any date. No preamble.\n\n<call>\n${transcript.slice(0, 20000)}\n</call>` }],
+            // (a face-to-face meeting at a visit, or a phone call)
+            messages: [{ role: 'user', content: `This is the text of a sales ${rec.visit_id ? 'meeting with a customer, face to face' : 'phone call'} (it may be in Hindi, Marathi, English or a mix). In simple English, write 3 to 5 short bullet points: what the customer needs, what was agreed, and the next step with any date. No preamble.\n\n<call>\n${transcript.slice(0, 20000)}\n</call>` }],
           });
           summary = (out.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim().slice(0, 4000) || null;
         }
@@ -285,4 +287,4 @@ async function transcribeOnce(recordingId) {
   try { return await transcribe(id); } finally { writing.delete(id); }
 }
 
-module.exports = { digits, match, callsOfDay, saveRecording, serveRecording, recordingOf, cleanup, transcribe: transcribeOnce, busyWriting, sniff };
+module.exports = { digits, match, callsOfDay, saveRecording, serveRecording, recordingOf, cleanup, transcribe: transcribeOnce, busyWriting, sniff, urlFor, AUDIO, MAX_RECORDING, writing };

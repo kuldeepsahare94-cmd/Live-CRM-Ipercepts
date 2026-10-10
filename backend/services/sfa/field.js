@@ -206,6 +206,65 @@ function closeStale(userId = null) {
       refreshKm(r.id);
     }
   }
+  autoPunchOut(s, userId);
+  autoCheckOutLong(s, userId);
+}
+
+// The moment HH:MM of a calendar day in the CRM's zone (as UTC ISO)
+function momentAt(day, hhmm) {
+  const [h, m] = String(hhmm).split(':').map(Number);
+  return new Date(Date.parse(dayRange(day)[0]) + (h * 60 + m) * 60000).toISOString();
+}
+// Settings → "Punch out by itself at": a day still open at that time is closed at that time (v1.3)
+function autoPunchOut(s, userId = null) {
+  if (!s.auto_out_time) return;
+  const rows = db.prepare(`SELECT * FROM sfa_sessions WHERE status = 'in'${userId ? ' AND user_id = ?' : ''}`).all(...(userId ? [userId] : []));
+  const now = nowIso();
+  for (const r of rows) {
+    // (punched in after that time — night work: the next day's time closes it)
+    let cut = momentAt(dayOf(r.in_at), s.auto_out_time);
+    if (cut <= r.in_at) cut = momentAt(addDays(dayOf(r.in_at), 1), s.auto_out_time);
+    if (now < cut) continue;
+    const last = db.prepare('SELECT at, lat, lng, accuracy FROM sfa_points WHERE session_id = ? AND at <= ? ORDER BY at DESC LIMIT 1').get(r.id, cut);
+    const done = db.prepare(`UPDATE sfa_sessions SET status = 'out', out_at = ?, out_lat = ?, out_lng = ?, out_accuracy = ?, auto_out = 1, out_note = ?, updated_at = ?
+      WHERE id = ? AND status = 'in'`).run(cut, last ? last.lat : r.in_lat, last ? last.lng : r.in_lng, last ? last.accuracy : r.in_accuracy, `Punched out by itself at ${s.auto_out_time}`, now, r.id);
+    if (done.changes) {
+      db.prepare("UPDATE sfa_visits SET status = 'closed', out_at = CASE WHEN in_at > ? THEN in_at ELSE ? END, auto_out = 1, notes = COALESCE(notes, 'Closed by itself'), updated_at = ? WHERE session_id = ? AND status = 'open'").run(cut, cut, now, r.id);
+      refreshKm(r.id);
+    }
+  }
+}
+// Settings → "Check out by itself after N hours" (v1.3)
+function autoCheckOutLong(s, userId = null) {
+  if (!s.visit_auto_out_hours) return;
+  const limit = new Date(Date.now() - s.visit_auto_out_hours * 3600000).toISOString();
+  const rows = db.prepare(`SELECT id, in_at FROM sfa_visits WHERE status = 'open' AND in_at < ?${userId ? ' AND user_id = ?' : ''}`).all(...(userId ? [limit, userId] : [limit]));
+  for (const v of rows) {
+    const at = new Date(Date.parse(v.in_at) + s.visit_auto_out_hours * 3600000).toISOString();
+    db.prepare("UPDATE sfa_visits SET status = 'closed', out_at = ?, auto_out = 1, notes = COALESCE(notes, ?), updated_at = ? WHERE id = ? AND status = 'open'")
+      .run(at, `Checked out by itself after ${s.visit_auto_out_hours} h`, nowIso(), v.id);
+  }
+}
+// Settings → "Check out by itself when N m away" (v1.3): two good points in a row that far from where
+// the person checked in close the visit at the first of them (one stray GPS point does not)
+function autoCheckOutAway(s, userId, pts) {
+  if (!s.visit_auto_out_m || !pts.length) return null;
+  const v = db.prepare("SELECT * FROM sfa_visits WHERE user_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1").get(userId);
+  if (!v || v.in_lat === null) return null;
+  const here = { lat: Number(v.in_lat), lng: Number(v.in_lng) };
+  const good = pts.filter((p) => p.at > v.in_at && !p.is_mock && (p.accuracy === null || p.accuracy <= Math.min(s.max_accuracy_m, s.visit_auto_out_m / 2)))
+    .sort((a, b) => (a.at < b.at ? -1 : 1));
+  let firstAway = v.away_at || null;
+  for (const p of good) {
+    const far = geo.distance(here, p) > s.visit_auto_out_m;
+    if (!far) { firstAway = null; continue; }
+    if (!firstAway) { firstAway = p.at; continue; }
+    const done = db.prepare("UPDATE sfa_visits SET status = 'closed', out_at = ?, out_lat = ?, out_lng = ?, out_accuracy = ?, auto_out = 1, notes = COALESCE(notes, ?), updated_at = ? WHERE id = ? AND status = 'open'")
+      .run(firstAway, p.lat, p.lng, p.accuracy, `Checked out by itself: left the place (more than ${s.visit_auto_out_m} m)`, nowIso(), v.id);
+    return done.changes ? Number(v.id) : null;
+  }
+  db.prepare('UPDATE sfa_visits SET away_at = ? WHERE id = ?').run(firstAway, v.id);
+  return null;
 }
 
 /** @param input { lat, lng, accuracy, at, address, note, selfie: { mime, data, thumb }, client_ref, device } */
@@ -349,6 +408,7 @@ function addPoints(user, input = {}) {
   const ins = db.prepare('INSERT OR IGNORE INTO sfa_points (user_id, session_id, at, lat, lng, accuracy, speed, heading, battery, charging, is_mock, source, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
   const touched = new Set();
   let saved = 0; let skipped = 0; let newest = null;
+  const accepted = [];
   const num = (v, lo, hi) => (blank(v) || !Number.isFinite(Number(v)) ? null : Math.min(hi, Math.max(lo, Number(v))));
   const now = nowIso();
   const tx = db.transaction(() => {
@@ -365,7 +425,7 @@ function addPoints(user, input = {}) {
       };
       const r = ins.run(user.id, sess.id, p.at, p.lat, p.lng, p.accuracy, p.speed, p.heading, p.battery, p.charging, p.is_mock, text(raw.source, 20), now);
       if (r.changes) {
-        saved += 1; touched.add(Number(sess.id));
+        saved += 1; touched.add(Number(sess.id)); accepted.push(p);
         if (!newest || p.at > newest.p.at) newest = { p, sess };
       } else skipped += 1;
     }
@@ -384,8 +444,10 @@ function addPoints(user, input = {}) {
       upsertLive(user.id, ses.id, { ...good, battery: battery === null ? null : Number(battery), is_mock: 0 });
     }
   }
+  let autoOut = null;
+  try { autoOut = autoCheckOutAway(s, user.id, accepted); } catch (e) { console.warn('[sfa] auto check-out:', e.message); }
   const open = openSession(user.id);
-  return { saved, skipped, km_today: kmOfDay(user.id, today()), session_km: open ? round2((km[Number(open.id)] ?? open.km)) : null, server_time: nowIso() };
+  return { saved, skipped, km_today: kmOfDay(user.id, today()), session_km: open ? round2((km[Number(open.id)] ?? open.km)) : null, server_time: nowIso(), visit_closed: autoOut };
 }
 const kmOfDay = (userId, day) => round2(db.prepare('SELECT COALESCE(SUM(km), 0) AS km FROM sfa_sessions WHERE user_id = ? AND day = ?').get(userId, day).km);
 
@@ -541,6 +603,7 @@ function presentVisit(v, files = null) {
     minutes: v.out_at ? Math.round((Date.parse(v.out_at) - Date.parse(v.in_at)) / 60000) : Math.round((Date.now() - Date.parse(v.in_at)) / 60000),
     far: Number(v.far) === 1, in_selfie_id: v.in_selfie_id ? Number(v.in_selfie_id) : null,
     notes: v.notes || '', outcome: v.outcome || '', next_action: v.next_action || '',
+    auto_out: Number(v.auto_out) === 1, recording_id: v.recording_id ? Number(v.recording_id) : null,
     files: files || undefined,
   };
 }
@@ -700,7 +763,7 @@ function listVisits(user, q = {}) {
     rows: rows.map((v) => {
       const out = presentVisit(v);
       if (ids === null || ids.includes(Number(v.user_id))) return out;
-      return { ...out, in_lat: null, in_lng: null, out_lat: null, out_lng: null, in_accuracy: null, in_distance_m: null, out_distance_m: null, notes: '', next_action: '', others: true };
+      return { ...out, in_lat: null, in_lng: null, out_lat: null, out_lng: null, in_accuracy: null, in_distance_m: null, out_distance_m: null, notes: '', next_action: '', recording_id: null, others: true };
     }),
   };
 }
@@ -742,6 +805,7 @@ function myDay(user) {
   return {
     day: d, server_time: nowIso(), time_zone: zone(),
     calls_today: callsToday, call_target: s.call_daily_target,
+    leave_today: (() => { try { return require('./leaves').leaveDays([Number(user.id)], d, d).get(`${user.id}:${d}`) || null; } catch { return null; } })(),
     session: open ? presentSession(db.prepare(`${SESSION_SELECT} WHERE s.id = ?`).get(open.id)) : null,
     sessions, km_today: kmOfDay(user.id, d), visits, open_visit: visits.find((v) => v.status === 'open') || presentVisit(openVisit(user.id)),
     meetings,
@@ -772,6 +836,7 @@ function live(user) {
   const visitCount = new Map(db.prepare(`SELECT user_id, COUNT(*) AS n FROM sfa_visits WHERE user_id IN (${marks}) AND in_at >= ? AND in_at < ? GROUP BY user_id`).all(...ids, ...dayRange(d)).map((r) => [Number(r.user_id), Number(r.n)]));
   const s = store.getSettings();
   const callMap = require('./calls').callsOfDay(ids, dayRange(d));
+  const onLeave = require('./leaves').leaveDays(ids, d, d);
   const out = list.map((p) => {
     const mine = sessions.filter((x) => Number(x.user_id) === p.id);
     const open = mine.find((x) => x.status === 'in');
@@ -783,10 +848,12 @@ function live(user) {
     // (at a customer the phone stands still and sends little: "at a customer" comes before "no signal")
     if (open) state = v ? 'visiting' : (minutes !== null && minutes > Math.max(15, (s.interval_seconds * 5) / 60) ? 'no_signal' : 'working');
     else if (first) state = 'done';
+    else if (onLeave.has(`${p.id}:${d}`)) state = 'leave';
     return {
       ...p, state, in_at: first ? first.in_at : null, in_time: first ? clockOf(first.in_at) : '',
       out_at: !open && mine.length ? mine[mine.length - 1].out_at : null,
-      late: !!first && clockOf(first.in_at) > s.work_start,
+      late: !!first && clockOf(first.in_at) > s.work_start && !onLeave.has(`${p.id}:${d}`),
+      leave: onLeave.get(`${p.id}:${d}`) || null,
       km_today: round2(mine.filter((x) => x.day === d).reduce((a, x) => a + Number(x.km || 0), 0)), visits_today: visitCount.get(p.id) || 0,
       at: lv ? lv.at : null, minutes_ago: minutes, lat: lv ? Number(lv.lat) : null, lng: lv ? Number(lv.lng) : null, accuracy: lv && lv.accuracy !== null ? Number(lv.accuracy) : null,
       battery: lv && lv.battery !== null ? Number(lv.battery) : null, charging: lv ? Number(lv.charging) === 1 : false, mock: lv ? Number(lv.is_mock) === 1 : false,
@@ -861,10 +928,11 @@ function register(user, q = {}) {
   const vis = db.prepare(`SELECT user_id, in_at FROM sfa_visits WHERE user_id IN (${marks}) AND in_at >= ? AND in_at < ?`).all(...ids, vFrom, vTo);
   const visitsBy = new Map();
   vis.forEach((v) => { const k = `${v.user_id}:${dayOf(v.in_at)}`; visitsBy.set(k, (visitsBy.get(k) || 0) + 1); });
+  const leaveBy = require('./leaves').leaveDays(ids, from, to);
   const rows = [];
   const totals = [];
   for (const p of list) {
-    const t = { user_id: p.id, user_name: p.name, days_present: 0, km: 0, visits: 0, hours: 0, late: 0 };
+    const t = { user_id: p.id, user_name: p.name, days_present: 0, km: 0, visits: 0, hours: 0, late: 0, days_leave: 0 };
     for (let i = 0; i < days; i += 1) {
       const d = addDays(from, i);
       const mine = sess.filter((x) => Number(x.user_id) === p.id && x.day === d);
@@ -875,12 +943,14 @@ function register(user, q = {}) {
         user_id: p.id, user_name: p.name, day: d, present: !!first,
         in_time: first ? clockOf(first.in_at) : '', out_time: last && last.out_at ? clockOf(last.out_at) : (last ? '' : ''), working: !!(last && last.status === 'in'),
         hours: round2(hours), km: round2(mine.reduce((a, x) => a + Number(x.km || 0), 0)), visits: visitsBy.get(`${p.id}:${d}`) || 0,
-        late: !!first && clockOf(first.in_at) > s.work_start, early_out: !!(last && last.out_at && !Number(last.auto_out) && dayOf(last.out_at) === d && clockOf(last.out_at) < s.work_end),
+        leave: leaveBy.get(`${p.id}:${d}`) || null,
+        late: !!first && clockOf(first.in_at) > s.work_start && !leaveBy.has(`${p.id}:${d}`), early_out: !!(last && last.out_at && !Number(last.auto_out) && dayOf(last.out_at) === d && clockOf(last.out_at) < s.work_end),
         auto_out: mine.some((x) => Number(x.auto_out) === 1), sessions: mine.length,
         in_place: first && first.in_lat !== null ? { lat: Number(first.in_lat), lng: Number(first.in_lng) } : null,
         in_selfie_id: first && first.in_selfie_id ? Number(first.in_selfie_id) : null,
       };
       rows.push(row);
+      if (row.leave) t.days_leave += row.leave.half ? 0.5 : 1;
       if (row.present) { t.days_present += 1; t.km = round2(t.km + row.km); t.visits += row.visits; t.hours = round2(t.hours + row.hours); if (row.late) t.late += 1; }
     }
     totals.push(t);
@@ -889,9 +959,9 @@ function register(user, q = {}) {
 }
 function registerCsv(report) {
   const cell = (v) => { let t = String(v === null || v === undefined ? '' : v); if (/^[=+\-@]/.test(t)) t = `'${t}`; return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-  const head = ['Person', 'Date', 'Present', 'In', 'Out', 'Hours', 'Km', 'Visits', 'Late', 'Left early', 'Closed by itself'];
+  const head = ['Person', 'Date', 'Present', 'In', 'Out', 'Hours', 'Km', 'Visits', 'Late', 'Left early', 'Closed by itself', 'Leave'];
   const lines = [head.join(',')];
-  report.rows.forEach((r) => lines.push([r.user_name, r.day, r.present ? 'Yes' : 'No', r.in_time, r.out_time || (r.working ? 'working' : ''), r.hours, r.km, r.visits, r.late ? 'Yes' : '', r.early_out ? 'Yes' : '', r.auto_out ? 'Yes' : ''].map(cell).join(',')));
+  report.rows.forEach((r) => lines.push([r.user_name, r.day, r.present ? 'Yes' : (r.leave ? 'On leave' : 'No'), r.in_time, r.out_time || (r.working ? 'working' : ''), r.hours, r.km, r.visits, r.late ? 'Yes' : '', r.early_out ? 'Yes' : '', r.auto_out ? 'Yes' : '', r.leave ? `${r.leave.type}${r.leave.half ? ' (half day)' : ''}` : ''].map(cell).join(',')));
   return `${lines.join('\r\n')}\r\n`;
 }
 
@@ -901,4 +971,6 @@ module.exports = {
   getPlace, setPlace, clearPlace, geocode, nearby, placeFor, PLACE_MODULES, VISIT_MODULES,
   checkIn, checkOut, addVisitFiles, getVisit, listVisits, fileOf,
   live, trail, register, registerCsv, cleanFile,
+  // (for plans, leave and meeting recordings — v1.3)
+  isDate, addDays, needRecord, recordName, userRow, presentPlace, openSession, momentOf, presentVisit, VISIT_SELECT, NAME,
 };

@@ -22,6 +22,13 @@
 //   POST /calls/match  GET /calls/today  POST /call-recordings  GET /calls/:id/recording  POST /calls/:id/transcribe
 //   GET  /live   GET /trail?user_id=&day=   GET /register?from=&to=[&format=csv]   GET /people
 //   GET|PUT /settings
+//
+//   (v1.3) Visit plans:  GET /plans/mine?from=&to=   GET /plans/day?day=   GET /plans/:id   PUT /plans { day, items, note, submit }
+//          POST /plans/:id/submit   POST /plans/:id/decide { approve, note }   DELETE /plans/:id   PUT /plans/:id/order { item_ids }
+//          GET /plans/team?from=&to=&status=&user_id=   GET /plans/report?from=&to=[&format=csv]   GET /route?day=&lat=&lng=
+//   Leave:  GET /leaves/mine   POST /leaves   POST /leaves/:id/cancel   POST /leaves/:id/decide   GET /leaves/team?status=
+//   Meeting recordings:  GET /visits/:id/recording-info   POST /visits/:id/consent/send { phone }   POST /visits/:id/consent/check { code }
+//          POST /visits/:id/recording { data, consent, duration, client_ref }   GET /visits/:id/recording   POST /visits/:id/recording/transcribe
 //   (no sign-in: GET /api/app/info — mounted in server.js)
 // ============================================================================
 
@@ -33,6 +40,9 @@ const store = require('../services/sfa/store');
 const field = require('../services/sfa/field');
 const mobile = require('../services/sfa/mobile');
 const calls = require('../services/sfa/calls');
+const plans = require('../services/sfa/plans');
+const leaves = require('../services/sfa/leaves');
+const meetrec = require('../services/sfa/meetrec');
 
 const router = express.Router();
 
@@ -83,6 +93,14 @@ function settingsPayload() {
     settings: { ...settings, transcribe_key: undefined, transcribe_key_set: !!settings.transcribe_key },
     ai_summary_ready: (() => { try { return !!require('../services/aiClient').anthropic; } catch { return false; } })(),
     km_categories: categories, vehicles, expenses_on: expenses,
+    // (v1.3) the consent code of a meeting recording goes on WhatsApp: is it set up, and its templates
+    whatsapp_ready: (() => { try { return !!db.prepare('SELECT id FROM whatsapp_providers LIMIT 1').get(); } catch { return false; } })(),
+    whatsapp_templates: (() => {
+      try {
+        return db.prepare(`SELECT DISTINCT t.template_name, t.language, t.status FROM whatsapp_templates t
+          WHERE t.provider_id = (SELECT id FROM whatsapp_providers ORDER BY is_default DESC, id LIMIT 1) ORDER BY t.template_name LIMIT 300`).all();
+      } catch { return []; }
+    })(),
     roles: db.prepare('SELECT id, name FROM roles ORDER BY id').all().map((r) => ({ id: Number(r.id), name: r.name })),
   };
 }
@@ -97,6 +115,7 @@ router.get('/meta', run((req) => {
   return {
     enabled: s.enabled, available: view && (s.enabled || admin), is_admin: admin, me_id: Number(req.user.id),
     is_manager: view ? field.isManager(req.user) : false, sees_all: view ? field.seesAll(req.user) : false,
+    plan_on: s.plan_on, plan_approval: s.plan_approval, leave_on: s.leave_on, leave_types: s.leave_types, meeting_rec_on: s.meeting_rec_on,
     can_export: field.can(req.user, 'export'), track: s.track, geocode: s.geocode, map_tiles_url: s.map_tiles_url, map_attribution: s.map_attribution, work_start: s.work_start, work_end: s.work_end, time_zone: field.zone(), today: field.today(),
   };
 }));
@@ -137,6 +156,43 @@ router.get('/files/:id', (req, res) => {
     res.end(f.buffer);
   } catch (e) { fail(res, e); }
 });
+
+// --- recording a meeting at a visit (v1.3) -------------------------------------
+router.get('/visits/:id/recording-info', run((req) => meetrec.info(req.user, req.params.id)));
+router.post('/visits/:id/consent/send', run((req) => meetrec.sendCode(req.user, req.params.id, req.body || {})));
+router.post('/visits/:id/consent/check', run((req) => meetrec.checkCode(req.user, req.params.id, req.body || {})));
+router.post('/visits/:id/recording', run((req) => meetrec.save(req.user, req.params.id, req.body || {}, serverBase(req)), 201));
+router.get('/visits/:id/recording', run((req) => meetrec.recordingOf(req.user, req.params.id, serverBase(req))));
+router.post('/visits/:id/recording/transcribe', run((req) => meetrec.transcribeAgain(req.user, req.params.id, serverBase(req))));
+
+// --- visit plans and the day's route (v1.3) ---------------------------------------
+router.get('/plans/mine', run((req) => plans.myPlans(req.user, req.query)));
+router.get('/plans/day', run((req) => plans.planOfDay(req.user, req.query.day)));
+router.get('/plans/team', run((req) => plans.teamPlans(req.user, req.query)));
+router.get('/plans/report', (req, res) => {
+  try {
+    const r = plans.report(req.user, req.query);
+    if (req.query.format !== 'csv') return res.json(r);
+    if (!field.can(req.user, 'export')) return res.status(403).json({ error: 'Your role cannot export.' });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="plan-vs-actual-${r.from}-to-${r.to}.csv"`);
+    return res.send(plans.reportCsv(r));
+  } catch (e) { return fail(res, e); }
+});
+router.get('/plans/:id', run((req) => plans.getPlan(req.user, req.params.id)));
+router.put('/plans', run((req) => plans.savePlan(req.user, req.body || {})));
+router.post('/plans/:id/submit', run((req) => plans.submitPlan(req.user, req.params.id)));
+router.post('/plans/:id/decide', run((req) => plans.decide(req.user, req.params.id, req.body || {})));
+router.put('/plans/:id/order', run((req) => plans.saveOrder(req.user, req.params.id, req.body || {})));
+router.delete('/plans/:id', run((req) => plans.deletePlan(req.user, req.params.id)));
+router.get('/route', run((req) => plans.route(req.user, req.query)));
+
+// --- leave (v1.3) ------------------------------------------------------------------
+router.get('/leaves/mine', run((req) => leaves.myLeaves(req.user, req.query)));
+router.get('/leaves/team', run((req) => leaves.teamLeaves(req.user, req.query)));
+router.post('/leaves', run((req) => leaves.apply(req.user, req.body || {}), 201));
+router.post('/leaves/:id/cancel', run((req) => leaves.cancel(req.user, req.params.id)));
+router.post('/leaves/:id/decide', run((req) => leaves.decide(req.user, req.params.id, req.body || {})));
 
 // --- places ------------------------------------------------------------------
 router.get('/nearby', run((req) => field.nearby(req.user, req.query)));
