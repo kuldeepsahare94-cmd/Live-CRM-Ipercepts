@@ -299,7 +299,7 @@ function RulesTab({ meta, canEdit, onSaved }) {
   };
 
   return (
-    <div className="card p-5 max-w-3xl space-y-6" data-duplicate-rules>
+    <div className="card p-5 space-y-6" data-duplicate-rules>
       {!canEdit && <Notice tone="warn">Only an administrator can change these rules.</Notice>}
 
       <label className="flex items-center justify-between gap-4 cursor-pointer">
@@ -499,7 +499,7 @@ export default function Duplicates() {
   }
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Duplicate Check & Merge"
         subtitle="Stop the same lead being created twice, and tidy up the duplicates already in the CRM."

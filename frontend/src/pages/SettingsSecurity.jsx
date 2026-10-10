@@ -677,7 +677,7 @@ export default function SettingsSecurity() {
   }
 
   return (
-    <div className="max-w-[1000px] mx-auto">
+    <div className="w-full">
       <PageHeader title="Security" subtitle="Restrict when and from where your team can sign in to iCRM." icon={ShieldCheck} accent="security">
         {tab === 'policies' && can('security', 'create') && (
           <button onClick={() => setBuilderId(null)} className="btn-primary flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg">

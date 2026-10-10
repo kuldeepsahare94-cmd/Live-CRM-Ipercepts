@@ -308,7 +308,7 @@ export default function Inbox() {
   const counts = data?.counts || {};
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader title="Inbox" icon={InboxIcon} accent="inbox"
         subtitle="Email sent from and received into the CRM, linked to the right customer record">
         <button onClick={sync} disabled={syncing} className="btn btn-secondary disabled:opacity-50">

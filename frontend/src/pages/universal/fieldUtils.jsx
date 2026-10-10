@@ -1,5 +1,6 @@
 // Shared helpers for the universal list/detail pages. Not a page itself.
 
+import { GeoInput, geoKind } from '../../components/geo/GeoField';
 import { useEffect, useRef, useState } from 'react';
 import { Search, X, Check, ChevronDown } from 'lucide-react';
 import { api } from '../../api';
@@ -211,8 +212,15 @@ function LookupPicker({ field, value, onChange }) {
 
 // Renders the right input widget for a field's type. `value`/`onChange`
 // follow the usual controlled-input contract.
-export function FieldInput({ field, value, onChange }) {
+export function FieldInput({ field, value, onChange, values, onSet, isNew = false }) {
   const opts = parseOptions(field);
+
+  // Country → State → City: linked dropdowns (India by default) on every form.
+  // A dropdown field with its own list keeps its list.
+  const geo = geoKind(field);
+  if (geo && !(field.field_type === 'dropdown' && opts.length)) {
+    return <GeoInput kind={geo.kind} prefix={geo.prefix} value={value} onChange={onChange} values={values || {}} onSet={onSet} defaultCountry={!!values && isNew} testid={`geo-${field.api_name}`} />;
+  }
 
   if (field.field_type === 'lookup') {
     return <LookupPicker field={field} value={value} onChange={onChange} />;

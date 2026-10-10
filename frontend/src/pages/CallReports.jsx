@@ -40,7 +40,7 @@ export default function CallReports() {
   const f = data?.follow_ups;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader title="Call Reports" icon={PhoneCall} accent="calls"
         subtitle="Call volume, talk time and disposition breakdown">
         {PRESETS.map((p) => (

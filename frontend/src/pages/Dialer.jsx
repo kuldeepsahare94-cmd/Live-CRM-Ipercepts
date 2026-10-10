@@ -61,7 +61,7 @@ function Lists() {
     try { await api.deleteDialList(l.id); load(); } catch (e) { setError(e.message); }
   };
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="w-full">
       <PageHeader title="Auto-dialer" icon={ListOrdered} accent="calls" subtitle="Call a list of people one after the other, without dialling a single number.">
         <Link to="/leads" className="btn btn-primary"><Phone className="w-4 h-4" /> Make a list from Leads</Link>
       </PageHeader>
@@ -166,8 +166,8 @@ function Run({ id }) {
     return () => clearTimeout(t);
   }, [count]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (error) return <div className="max-w-4xl mx-auto"><div className="card p-5 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{error} <Link to="/dialer" className="underline ml-2">Back to the lists</Link></div></div>;
-  if (!data) return <div className="max-w-4xl mx-auto"><div className="card p-6 t-meta">Loading…</div></div>;
+  if (error) return <div className="w-full"><div className="card p-5 text-sm" role="alert" style={{ color: 'var(--color-danger)' }}>{error} <Link to="/dialer" className="underline ml-2">Back to the lists</Link></div></div>;
+  if (!data) return <div className="w-full"><div className="card p-6 t-meta">Loading…</div></div>;
 
   const { current, next, next_record: nextRecord, items } = data;
   const st = list.stats;
@@ -176,7 +176,7 @@ function Run({ id }) {
   const started = list.status !== 'ready';
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="w-full">
       <Link to="/dialer" className="text-xs font-medium inline-flex items-center gap-1 mb-3" style={{ color: 'var(--color-brand)' }}><ArrowLeft className="w-3.5 h-3.5" /> Dial lists</Link>
       <PageHeader title={list.name} icon={ListOrdered} accent="calls"
         subtitle={`${list.mode === 'preview' ? 'Preview' : 'Automatic'} · ${list.mine ? 'your list' : `for ${list.agent}`} · ${LIST_STATUS[list.status] || list.status}`}>

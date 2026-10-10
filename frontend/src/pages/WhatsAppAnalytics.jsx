@@ -37,7 +37,7 @@ export default function WhatsAppAnalytics() {
   const t = data.totals;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="WhatsApp Analytics"
         subtitle="Combined outcomes from campaigns and automated workflows."

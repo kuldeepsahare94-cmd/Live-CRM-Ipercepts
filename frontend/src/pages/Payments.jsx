@@ -184,7 +184,7 @@ export default function Payments() {
   const today = new Date().toLocaleDateString('en-CA');
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Payments"
         subtitle="Linked to an Account, Opportunity, or Quotation. Mark paid to unlock receipts."

@@ -151,8 +151,8 @@ export default function ReportBuilder({ onBack, onSaved }) {
     }
   };
 
-  if (error && !meta) return <div className="max-w-[1600px] mx-auto"><ErrorState message={error} /></div>;
-  if (!meta) return <div className="max-w-[1600px] mx-auto t-meta mt-8">Loading fields…</div>;
+  if (error && !meta) return <div className="w-full"><ErrorState message={error} /></div>;
+  if (!meta) return <div className="w-full t-meta mt-8">Loading fields…</div>;
 
   const p = paletteFor(palette);
   const opsFor = (fieldName) => {
@@ -167,7 +167,7 @@ export default function ReportBuilder({ onBack, onSaved }) {
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <button onClick={onBack}
         className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-muted)] hover:text-ink mb-3 no-print">
         <ChevronLeft className="w-4 h-4" /> All reports

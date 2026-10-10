@@ -885,7 +885,7 @@ export default function CalendarPage() {
   const connectedProviders = [...new Set(connections.map((c) => c.provider))];
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Calendar"
         subtitle="Meetings, task deadlines and calls, alongside your own Google or Outlook calendar."

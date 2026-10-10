@@ -107,7 +107,7 @@ export default function SettingsTemplates() {
   }, [templates]);
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Document Templates"
         subtitle="How quotations, proformas and invoices are laid out. One engine, any number of designs."

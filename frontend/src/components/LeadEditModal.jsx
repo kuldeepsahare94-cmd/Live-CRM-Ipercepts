@@ -39,6 +39,8 @@ const CORE = [
     { api_name: 'mobile', label: 'Mobile', field_type: 'phone' },
     { api_name: 'alternate_mobile', label: 'Alternate Mobile', field_type: 'phone' },
     { api_name: 'email', label: 'Email', field_type: 'email' },
+    { api_name: 'country', label: 'Country', field_type: 'text' },
+    { api_name: 'state', label: 'State', field_type: 'text' },
     { api_name: 'city', label: 'City', field_type: 'text' },
     { api_name: 'source', label: 'Source', field_type: 'dropdown', managed: 'source' },
     { api_name: 'assigned_counselor', label: 'Owner', field_type: 'dropdown', dynamic: 'owners' },

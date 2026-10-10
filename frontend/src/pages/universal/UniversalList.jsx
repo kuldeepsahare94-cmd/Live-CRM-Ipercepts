@@ -1,3 +1,4 @@
+import { geoSeed } from '../../components/geo/GeoField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Kanban as KanbanIcon, Search, MoreHorizontal, Eye, Pencil, LayoutGrid } from 'lucide-react';
@@ -119,7 +120,7 @@ export default function UniversalList() {
   const createFields = useMemo(() => fields.filter((f) => f.show_in_create), [fields]);
 
   const defaultsForCreate = useMemo(() => {
-    const out = {};
+    const out = geoSeed(createFields);
     createFields.forEach((f) => {
       if (f.default_value === null || f.default_value === undefined || f.default_value === '') return;
       out[f.api_name] = f.field_type === 'checkbox'
@@ -303,11 +304,11 @@ export default function UniversalList() {
   // and then threw on `module.plural_label.toLowerCase()`, taking out the
   // whole route.
   if (loading) {
-    return <div className="max-w-[1600px] mx-auto"><SkeletonRows rows={8} cols={5} /></div>;
+    return <div className="w-full"><SkeletonRows rows={8} cols={5} /></div>;
   }
   if (error) {
     return (
-      <div className="max-w-[1600px] mx-auto">
+      <div className="w-full">
         <ErrorState message={error.message || String(error)} detail={error.detail}
           onRetry={() => { setLoading(true); setError(''); }} />
       </div>
@@ -315,7 +316,7 @@ export default function UniversalList() {
   }
   if (!module || typeof module !== 'object' || !module.api_name) {
     return (
-      <div className="max-w-[1600px] mx-auto">
+      <div className="w-full">
         <ErrorState message={`The "${moduleApiName}" module could not be loaded.`}
           detail={`Expected module metadata, received: ${JSON.stringify(module)}`}
           onRetry={() => { setLoading(true); setError(''); }} />
@@ -459,7 +460,7 @@ export default function UniversalList() {
 
 
   return (
-    <div className="relative max-w-[1600px] mx-auto rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
+    <div className="relative rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
       {/* Background treatment, tinted by THIS module's accent — so Accounts
           sits on a faint blue wash and Tickets on a rose one, while the
           treatment itself (dot grid + corner blooms) is identical
@@ -590,8 +591,9 @@ export default function UniversalList() {
               <div className={fieldErrors[f.api_name] ? 'rounded-lg' : ''}
                 style={fieldErrors[f.api_name] ? { boxShadow: '0 0 0 2px var(--color-danger)' } : undefined}>
                 <FieldInput field={f} value={form[f.api_name]}
+                  values={form} isNew onSet={(k, v) => setForm((p) => ({ ...p, [k]: v }))}
                   onChange={(v) => {
-                    setForm({ ...form, [f.api_name]: v });
+                    setForm((p) => ({ ...p, [f.api_name]: v }));
                     // Clear the error as soon as they start fixing it —
                     // leaving it red while they type reads as broken.
                     if (fieldErrors[f.api_name]) {

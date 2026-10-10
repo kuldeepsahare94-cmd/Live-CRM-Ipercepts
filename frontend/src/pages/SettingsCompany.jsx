@@ -1,3 +1,4 @@
+import { GeoInput } from '../components/geo/GeoField';
 import { useEffect, useRef, useState } from 'react';
 import { Building2, Upload, X, Landmark, PenLine, Info } from 'lucide-react';
 import { api } from '../api';
@@ -112,7 +113,7 @@ export default function SettingsCompany() {
 
   if (!form) {
     return (
-      <div className="max-w-[1100px] mx-auto">
+      <div className="w-full">
         <PageHeader title="Company Profile" icon={Building2} accent="settings" />
         <div className="card p-5 mt-5"><div className="skeleton h-4 w-40 mb-3" /><div className="skeleton h-40" /></div>
       </div>
@@ -120,7 +121,7 @@ export default function SettingsCompany() {
   }
 
   return (
-    <div className="max-w-[1100px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Company Profile"
         subtitle="Your letterhead, tax identity and bank details — used on every quotation, proforma and invoice."
@@ -152,8 +153,8 @@ export default function SettingsCompany() {
             </Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="City">
-                <input className={input} disabled={!editable} value={form.city || ''}
-                  onChange={(e) => set('city')(e.target.value)} />
+                <GeoInput kind="city" value={form.city || ''} onChange={set('city')} disabled={!editable}
+                  values={{ country: form.country || 'India', state: form.state || '', city: form.city || '' }} testid="company-city" />
               </Field>
               <Field label="PIN code">
                 <input className={input} disabled={!editable} value={form.postal_code || ''}

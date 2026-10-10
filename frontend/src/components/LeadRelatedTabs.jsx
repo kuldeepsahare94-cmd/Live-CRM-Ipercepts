@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Paperclip, Download, PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, CheckSquare, TrendingUp } from 'lucide-react';
 import { api } from '../api';
 import { MeetingList } from './MeetingCard';
+import { RecordingPlayer, CallTranscript } from './calls/CallRecording';
 
 /* ---------------------------------------------------------------------------
    These are REAL tables, not invented ones. calls/meetings/tasks/notes/
@@ -30,16 +31,19 @@ const mmss = (total) => {
 };
 // "2026-10-05 07:20:04" (the server's clock, UTC) or an ISO instant → local date and time.
 function when(c) {
-  const raw = c.provider ? (c.start_time || c.created_at) : c.created_at;
+  const raw = (c.provider || c.call_source) ? (c.start_time || c.created_at) : c.created_at;
   if (!raw) return '';
   const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(raw) ? raw : `${String(raw).replace(' ', 'T')}Z`);
   if (Number.isNaN(d.getTime())) return String(raw).slice(0, 16);
   return d.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
 }
 
-// The lead's calls. A call made or received through the IVR (MCube) shows its
-// direction, real talk time and recording; a call logged by hand with the
+// The lead's calls. A call made or received through the IVR (MCube) or from the
+// mobile app shows its direction, real start/end, talk time and recording (with
+// the text and summary when that is switched on); a call logged by hand with the
 // Dispose button looks as it always did.
+const SOURCE = { app: 'App', phone: 'Phone' };
+const clock = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); };
 export function CallsTab({ leadId, refreshKey = 0 }) {
   const [rows, setRows] = useState(null);
   useEffect(() => {
@@ -55,10 +59,10 @@ export function CallsTab({ leadId, refreshKey = 0 }) {
     <div className="space-y-2">
       {rows.map((c) => {
         const ivr = !!c.provider;
+        const real = ivr || !!SOURCE[c.call_source];        // the length is exact (the IVR or the phone)
         const inbound = c.direction === 'Inbound';
-        const missed = ivr && inbound && !c.connected;
-        const Icon = !ivr ? PhoneCall : (missed ? PhoneMissed : (inbound ? PhoneIncoming : PhoneOutgoing));
-        const secure = c.call_recording_url && /^https:\/\//i.test(c.call_recording_url);
+        const missed = real && inbound && !c.connected;
+        const Icon = !real ? PhoneCall : (missed ? PhoneMissed : (inbound ? PhoneIncoming : PhoneOutgoing));
         return (
           <div key={c.id} className="flex items-start gap-3 text-sm border-l-2 border-line pl-3 py-1">
             <Icon className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: missed ? 'var(--color-danger)' : 'var(--color-brand)' }} />
@@ -66,19 +70,18 @@ export function CallsTab({ leadId, refreshKey = 0 }) {
               <div className="text-ink font-medium flex items-center gap-2 flex-wrap">
                 {c.call_subject || c.call_outcome || 'Call'}
                 {ivr && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand)' }}>IVR</span>}
+                {!ivr && SOURCE[c.call_source] && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-canvas-alt)', color: 'var(--color-muted)' }} title={c.call_source === 'app' ? 'Called from the mobile app' : 'Found in the phone\'s call history'} data-testid="call-source">{SOURCE[c.call_source]}</span>}
                 {ivr && !c.call_outcome && !missed && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-danger-soft)', color: 'var(--color-danger)' }}>Not disposed</span>}
               </div>
               <div className="t-meta">
                 {c.connected ? 'Connected' : (missed ? 'Missed' : 'Not connected')}
-                {c.duration_seconds ? ` · ${ivr ? mmss(c.duration_seconds) : `${Math.round(c.duration_seconds / 60)}m`}` : ''} · {when(c)}
+                {c.duration_seconds ? ` · ${real ? mmss(c.duration_seconds) : `${Math.round(c.duration_seconds / 60)}m`}` : ''} · {when(c)}
+                {c.end_time && c.start_time ? ` – ${clock(c.end_time)}` : ''}
                 {ivr && c.did_number ? ` · on ${c.did_number}` : ''}
               </div>
               {c.notes && <div className="text-xs text-[var(--color-muted)] mt-0.5">{c.notes}</div>}
-              {c.call_recording_url && (secure ? (
-                <audio controls preload="none" src={c.call_recording_url} className="mt-1.5 h-8 w-full max-w-sm" aria-label="Call recording" />
-              ) : (
-                <a href={c.call_recording_url} target="_blank" rel="noreferrer" className="text-xs font-medium mt-1 inline-block" style={{ color: 'var(--color-brand)' }}>Open the recording</a>
-              ))}
+              <RecordingPlayer url={c.call_recording_url} compact />
+              {c.recording_id && <div><CallTranscript callId={c.id} /></div>}
             </div>
           </div>
         );

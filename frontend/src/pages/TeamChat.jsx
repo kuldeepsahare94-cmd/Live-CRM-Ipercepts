@@ -19,7 +19,7 @@ import ChatWidget from '../components/ChatWidget';
 
 export default function TeamChat() {
   return (
-    <div className="max-w-[1200px] mx-auto flex flex-col" style={{ height: 'calc(100vh - 96px)' }}>
+    <div className="w-full flex flex-col" style={{ height: 'calc(100vh - 96px)' }}>
       <PageHeader
         title="Team Chat"
         subtitle="Direct messages, groups, and broadcasts across the team."

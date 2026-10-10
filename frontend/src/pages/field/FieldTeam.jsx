@@ -29,6 +29,8 @@ const CHIP = 'px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap borde
 const SMALL = { padding: '.3rem .5rem' };
 // what the server said, in its own words (it answers in plain English)
 const errorText = (e, fallback) => (e && typeof e.message === 'string' && e.message && e.message.length < 200 ? e.message : fallback);
+// talk time: "12 min", "1 h 05 min"
+const talkTime = (s) => { const m = Math.round((Number(s) || 0) / 60); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`; };
 const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
 
 function StateChip({ state }) {
@@ -165,6 +167,7 @@ function LiveTab({ meta, onOpenDay }) {
               <tr className="text-left t-meta" style={{ borderBottom: '1px solid var(--color-line)' }}>
                 <th className="px-4 py-2.5 font-medium">Person</th><th className="px-3 py-2.5 font-medium">Now</th><th className="px-3 py-2.5 font-medium">In</th>
                 <th className="px-3 py-2.5 font-medium text-right">Km today</th><th className="px-3 py-2.5 font-medium text-right">Visits</th>
+                <th className="px-3 py-2.5 font-medium text-right">Calls{data.call_target ? ` / ${data.call_target}` : ''}</th>
                 <th className="px-3 py-2.5 font-medium">Last seen</th><th className="px-3 py-2.5 font-medium">Battery</th><th className="px-3 py-2.5" />
               </tr>
             </thead>
@@ -183,6 +186,14 @@ function LiveTab({ meta, onOpenDay }) {
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{p.km_today ? km(p.km_today) : '—'}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{p.visits_today || '—'}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap" data-testid={`live-calls-${p.id}`}>
+                    {p.calls_today ? (
+                      <>
+                        <span style={data.call_target && p.calls_today >= data.call_target ? { color: 'var(--color-success)', fontWeight: 600 } : undefined}>{p.calls_today}</span>
+                        <div className="t-meta">{p.calls_connected || 0} answered · {talkTime(p.talk_seconds)}</div>
+                      </>
+                    ) : '—'}
+                  </td>
                   <td className="px-3 py-2.5 whitespace-nowrap t-meta">{p.at ? ago(p.minutes_ago) : '—'}</td>
                   <td className="px-3 py-2.5"><Battery value={p.battery} charging={p.charging} /></td>
                   <td className="px-3 py-2.5 text-right"><button type="button" className="btn btn-ghost" style={SMALL} onClick={() => onOpenDay(p.id)} data-testid={`live-day-${p.id}`}><Route className="w-4 h-4" /> Day</button></td>

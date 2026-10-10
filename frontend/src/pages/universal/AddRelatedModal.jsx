@@ -1,3 +1,4 @@
+import { geoSeed } from '../../components/geo/GeoField';
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { api } from '../../api';
@@ -83,7 +84,9 @@ export default function AddRelatedModal({ relationKey, parentModule, parentId, p
         const hidden = target.polymorphic
           ? ['related_module', 'related_record_id']
           : [target.fk];
-        setFields(f.filter((x) => x.show_in_create && !hidden.includes(x.api_name)));
+        const shownFields = f.filter((x) => x.show_in_create && !hidden.includes(x.api_name));
+        setFields(shownFields);
+        setForm((p) => ({ ...geoSeed(shownFields), ...p }));
       })
       .catch((e) => setError(friendlyError(e, 'Could not load the form.').message))
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -151,7 +154,8 @@ export default function AddRelatedModal({ relationKey, parentModule, parentId, p
                     {f.label}{f.required ? ' *' : ''}
                   </label>
                   <FieldInput field={f} value={form[f.api_name] ?? ''}
-                    onChange={(v) => setForm({ ...form, [f.api_name]: v })} />
+                    onChange={(v) => setForm((p) => ({ ...p, [f.api_name]: v }))}
+                    values={form} isNew onSet={(k, v) => setForm((p) => ({ ...p, [k]: v }))} />
                 </div>
               ))}
             </div>

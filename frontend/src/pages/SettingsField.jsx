@@ -7,6 +7,8 @@
  *   Visits       check-in at customers: selfie, how far is "far", the customer's place
  *   Km expense   the day's km made into an expense at punch out (needs Expenses)
  *   Map          OpenStreetMap, or another map server
+ *   Calls & app  calls from the app (auto log, the phone's calls, recordings, target, WhatsApp),
+ *                call transcription and summary, the app's newest version
  *
  * Who may use it: Roles & Permissions → "Field force" (view = use the app; export = the CSV).
  */
@@ -17,7 +19,7 @@ import { api, absoluteApiBase } from '../api';
 import { PageHeader } from '../components/ui';
 import { fieldSettingsChanged } from '../components/field/field';
 
-const TABS = [['general', 'General'], ['attendance', 'Attendance'], ['tracking', 'Tracking & km'], ['visits', 'Visits'], ['expense', 'Km expense'], ['map', 'Map']];
+const TABS = [['general', 'General'], ['attendance', 'Attendance'], ['tracking', 'Tracking & km'], ['visits', 'Visits'], ['calls', 'Calls & app'], ['expense', 'Km expense'], ['map', 'Map']];
 
 function Toggle({ on, onChange, label, testid }) {
   return (
@@ -29,12 +31,12 @@ function Toggle({ on, onChange, label, testid }) {
 }
 function Row({ title, hint, children }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3.5 flex-wrap sm:flex-nowrap" style={{ borderBottom: '1px solid var(--color-line-soft)' }}>
+    <div className="grid gap-2 md:gap-8 md:grid-cols-[minmax(240px,2fr)_3fr] items-start py-3.5" style={{ borderBottom: '1px solid var(--color-line-soft)' }}>
       <div className="min-w-0">
         <p className="text-sm font-medium text-ink">{title}</p>
-        {hint && <p className="t-meta mt-0.5 max-w-xl">{hint}</p>}
+        {hint && <p className="t-meta mt-0.5">{hint}</p>}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -47,7 +49,7 @@ function Num({ value, onChange, unit, step = 1, min, max, testid, width = 96 }) 
   );
 }
 
-const NUMBERS = ['interval_seconds', 'distance_filter_m', 'max_accuracy_m', 'max_speed_kmh', 'min_move_m', 'road_factor', 'auto_out_hours', 'visit_radius_m', 'km_expense_min'];
+const NUMBERS = ['interval_seconds', 'distance_filter_m', 'max_accuracy_m', 'max_speed_kmh', 'min_move_m', 'road_factor', 'auto_out_hours', 'visit_radius_m', 'km_expense_min', 'call_daily_target', 'call_recording_days'];
 
 export default function SettingsField() {
   const [payload, setPayload] = useState(null);
@@ -61,7 +63,7 @@ export default function SettingsField() {
   const take = (p) => {
     setPayload(p);
     const s = p.settings;
-    setF({ ...s, ...Object.fromEntries(NUMBERS.map((k) => [k, String(s[k] ?? '')])), km_expense_category_id: s.km_expense_category_id ? String(s.km_expense_category_id) : '' });
+    setF({ ...s, ...Object.fromEntries(NUMBERS.map((k) => [k, String(s[k] ?? '')])), km_expense_category_id: s.km_expense_category_id ? String(s.km_expense_category_id) : '', transcribe_key: '' });
   };
   useEffect(() => { api.fieldSettings().then(take).catch((e) => setError(e.message || 'The settings could not be loaded.')); }, []);
   const set = (k, v) => { setF((x) => ({ ...x, [k]: v })); setSaved(false); };
@@ -92,7 +94,7 @@ export default function SettingsField() {
   const viewers = new Set((f.viewer_role_ids || []).map(Number));
 
   return (
-    <div className="max-w-4xl">
+    <div className="w-full">
       <Link to="/settings" className="t-meta inline-flex items-center gap-1 mb-3 hover:underline"><ArrowLeft className="w-4 h-4" /> Settings</Link>
       <PageHeader title="Field force" subtitle="Attendance with location, live tracking, km, visits at customers — the mobile app for the field team" icon={MapPinned} accent="meetings">
         <Link to="/field" className="btn btn-secondary">Open Field team</Link>
@@ -170,6 +172,63 @@ export default function SettingsField() {
             <Row title="Complete the meeting at check-out" hint="A check-in at a meeting marks it Completed with the notes and outcome of the visit."><Toggle on={f.close_meeting_on_checkout} onChange={(v) => set('close_meeting_on_checkout', v)} label="Complete the meeting" /></Row>
             <Row title="Find a customer's place from the address" hint="With OpenStreetMap's free address search (one address a second). Off: places come from visits or from the app's “the customer is here”.">
               <Toggle on={f.geocode} onChange={(v) => set('geocode', v)} label="Find from the address" testid="f-geocode" />
+            </Row>
+          </>
+        )}
+
+        {tab === 'calls' && (
+          <>
+            <p className="text-sm font-semibold text-ink pt-4">Calls from the mobile app</p>
+            <Row title="Save calls by themselves (auto log)" hint="After a call from the app, the call is saved at once with its real start, end and length (from the phone's call history). The person can still add the outcome, a remark and a follow-up. Off: the person saves each call.">
+              <Toggle on={f.call_auto_log} onChange={(v) => set('call_auto_log', v)} label="Auto log" testid="f-call-auto" />
+            </Row>
+            <Row title="Find calls made outside the app" hint="The app looks at the phone's call history for calls with numbers that are in the CRM (leads, contacts, customers): missed calls to call back, calls not saved yet (saved by themselves with auto log). Calls with other numbers are never saved.">
+              <Toggle on={f.call_scan_phone} onChange={(v) => set('call_scan_phone', v)} label="Find calls on the phone" testid="f-call-scan" />
+            </Row>
+            <Row title="Calls a day (target)" hint="Shown on the app's Home and to managers (Field team → Live). 0 = no target.">
+              <Num value={f.call_daily_target} onChange={(v) => set('call_daily_target', v)} unit="calls" min={0} max={1000} testid="f-call-target" />
+            </Row>
+            <Row title="Save the phone's call recordings" hint="Many Android phones record calls in their own dialer (Samsung, Xiaomi, Oppo, Vivo, Realme, OnePlus — switch “Record calls automatically” on in the phone's Phone app). The app finds the recording after the call and saves it with the call. Phones with the Google Phone app cannot: use the telephony (MCube) for those.">
+              <Toggle on={f.call_recordings} onChange={(v) => set('call_recordings', v)} label="Save recordings" testid="f-call-rec" />
+            </Row>
+            <Row title="Delete recordings after" hint="Recordings take space in the database. After this many days the sound file is deleted (the call stays). 0 = keep them.">
+              <Num value={f.call_recording_days} onChange={(v) => set('call_recording_days', v)} unit="days" min={0} max={3650} testid="f-call-rec-days" />
+            </Row>
+            <Row title="WhatsApp message after a call" hint="The app offers it after each call. {name} = the customer's name, {me} = the person's name. Empty: WhatsApp opens without a message.">
+              <textarea className="input" style={{ width: 360, minHeight: 70 }} value={f.call_whatsapp_text} placeholder="Hi {name}, thank you for your time today. – {me}" onChange={(e) => set('call_whatsapp_text', e.target.value)} data-testid="f-call-wa" />
+            </Row>
+
+            <p className="text-sm font-semibold text-ink pt-5">Recordings to text (optional, paid)</p>
+            <Row title="Write each recording as text" hint="A speech service (OpenAI Whisper, or any service with the same API — Groq, a local Whisper server) writes what was said. It costs about ₹0.50 a minute of call with OpenAI. Off by default.">
+              <Toggle on={f.transcribe_on} onChange={(v) => set('transcribe_on', v)} label="Transcription" testid="f-tr-on" />
+            </Row>
+            <Row title="Service address" hint="https://api.openai.com/v1 for OpenAI; https://api.groq.com/openai/v1 for Groq.">
+              <input className="input" style={{ width: 360 }} value={f.transcribe_base_url} onChange={(e) => set('transcribe_base_url', e.target.value)} data-testid="f-tr-url" />
+            </Row>
+            <Row title="Model" hint="whisper-1 (OpenAI), whisper-large-v3 (Groq).">
+              <input className="input" style={{ width: 220 }} value={f.transcribe_model} onChange={(e) => set('transcribe_model', e.target.value)} data-testid="f-tr-model" />
+            </Row>
+            <Row title="Language of the calls" hint="Empty = the service finds it (calls in Hinglish work best this way).">
+              <select className="input" style={{ width: 220 }} value={f.transcribe_language} onChange={(e) => set('transcribe_language', e.target.value)} data-testid="f-tr-lang">
+                <option value="">Find it by itself</option><option value="en">English</option><option value="hi">Hindi</option><option value="mr">Marathi</option>
+              </select>
+            </Row>
+            <Row title="Service key" hint={payload.settings.transcribe_key_set ? 'A key is saved (kept encrypted, never shown). Type a new one to change it.' : 'The key of your account at the speech service.'}>
+              <span className="inline-flex items-center gap-2">
+                <input className="input" type="password" autoComplete="new-password" style={{ width: 260 }} value={f.transcribe_key} placeholder={payload.settings.transcribe_key_set ? '•••••••• (saved)' : 'sk-…'} onChange={(e) => set('transcribe_key', e.target.value)} data-testid="f-tr-key" />
+                {payload.settings.transcribe_key_set && <button type="button" className="btn btn-ghost" onClick={() => { set('transcribe_key', '-'); set('transcribe_on', false); }} data-testid="f-tr-key-remove">Remove</button>}
+              </span>
+            </Row>
+            <Row title="A short summary of each call" hint={payload.ai_summary_ready ? "The CRM's AI assistant writes 3–5 points from the text (what the customer wants, the next step)." : "Needs the CRM's AI assistant (ANTHROPIC_API_KEY on the server), which is not set up."}>
+              <Toggle on={f.call_summary} onChange={(v) => set('call_summary', v)} label="Call summary" testid="f-tr-summary" />
+            </Row>
+
+            <p className="text-sm font-semibold text-ink pt-5">The app's newest version</p>
+            <Row title="Newest version" hint="When a phone has an older app, it shows “A new version is ready” with the link below. Example: 1.1.0">
+              <input className="input" style={{ width: 140 }} value={f.app_latest_version} placeholder="1.1.0" onChange={(e) => set('app_latest_version', e.target.value)} data-testid="f-app-version" />
+            </Row>
+            <Row title="Download link" hint="Where the people get the APK (Google Drive link, your website…). With the Play Store, its link.">
+              <input className="input" style={{ width: 360 }} value={f.app_download_url} placeholder="https://…" onChange={(e) => set('app_download_url', e.target.value)} data-testid="f-app-url" />
             </Row>
           </>
         )}

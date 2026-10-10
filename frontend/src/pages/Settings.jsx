@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import {
   CalendarDays, Settings as SettingsIcon, Sparkles, Database, ShieldCheck, Boxes, Zap, GitBranch, Users2, History,
   Percent, Mail, LayoutList, Check, AlertTriangle, Building2, LayoutTemplate, ListChecks, Bell, Search, Palette,
-  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge, PhoneCall, ReceiptText, MapPinned
+  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge, PhoneCall, ReceiptText, MapPinned, ChevronRight
 } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -62,16 +62,21 @@ function AiAuditLog() {
 function sections(can) {
   return [
     {
-      title: 'General',
+      title: 'General', icon: Building2, tint: '#D97706',
       items: [
         { to: '/settings/company', icon: Building2, tint: '#D97706', title: 'Company Profile', show: can('settings', 'edit'),
           desc: 'Letterhead, GSTIN, bank details and signature — printed on quotations, proforma invoices, invoices and payment receipts.' },
         { to: '/appearance', icon: Palette, tint: '#DB2777', title: 'Appearance', show: true,
           desc: 'Theme and colours for your CRM.' },
+        { to: '/settings/notifications', icon: Bell, tint: '#F59E0B', title: 'Follow-up Reminders', show: true,
+          desc: 'Your reminders: browser notifications, sound, timing and overdue reminders.',
+          keywords: 'notification reminder browser sound follow up' },
+        { to: '/settings/calendar', icon: CalendarDays, tint: '#0284C7', title: 'My Calendar', show: true,
+          desc: 'Connect your own Google or Outlook calendar and choose what syncs each way.' },
       ],
     },
     {
-      title: 'CRM Configuration',
+      title: 'CRM Configuration', icon: Boxes, tint: '#7C3AED',
       items: [
         { to: '/settings/modules', icon: Boxes, tint: '#7C3AED', title: 'Modules & Fields', show: can('settings', 'edit'),
           desc: 'Create custom modules, add fields to any module, and manage each dropdown’s options.' },
@@ -89,7 +94,7 @@ function sections(can) {
       ],
     },
     {
-      title: 'Sales & Documents',
+      title: 'Sales & Documents', icon: LayoutTemplate, tint: '#0284C7',
       items: [
         { to: '/settings/template-library', icon: LayoutTemplate, tint: 'var(--color-brand)', title: 'Template Library', show: can('document_templates', 'view'),
           desc: 'Ready-made quotation, proforma and invoice designs. Pick one, add your logo and colours.' },
@@ -100,24 +105,29 @@ function sections(can) {
       ],
     },
     {
-      title: 'Support',
+      title: 'Field Team & Expenses', icon: MapPinned, tint: '#0D9488',
       items: [
-        { to: '/support/settings', icon: LifeBuoy, tint: '#E11D48', title: 'Support Desk Settings', show: can('support', 'view'),
-          desc: 'SLA policies, queues, categories, escalation rules and business hours for tickets.' },
+        { to: '/settings/field', icon: MapPinned, tint: '#0284C7', title: 'Field force', show: can('settings', 'view'),
+          desc: 'The mobile app for the field team: punch in / out with location and selfie, live tracking, km per day, visits at customers, km as an expense.' },
+        { to: '/settings/expenses', icon: ReceiptText, tint: '#0D9488', title: 'Expenses', show: can('settings', 'view'),
+          desc: 'Field expenses with bill photos, km and daily allowance: categories and limits, who approves, who pays, advances. Also what the mobile app uses.' },
       ],
     },
     {
-      title: 'Notifications',
+      title: 'Calls, Email & Messaging', icon: PhoneCall, tint: '#3B5BFF',
       items: [
-        { to: '/settings/notifications', icon: Bell, tint: '#F59E0B', title: 'Follow-up Reminders', show: true,
-          desc: 'Your reminders: browser notifications, sound, timing and overdue reminders.',
-          keywords: 'notification reminder browser sound follow up' },
+        { to: '/settings/telephony', icon: PhoneCall, tint: '#3B5BFF', title: 'Telephony (MCube IVR)', show: can('settings', 'view'),
+          desc: 'Click-to-call, automatic call logs with recordings, incoming-call pop-up, missed-call follow-ups, auto-dialer and live calls.' },
         { to: '/settings/email', icon: Mail, tint: '#7C3AED', title: 'Email', show: true,
           desc: 'The mailbox this CRM sends from — organisation-wide or your own address.' },
+        { to: '/whatsapp', icon: MessageCircle, tint: '#16A34A', title: 'WhatsApp', show: can('whatsapp', 'view'),
+          desc: 'WhatsApp Business providers, templates, workflows and campaigns.' },
+        { to: '/lead-sources', icon: Radio, tint: '#C026D3', title: 'Lead Sources', show: can('lead_sources', 'view'),
+          desc: 'Website forms and Facebook / Instagram lead ads that create leads automatically.' },
       ],
     },
     {
-      title: 'Users & Security',
+      title: 'Users & Security', icon: KeyRound, tint: '#475569',
       items: [
         { to: '/users', icon: UserCog, tint: '#475569', title: 'Users', show: can('users', 'view'),
           desc: 'Add people, set their role, deactivate leavers.' },
@@ -130,31 +140,16 @@ function sections(can) {
       ],
     },
     {
-      title: 'Automation',
+      title: 'Automation & Support', icon: Zap, tint: '#7C3AED',
       items: [
         { to: '/settings/workflows', icon: Zap, tint: '#7C3AED', title: 'Workflows', show: can('settings', 'edit'),
           desc: 'Rules that run by themselves: tell the owner, remind about untouched leads, escalate to the manager, daily lists. Ready-made ones for every module.' },
+        { to: '/support/settings', icon: LifeBuoy, tint: '#E11D48', title: 'Support Desk Settings', show: can('support', 'view'),
+          desc: 'SLA policies, queues, categories, escalation rules and business hours for tickets.' },
       ],
     },
     {
-      title: 'Integrations',
-      items: [
-        { to: '/settings/calendar', icon: CalendarDays, tint: '#0284C7', title: 'My Calendar', show: true,
-          desc: 'Connect your own Google or Outlook calendar and choose what syncs each way.' },
-        { to: '/whatsapp', icon: MessageCircle, tint: '#16A34A', title: 'WhatsApp', show: can('whatsapp', 'view'),
-          desc: 'WhatsApp Business providers, templates, workflows and campaigns.' },
-        { to: '/settings/telephony', icon: PhoneCall, tint: '#3B5BFF', title: 'Telephony (MCube IVR)', show: can('settings', 'view'),
-          desc: 'Click-to-call, automatic call logs with recordings, incoming-call pop-up, missed-call follow-ups, auto-dialer and live calls.' },
-        { to: '/settings/expenses', icon: ReceiptText, tint: '#0D9488', title: 'Expenses', show: can('settings', 'view'),
-          desc: 'Field expenses with bill photos, km and daily allowance: categories and limits, who approves, who pays, advances. Also what the mobile app uses.' },
-        { to: '/settings/field', icon: MapPinned, tint: '#0284C7', title: 'Field force', show: can('settings', 'view'),
-          desc: 'The mobile app for the field team: punch in / out with location and selfie, live tracking, km per day, visits at customers, km as an expense.' },
-        { to: '/lead-sources', icon: Radio, tint: '#C026D3', title: 'Lead Sources', show: can('lead_sources', 'view'),
-          desc: 'Website forms and Facebook / Instagram lead ads that create leads automatically.' },
-      ],
-    },
-    {
-      title: 'System',
+      title: 'System', icon: History, tint: '#475569',
       items: [
         { to: '/settings/data', icon: History, tint: '#475569', title: 'Data & Audit Log', show: can('settings', 'view'),
           desc: 'Import and export any module as CSV, and see who changed what — including dropdown option changes.' },
@@ -163,19 +158,40 @@ function sections(can) {
   ];
 }
 
-function LinkCard({ item }) {
+// one group: a panel with its settings as rows
+function GroupPanel({ group }) {
+  const GIcon = group.icon;
+  return (
+    <section className="card overflow-hidden break-inside-avoid mb-4" data-testid="settings-group">
+      <header className="flex items-center gap-2.5 px-4 py-3" style={{ borderBottom: '1px solid var(--color-line)', background: `color-mix(in srgb, ${group.tint} 5%, transparent)` }}>
+        <span className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `color-mix(in srgb, ${group.tint} 14%, transparent)`, color: group.tint }}>
+          <GIcon className="w-4 h-4" />
+        </span>
+        <h2 className="text-[12px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-ink)' }}>{group.title}</h2>
+        <span className="ml-auto text-[11px] font-medium" style={{ color: 'var(--color-faint)' }}>{group.items.length}</span>
+      </header>
+      <div>
+        {group.items.map((i) => <LinkRow key={i.to} item={i} />)}
+      </div>
+    </section>
+  );
+}
+
+function LinkRow({ item }) {
   const Icon = item.icon;
   return (
-    <Link to={item.to}
-      className="card p-4 flex items-start gap-3 hover:shadow-md hover:-translate-y-0.5 transition-all h-full">
-      <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+    <Link to={item.to} data-testid="settings-link"
+      className="group flex items-start gap-3 px-4 py-3 transition-colors hover:bg-[var(--color-canvas)]"
+      style={{ borderTop: '1px solid var(--color-line-soft, var(--color-line))' }}>
+      <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
         style={{ background: `color-mix(in srgb, ${item.tint} 12%, transparent)`, color: item.tint }}>
-        <Icon className="w-5 h-5" />
+        <Icon className="w-[18px] h-[18px]" />
       </span>
-      <span className="min-w-0">
-        <span className="block text-sm font-semibold text-ink">{item.title}</span>
-        <span className="block text-xs text-slate-500 mt-0.5">{item.desc}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-ink group-hover:text-[var(--color-brand)]">{item.title}</span>
+        <span className="block text-xs text-slate-500 mt-0.5 leading-relaxed">{item.desc}</span>
       </span>
+      <ChevronRight className="w-4 h-4 shrink-0 mt-2.5 opacity-40 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--color-brand)' }} />
     </Link>
   );
 }
@@ -325,7 +341,7 @@ export default function Settings() {
   const anySystemPanel = showRepair || showDemo || showBackup || showAiLog;
 
   return (
-    <div className="max-w-[1400px] mx-auto">
+    <div className="w-full">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-amber-soft text-amber flex items-center justify-center">
@@ -343,21 +359,16 @@ export default function Settings() {
         </div>
       </div>
 
-      {groups.map((g) => (
-        <section key={g.title} className="mt-7">
-          <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2.5">{g.title}</h2>
-          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {g.items.map((i) => <LinkCard key={i.to} item={i} />)}
-          </div>
-        </section>
-      ))}
+      {groups.length > 0 && (
+        <div className="mt-6 columns-1 md:columns-2 xl:columns-3 2xl:columns-4 gap-4" data-testid="settings-groups">
+          {groups.map((g) => <GroupPanel key={g.title} group={g} />)}
+        </div>
+      )}
 
       {anySystemPanel && (
-        <section className="mt-7">
-          {!groups.some((g) => g.title === 'System') && (
-            <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2.5">System</h2>
-          )}
-          <div className="space-y-3">
+        <section className="mt-4">
+          <h2 className="text-[12px] font-bold uppercase tracking-wider text-slate-500 mb-3">System tools</h2>
+          <div className="grid xl:grid-cols-2 gap-4 items-start">
             {showBackup && (
               <div className="card p-5">
                 <div className="flex items-center gap-3 mb-3">
@@ -503,7 +514,7 @@ export default function Settings() {
             )}
 
             {showAiLog && (
-              <div>
+              <div className="xl:col-span-2">
                 <h3 className="text-sm font-semibold text-ink mt-2 mb-1 flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-amber" /> AI Assistant Activity Log
                 </h3>

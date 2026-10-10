@@ -40,7 +40,7 @@ export default function SupportShell({ children }) {
   const items = NAV.filter((n) => perms[n.perm || 'support']?.view);
   return (
     <div className="sd-canvas -m-4 sm:-m-6 p-4 sm:p-6 min-h-full">
-      <div className="max-w-[1680px] mx-auto flex flex-col lg:flex-row gap-5">
+      <div className="w-full flex flex-col lg:flex-row gap-5">
         <aside className="lg:w-[214px] shrink-0" aria-label="Support navigation">
           <div className="lg:sticky lg:top-4">
             <div className="hidden lg:flex items-center gap-2 px-3 pb-3">

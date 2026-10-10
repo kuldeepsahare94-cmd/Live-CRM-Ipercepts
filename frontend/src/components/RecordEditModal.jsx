@@ -268,7 +268,7 @@ export function EditRecordModal({
                             {f.required ? <span style={{ color: 'var(--color-danger)' }}> *</span> : null}
                           </label>
                           <div className={bad ? 'rounded-lg ring-2 ring-[var(--color-danger)]' : ''}>
-                            <FieldInput field={f} value={values[f.api_name]} onChange={(v) => set(f.api_name, v)} />
+                            <FieldInput field={f} value={values[f.api_name]} onChange={(v) => set(f.api_name, v)} values={values} onSet={set} />
                           </div>
                           {f.help_text && !bad && (
                             <p className="text-[11px] mt-1" style={{ color: 'var(--color-faint)' }}>{f.help_text}</p>

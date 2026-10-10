@@ -445,7 +445,7 @@ export default function FieldLayoutManager() {
   }
 
   return (
-    <div className="relative max-w-[1500px] mx-auto rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
+    <div className="relative rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
       <div aria-hidden="true" className="absolute inset-0 z-0 overflow-hidden rounded-3xl pointer-events-none">
         <div className="absolute inset-0" style={{
           backgroundImage: `radial-gradient(circle at 1px 1px, ${accent.solid}33 1px, transparent 0)`,

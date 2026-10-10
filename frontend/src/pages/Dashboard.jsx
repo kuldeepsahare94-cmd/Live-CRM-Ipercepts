@@ -1038,11 +1038,17 @@ function LatestActivity({ items, viewAll }) {
 function DashboardSkeleton() {
   const block = (h) => <div className="rounded-2xl animate-pulse" style={{ height: h, background: 'var(--color-canvas-alt)' }} />;
   return (
-    <div className="max-w-[1600px] mx-auto space-y-4" aria-busy="true" aria-label="Loading dashboard">
+    <div className="w-full space-y-4" aria-busy="true" aria-label="Loading dashboard">
       {block(64)}{block(150)}{block(120)}{block(130)}{block(280)}
     </div>
   );
 }
+
+// The last figures shown, per person and filter, for this browser tab. Coming
+// back to the dashboard shows them at once while fresh figures load behind
+// them (usually unchanged — the server keeps them too), instead of a blank
+// loading screen on every visit.
+const lastShown = new Map();
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -1051,9 +1057,12 @@ export default function Dashboard() {
   const ctx = useMemo(() => ({
     owner: params.get('owner') || '', team: params.get('team') || '', period: params.get('period') || 'this_month',
   }), [params]);
-  const [data, setData] = useState(null);
+  const cacheKey = `${user?.id || ''}|${ctx.owner}|${ctx.team}|${ctx.period}`;
+  const [data, setData] = useState(() => lastShown.get(cacheKey) || null);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Switching the filter back to one seen before shows its figures at once too.
+  useEffect(() => { const seen = lastShown.get(cacheKey); if (seen) setData(seen); }, [cacheKey]);
   const [reviewing, setReviewing] = useState(false);
   const restored = useRef(false);
 
@@ -1061,10 +1070,14 @@ export default function Dashboard() {
     setError(null);
     setRefreshing(true);
     api.dashboardCrm({ owner: ctx.owner || undefined, team: ctx.team || undefined, period: ctx.period })
-      .then(setData)
+      .then((d) => {
+        if (lastShown.size > 20) lastShown.clear();
+        lastShown.set(cacheKey, d);
+        setData(d);
+      })
       .catch((e) => setError(friendlyError(e, 'Could not load the dashboard.')))
       .finally(() => setRefreshing(false));
-  }, [ctx.owner, ctx.team, ctx.period]);
+  }, [ctx.owner, ctx.team, ctx.period, cacheKey]);
   useEffect(() => { load(); }, [load]);
   // Start the chart code download alongside the data request.
   useEffect(() => { loadCharts().catch(() => {}); }, []);
@@ -1097,7 +1110,7 @@ export default function Dashboard() {
 
   if (error && !data) {
     return (
-      <div className="max-w-[1600px] mx-auto p-8 text-center dash-card" role="alert">
+      <div className="w-full p-8 text-center dash-card" role="alert">
         <p className="t-section mb-1">{error.message}</p>
         <p className="t-meta">The figures could not be loaded, so none are shown rather than showing zeros.</p>
         <button type="button" onClick={load} className="btn btn-primary mx-auto mt-3 inline-flex items-center gap-1.5">
@@ -1125,7 +1138,7 @@ export default function Dashboard() {
 
   return (
     <div className="dash-canvas relative -m-4 sm:-m-6 p-4 sm:p-6">
-    <div className="relative max-w-[1600px] mx-auto">
+    <div className="relative w-full">
       {/* Header: a light, faded white-to-blue banner with the mountain
           illustration — calm enough that the figures below stay the focus. */}
       <header className="dash-hero relative overflow-hidden rounded-[20px] px-5 sm:px-6 py-5">

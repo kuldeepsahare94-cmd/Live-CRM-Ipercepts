@@ -119,7 +119,7 @@ export default function WhatsAppIntegrations() {
   const remove = async (p) => { if (confirm(`Remove "${p.name}"? This can't be undone.`)) { await api.waDeleteProvider(p.id); load(); } };
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="WhatsApp Integrations"
         subtitle="Connect one or more WhatsApp Business Accounts across any supported provider."

@@ -52,7 +52,7 @@ export default function Users() {
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Users"
         subtitle="Team members, the role each one has, and who they report to (used by Workflows to reach the manager)."

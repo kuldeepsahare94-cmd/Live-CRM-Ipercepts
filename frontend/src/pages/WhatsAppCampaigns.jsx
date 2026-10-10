@@ -242,7 +242,7 @@ export default function WhatsAppCampaigns() {
   }, []);
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Bulk WhatsApp Campaigns"
         subtitle="Send personalised, approved-template messages to filtered recipient lists."

@@ -475,10 +475,10 @@ export default function EmailCampaigns() {
     clicks: campaigns.reduce((s, c) => s + (c.click_count || 0), 0),
   }), [campaigns]);
 
-  if (loading) return <div className="max-w-[1600px] mx-auto"><SkeletonRows rows={5} cols={4} /></div>;
+  if (loading) return <div className="w-full"><SkeletonRows rows={5} cols={4} /></div>;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader title="Email Campaigns" icon={Megaphone} accent="campaigns"
         subtitle="Send personalised bulk email and track how it performs">
         {can('email_campaigns', 'create') && (

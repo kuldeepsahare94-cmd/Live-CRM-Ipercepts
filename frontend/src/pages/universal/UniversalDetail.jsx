@@ -23,6 +23,7 @@ import DocumentItemsPanel from './DocumentItemsPanel';
 import { ProductPhotoPanel, ProductThumb } from '../../components/ProductPhoto';
 import DocumentActionsPanel from './DocumentActionsPanel';
 import FieldVisitsPanel from '../../components/field/FieldVisitsPanel';
+import { CallFactsPanel } from '../../components/calls/CallRecording';
 import DocumentPaymentsPanel from './DocumentPaymentsPanel';
 import SubscriptionPanels, { CustomerSubscriptions } from './SubscriptionPanels';
 import AssignPicker from '../../components/AssignPicker';
@@ -768,7 +769,7 @@ export default function UniversalDetail() {
   const tabs = ['overview', ...embeddedRelations.map(([k]) => k), ...(showEmails ? ['emails'] : []), ...(showWhatsApp ? ['whatsapp'] : []), 'related'];
 
   return (
-    <div className="relative max-w-[1400px] mx-auto rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
+    <div className="relative rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
       {/* Same background treatment as the list pages, tinted by this
           module's accent — so moving list -> detail feels like staying
           inside the module rather than landing on a different product.
@@ -1083,6 +1084,8 @@ export default function UniversalDetail() {
         <DocumentActionsPanel module={module} record={record}
           canEdit={can(module.api_name, 'edit')} onUpdated={load} />
       )}
+
+      {module.api_name === 'calls' && <CallFactsPanel record={record} />}
 
       {['contacts', 'accounts', 'opportunities'].includes(module.api_name) && (
         <FieldVisitsPanel module={module.api_name} recordId={Number(id)} canEdit={can(module.api_name, 'edit')} />

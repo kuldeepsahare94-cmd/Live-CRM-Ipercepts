@@ -170,7 +170,7 @@ export default function SettingsPipelines() {
   if (loading) return <div className="py-8 t-meta">Loading…</div>;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Pipelines"
         subtitle="Define the stages a deal moves through — names, colours, and win probability."

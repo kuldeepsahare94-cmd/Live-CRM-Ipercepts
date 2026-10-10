@@ -1,3 +1,4 @@
+import { GeoInput } from '../components/geo/GeoField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -47,6 +48,8 @@ function leadFields(statuses, sources, qualifications = [], extra = {}) {
     f('follow_up_date', 'Next follow-up', 'date'),
     f('created_at', 'Created', 'date', { show_in_edit: 0 }),
     f('city', 'City', 'text'),
+    f('state', 'State', 'text'),
+    f('country', 'Country', 'text'),
     f('email', 'Email', 'email', { show_in_edit: 0 }),
     f('mobile', 'Mobile', 'phone', { show_in_edit: 0 }),
     f('campaign', 'Campaign', 'text'),
@@ -105,7 +108,7 @@ const relative = (iso) => {
 
 const empty = {
   student_name: '', account_name: '', mobile: '', alternate_mobile: '', email: '', gender: '', date_of_birth: '',
-  address: '', city: '', qualification: '', source: '', status: 'New', follow_up_date: '',
+  address: '', country: 'India', state: '', city: '', qualification: '', source: '', status: 'New', follow_up_date: '',
   assigned_counselor: '', remarks: '', lead_rating: '', product_interest: '',
 };
 
@@ -402,6 +405,13 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
     } finally { setSaving(false); }
   };
 
+  const setKey = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const geoField = (label, kind) => (
+    <div>
+      <label className="t-meta font-medium block mb-1">{label}</label>
+      <GeoInput kind={kind} value={form[kind] || ''} onChange={(v) => setKey(kind, v)} values={form} onSet={setKey} testid={`lead-${kind}`} />
+    </div>
+  );
   const field = (label, key, props = {}) => (
     <div>
       <label className="t-meta font-medium block mb-1">{label}{props.required && ' *'}</label>
@@ -435,7 +445,11 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
                   ORGANISATION. Without this the conversion had nothing to
                   name it after and used the person's name instead. */}
               {field('Company / Account Name', 'account_name', { placeholder: 'e.g. Smart Business Solution' })}
-              {field('City', 'city')}
+            </div>
+            <div className="grid sm:grid-cols-3 gap-3 mt-3">
+              {geoField('Country', 'country')}
+              {geoField('State', 'state')}
+              {geoField('City', 'city')}
             </div>
           </section>
 
@@ -873,7 +887,7 @@ export default function Leads() {
   const have = stale ? null : (view === 'kanban' ? board : data);      // the answer for the view on screen
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader title="Leads" subtitle="Manage your leads and track their journey from first enquiry to close">
         {viewBtn('list', List, 'List View')}
         {viewBtn('kanban', Columns3, 'Kanban View')}

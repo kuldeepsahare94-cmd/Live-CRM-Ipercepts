@@ -401,7 +401,7 @@ function SettingsTab({ canEdit }) {
   };
 
   return (
-    <div className="space-y-4 max-w-4xl" data-wf-settings>
+    <div className="space-y-4" data-wf-settings>
       {saved && <div className="fixed bottom-5 right-5 z-30 rounded-lg px-3.5 py-2 text-sm shadow-lg text-white" style={{ background: 'var(--color-ink)' }} role="status">{saved}</div>}
 
       <section className="card p-5 space-y-3">
@@ -562,7 +562,7 @@ export default function SettingsWorkflows() {
   if (error) return <ErrorState message={error.message} detail={error.detail} onRetry={() => { setError(null); load(); }} />;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Workflows"
         subtitle="Let the CRM do the routine: tell the right person, remind, escalate to the manager, assign, update — when something happens or when nothing happens for too long."

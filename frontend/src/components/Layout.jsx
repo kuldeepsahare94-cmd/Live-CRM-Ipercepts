@@ -14,6 +14,7 @@ import NotificationBell from './NotificationBell';
 import ChatWidget from './ChatWidget';
 import CalendarWidget from './CalendarWidget';
 import AssistantWidget from './AssistantWidget';
+import VoiceTyping from './VoiceTyping';
 import { ModuleIcon } from './moduleIcons';
 import { accentFor } from '../theme/moduleAccents';
 import { Avatar } from './ui';
@@ -422,6 +423,7 @@ export default function Layout() {
       </div>
 
       <AssistantWidget />
+      <VoiceTyping />
       {/* Follow-up reminders: in-app popup, sound and browser notification. */}
       <ErrorBoundary fallback={null}>
         <ReminderCenter />

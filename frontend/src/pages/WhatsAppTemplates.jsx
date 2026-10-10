@@ -43,7 +43,7 @@ export default function WhatsAppTemplates() {
   useEffect(() => { api.waListProviders().then(setProviders); }, []);
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="WhatsApp Templates"
         subtitle="Synced automatically from each connected provider. Use the Sync button on the Integrations page to refresh."

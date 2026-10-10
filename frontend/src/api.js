@@ -971,6 +971,8 @@ export const api = {
   geocodeFieldPlace: (module, id) => req('POST', `/sfa/places/${module}/${id}/geocode`, {}),
   fieldSettings: () => req('GET', '/sfa/settings'),
   saveFieldSettings: (body) => req('PUT', '/sfa/settings', body),
+  callRecording: (callId) => req('GET', `/sfa/calls/${callId}/recording`),
+  transcribeCall: (callId) => req('POST', `/sfa/calls/${callId}/transcribe`, {}),
 
   // Expense management: expenses with bills, claims, approvals, advances, payment
   expenseMeta: () => req('GET', '/expenses/meta'),

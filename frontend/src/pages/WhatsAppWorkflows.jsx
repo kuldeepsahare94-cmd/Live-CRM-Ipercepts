@@ -166,7 +166,7 @@ export default function WhatsAppWorkflows() {
   const eventLabel = (key) => events.find((e) => e.key === key)?.label || key;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="WhatsApp Workflows"
         subtitle="Automatically message people when something happens in the CRM."

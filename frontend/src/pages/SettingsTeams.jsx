@@ -115,7 +115,7 @@ export default function SettingsTeams() {
   if (loading) return <div className="py-8 t-meta">Loading…</div>;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Teams"
         subtitle="Group users into teams so records can be assigned to a team, not just an individual."

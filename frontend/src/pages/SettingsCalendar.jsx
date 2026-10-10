@@ -139,11 +139,11 @@ export default function SettingsCalendar() {
   };
 
   if (!meta) {
-    return <div className="max-w-[900px] mx-auto"><p className="t-meta mt-8">Loading…</p></div>;
+    return <div className="w-full"><p className="t-meta mt-8">Loading…</p></div>;
   }
 
   return (
-    <div className="max-w-[900px] mx-auto">
+    <div className="w-full">
       <Link to="/settings"
         className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-muted)] hover:text-ink mb-3">
         <ChevronLeft className="w-4 h-4" /> Settings

@@ -105,7 +105,7 @@ export default function UniversalKanban() {
   const hasValue = columns.some((c) => c.total !== undefined);
 
   return (
-    <div className="relative max-w-[1600px] mx-auto rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
+    <div className="relative rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
       {/* Same background treatment as the list and detail pages, tinted by
           this module's accent — the Kanban was a bare white page, which is
           why switching views felt like leaving the product. */}

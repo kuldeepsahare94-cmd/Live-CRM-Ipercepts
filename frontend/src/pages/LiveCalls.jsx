@@ -63,7 +63,7 @@ export default function LiveCalls() {
   const actions = data?.actions || [];
   const canSettings = !!tel.status?.can_settings;
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full">
       <PageHeader title="Live calls" icon={Headphones} accent="calls" subtitle="The calls your agents are on right now." />
       {error && <div className="card p-4 text-sm mb-4" role="alert" style={{ color: 'var(--color-danger)' }}>{error}</div>}
       {data && actions.length === 0 && (

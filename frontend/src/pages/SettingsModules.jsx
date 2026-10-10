@@ -472,7 +472,7 @@ export default function SettingsModules() {
   if (loading) return <div className="py-8 t-meta">Loading…</div>;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Modules & Fields"
         subtitle="Create custom modules, add fields to any module, and control what shows where — no code required."

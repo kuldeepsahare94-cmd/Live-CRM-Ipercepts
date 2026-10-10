@@ -384,7 +384,7 @@ function NumberingSection({ can }) {
 export default function SettingsFinance() {
   const can = usePermissions();
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Taxes, Currencies & Numbering"
         subtitle="Tax rates for quotes and products, the currencies you trade in, and how documents are numbered."

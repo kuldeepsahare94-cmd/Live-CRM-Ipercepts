@@ -339,7 +339,7 @@ export default function LeadSources() {
   const remove = async (s) => { if (confirm(`Delete "${s.name}"?`)) { await api.deleteLeadSource(s.id); load(); } };
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Lead Sources"
         subtitle="Website forms, landing pages, and social ad platforms — plugged straight into your Leads pipeline."

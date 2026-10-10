@@ -586,7 +586,7 @@ export default function SettingsData() {
   if (loading) return <div className="py-8 t-meta">Loading…</div>;
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Data & Audit"
         subtitle="Bulk import/export, and a record of who changed what."

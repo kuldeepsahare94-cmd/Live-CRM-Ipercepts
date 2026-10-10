@@ -101,7 +101,7 @@ export default function SettingsTemplateLibrary() {
 
   if (error) {
     return (
-      <div className="max-w-[1600px] mx-auto p-8 text-center">
+      <div className="w-full p-8 text-center">
         <p className="t-section mb-1">{error.message}</p>
         <button onClick={() => window.location.reload()} className="btn btn-primary mx-auto mt-3">Retry</button>
       </div>
@@ -109,7 +109,7 @@ export default function SettingsTemplateLibrary() {
   }
 
   return (
-    <div className="max-w-[1600px] mx-auto pb-10">
+    <div className="w-full pb-10">
       <Link to="/settings" className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-muted)] hover:text-ink mb-3">
         <ChevronLeft className="w-4 h-4" /> Settings
       </Link>

@@ -49,12 +49,12 @@ function Toggle({ on, onChange, label, disabled }) {
 }
 function Row({ title, hint, children }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3.5 border-b border-line/70 last:border-0">
+    <div className="grid gap-2 md:gap-8 md:grid-cols-[minmax(240px,2fr)_3fr] items-start py-3.5 border-b border-line/70 last:border-0">
       <div className="min-w-0">
         <p className="text-sm font-medium text-ink">{title}</p>
         {hint && <p className="t-meta mt-0.5">{hint}</p>}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -741,7 +741,7 @@ export default function SettingsTelephony() {
   }, []);
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="w-full">
       <Link to="/settings" className="text-xs font-medium inline-flex items-center gap-1 mb-3" style={{ color: 'var(--color-brand)' }}><ArrowLeft className="w-3.5 h-3.5" /> Settings</Link>
       <PageHeader title="Telephony (MCube IVR)" icon={PhoneCall} accent="calls"
         subtitle="Call from the CRM, log every call by itself with its recording, see who is calling, never lose a missed call.">

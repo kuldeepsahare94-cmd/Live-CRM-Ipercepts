@@ -56,7 +56,7 @@ export default function SettingsOptions() {
   if (error) return <ErrorState message={error} onRetry={() => { setError(''); load(); }} />;
 
   return (
-    <div className="max-w-[1200px] mx-auto">
+    <div className="w-full">
       <Link to="/settings" className="text-slate-500 hover:text-ink text-sm inline-flex items-center gap-1 mb-3">
         <ArrowLeft className="w-4 h-4" /> Settings
       </Link>

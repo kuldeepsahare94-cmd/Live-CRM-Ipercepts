@@ -6,7 +6,7 @@ export default function Appearance() {
   const { theme, setTheme, dark, setDark } = useTheme();
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Appearance"
         subtitle="Pick a theme — changes apply instantly, saved on this device."

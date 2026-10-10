@@ -14,6 +14,7 @@
  * rules (over a limit, bill missing, too old…), so it can be put right before
  * the claim reaches the approver.
  */
+import { GeoInput } from '../geo/GeoField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Camera, Paperclip, Loader2, Search, X, ChevronDown, ChevronUp, Trash2, Info, ScanText, Check } from 'lucide-react';
@@ -539,7 +540,7 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
             {more && (
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Bill number"><input className="input" maxLength={60} value={f.bill_number} onChange={(e) => set('bill_number', e.target.value)} /></Field>
-                <Field label="City"><input className="input" maxLength={80} value={f.city} onChange={(e) => set('city', e.target.value)} /></Field>
+                <Field label="City"><GeoInput kind="city" value={f.city} onChange={(v) => set('city', v)} testid="exp-city" /></Field>
                 <Field label="GSTIN of the seller"><input className="input" maxLength={15} value={f.gstin} onChange={(e) => set('gstin', e.target.value.toUpperCase())} placeholder="15 letters and digits" /></Field>
                 <Field label={`Tax in the bill (${curLabel})`}><input type="number" inputMode="decimal" min="0" step="0.01" className="input" value={f.tax_amount} onChange={(e) => set('tax_amount', e.target.value)} /></Field>
               </div>

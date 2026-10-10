@@ -337,9 +337,9 @@ export default function Customer360() {
   };
   useEffect(() => { setLoading(true); load(); }, [id]);
 
-  if (loading) return <div className="max-w-[1600px] mx-auto"><SkeletonCards count={4} /></div>;
+  if (loading) return <div className="w-full"><SkeletonCards count={4} /></div>;
   if (error) return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <ErrorState message={error.message} detail={error.detail} onRetry={() => { setLoading(true); load(); }} />
     </div>
   );
@@ -354,7 +354,7 @@ export default function Customer360() {
   const C360 = { from: '#6366F1', to: '#7C3AED', solid: '#6D28D9' };
 
   return (
-    <div className="relative max-w-[1600px] mx-auto rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
+    <div className="relative rounded-3xl -m-4 sm:-m-6 p-4 sm:p-6">
       <div aria-hidden="true" className="absolute inset-0 z-0 overflow-hidden rounded-3xl pointer-events-none">
         <div className="absolute inset-0" style={{
           backgroundImage: `radial-gradient(circle at 1px 1px, ${C360.solid}33 1px, transparent 0)`,

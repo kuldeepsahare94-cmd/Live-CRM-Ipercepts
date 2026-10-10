@@ -242,7 +242,7 @@ export default function Reports() {
     const dated = activeSavedId ? true : (activeMeta?.dated ?? result?.dated);
 
     return (
-      <div className="max-w-[1600px] mx-auto">
+      <div className="w-full">
         <div className="no-print">
           <button onClick={() => setView('catalogue')}
             className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-muted)] hover:text-ink mb-3">
@@ -355,7 +355,7 @@ export default function Reports() {
 
   // ---- catalogue ----------------------------------------------------------
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Reports"
         subtitle={`${cat.length} ready-made reports across every module, plus your own.`}

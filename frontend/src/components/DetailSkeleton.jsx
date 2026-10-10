@@ -8,7 +8,7 @@ import { avatarGradientFor, initialsOf } from '../theme/avatarColors';
 
 export default function DetailSkeleton({ title }) {
   return (
-    <div className="max-w-[1400px] mx-auto space-y-4" aria-busy="true" aria-label={title ? `Opening ${title}` : 'Opening record'}>
+    <div className="w-full space-y-4" aria-busy="true" aria-label={title ? `Opening ${title}` : 'Opening record'}>
       <div className="card p-5 flex items-center gap-4">
         {title ? (
           <span className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-lg font-bold shrink-0"

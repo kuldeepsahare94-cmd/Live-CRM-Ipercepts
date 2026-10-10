@@ -45,12 +45,12 @@ function Toggle({ on, onChange, label, disabled }) {
 }
 function Row({ title, hint, children }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3.5 flex-wrap sm:flex-nowrap" style={{ borderBottom: '1px solid var(--color-line-soft)' }}>
+    <div className="grid gap-2 md:gap-8 md:grid-cols-[minmax(240px,2fr)_3fr] items-start py-3.5" style={{ borderBottom: '1px solid var(--color-line-soft)' }}>
       <div className="min-w-0">
         <p className="text-sm font-medium text-ink">{title}</p>
-        {hint && <p className="t-meta mt-0.5 max-w-xl">{hint}</p>}
+        {hint && <p className="t-meta mt-0.5">{hint}</p>}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -267,7 +267,7 @@ export default function SettingsExpenses() {
   );
 
   return (
-    <div className="max-w-4xl">
+    <div className="w-full">
       <Link to="/settings" className="inline-flex items-center gap-1 text-sm mb-3 hover:underline" style={{ color: 'var(--color-muted)' }}><ArrowLeft className="w-4 h-4" /> Settings</Link>
       <PageHeader title="Expenses" subtitle="Bills, travel and daily allowance of your field team: the rules, who approves and who pays" icon={ReceiptText} accent="payments">
         <Link to="/expenses" className="btn btn-secondary">Open Expenses</Link>

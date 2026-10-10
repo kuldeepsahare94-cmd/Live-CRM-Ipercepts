@@ -150,7 +150,7 @@ export default function Roles() {
   const limited = activeRole && !isSuper ? modules.filter((m) => scoped.has(m) && matrix[m]?.view && matrix[m]?.scope !== 'all') : [];
 
   return (
-    <div className="max-w-[1600px] mx-auto">
+    <div className="w-full">
       <PageHeader
         title="Roles & Permissions"
         subtitle="What each role may do in every module, and which records it sees."

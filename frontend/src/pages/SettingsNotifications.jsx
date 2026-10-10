@@ -28,12 +28,12 @@ function Toggle({ on, onChange, label, disabled }) {
 
 function Row({ title, hint, children }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-3.5 border-b border-line/70 last:border-0">
+    <div className="grid gap-2 md:gap-8 md:grid-cols-[minmax(240px,2fr)_3fr] items-start py-3.5 border-b border-line/70 last:border-0">
       <div className="min-w-0">
         <p className="text-sm font-medium text-ink">{title}</p>
         {hint && <p className="t-meta mt-0.5">{hint}</p>}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }
@@ -94,7 +94,7 @@ export default function SettingsNotifications() {
   const usesBefore = prefs.reminder_timing === 'before' || prefs.reminder_timing === 'both';
 
   return (
-    <div className="max-w-[900px] mx-auto">
+    <div className="w-full">
       <Link to="/settings" className="text-slate-500 hover:text-ink text-sm inline-flex items-center gap-1 mb-3">
         <ArrowLeft className="w-4 h-4" /> Settings
       </Link>
