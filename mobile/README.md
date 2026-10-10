@@ -20,8 +20,27 @@ its rules (Settings → Field force).
   phone and are sent when the internet is back. Searching and opening
   records need the internet.
 - **Customers and leads**: lists with search, details, add and change (the
-  company's own form fields), call (the phone's dialer) and log the call with
-  a follow-up, WhatsApp, directions in Google Maps, "the customer is here".
+  company's own form fields), WhatsApp, directions in Google Maps, "the customer is here".
+- **Calls** (version 1.1): tap Call → the phone's dialer → back in the app, the
+  phone's call history gives the real start, end, length and whether it was
+  answered. With "auto log" the call is saved by itself; the person can add the
+  outcome, a remark (typed or spoken), the lead's status and a follow-up
+  (This evening / Tomorrow / In 3 days / Next week / Pick), and send a WhatsApp
+  message. Works offline (outbox).
+- **The phone's calls**: calls made or missed outside the app with numbers that
+  are in the CRM are found and saved; Home shows "Call back" for missed calls
+  from customers and the day's calls against the target; "Phone calls" lists the
+  phone's recent calls with the CRM's names and "Lead" for an unknown number.
+  Calls with numbers that are not in the CRM are never saved.
+- **Call recordings**: on phones whose own dialer records calls (Samsung,
+  Xiaomi/Redmi/POCO, Oppo, Vivo, Realme, OnePlus — "Record calls automatically"
+  in the phone's Phone app), the recording is found after the call and saved with
+  it. Phones with the Google Phone app (Pixel, Motorola, Nokia…) do not keep a
+  recording file other apps can read: use the telephony (MCube) for those.
+- **Speak instead of typing**: a mic on every notes box (English, हिंदी, मराठी),
+  with the phone's own speech recognition (free).
+- **New version**: when Settings → Field force → Calls & app has a newer version,
+  Home shows "A new version of iCRM is ready" with the download link.
 - **Orders**: a quotation in a few taps — products with photos, + / − for the
   quantity; the CRM works out the tax and the total.
 - **Meetings, calls, tasks, subscriptions, deals, contacts**: lists and details;
@@ -66,8 +85,17 @@ New repository secret**:
 | `ICRM_KEY_ALIAS` | `icrm` |
 | `ICRM_KEY_PASSWORD` | the key password |
 
-The next build then makes `iCRM-1.0.0-<n>.apk` (signed) and
-`iCRM-1.0.0-<n>.aab` (for the Play Store).
+The next build then makes `iCRM-<version>-<n>.apk` (signed) and
+`iCRM-<version>-<n>.aab` (for the Play Store).
+
+A debug APK (made without the key) is signed by a new, random key at each build:
+Android then refuses to install a newer debug APK over an older one ("App not
+installed"). With your key, every new version installs over the old one.
+
+The Play Store asks about the call history: `READ_CALL_LOG` is allowed for a
+CRM only with the Permissions Declaration Form (Play Console → App content →
+Sensitive permissions; the "enterprise / CRM" use). Installing the APK yourself
+(not from the Play Store) needs nothing of this.
 
 The Play Store asks about the location in the background. The app uses a
 foreground service with a notification only between punch in and punch out
@@ -78,7 +106,9 @@ user with a notification while on duty, for attendance and travel claims").
 
 1. Type the CRM address (Settings → Field force on the web shows it, with a copy button).
 2. Sign in.
-3. Allow **Location** ("While using the app") and **Notifications** when asked.
+3. Allow **Location** ("While using the app") and **Notifications** when asked;
+   at the first call, **Call logs** and **Music and audio** (for the recordings);
+   at the first mic tap, the **Microphone**.
 4. On Xiaomi / Redmi / Oppo / Vivo / Realme / OnePlus / Samsung: Settings →
    Apps → iCRM → Battery → **No restrictions** (and **Autostart** on Xiaomi),
    or the phone may stop the route when the screen is off. The app's
@@ -95,6 +125,11 @@ user with a notification while on duty, for attendance and travel claims").
 The server must allow the app's address: the CRM server already allows
 `https://localhost` (the app inside the phone). Testing in a browser on
 another address: add it to `FRONTEND_URL` on the server (comma separated).
+
+iCRM's own Android code (the phone's call history and recordings) is in
+`android-src/` (a Capacitor plugin, `CallLog`); `scripts/android-setup.mjs` copies it
+into the Android project and adds its permissions. In a browser the app uses a
+stand-in when `window.__icrmCallLog` is set (tests).
 
 Built with React, Vite, Capacitor 7, Leaflet (OpenStreetMap). App id
 `com.ipercepts.icrm`.

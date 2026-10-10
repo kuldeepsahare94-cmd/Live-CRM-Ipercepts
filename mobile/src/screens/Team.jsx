@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, BatteryLow } from 'lucide-react';
 import { GET } from '../lib/api';
-import { km } from '../lib/format';
+import { km, talk } from '../lib/format';
 import { TopBar, BottomNav, Loading, Empty, Avatar, StatusBars } from '../components/ui';
 import MapView from '../components/MapView';
 import DayRoute from '../components/DayRoute';
@@ -52,6 +52,7 @@ export default function Team() {
                   </div>
                   <div className="end col" style={{ gap: 2, alignItems: 'flex-end' }}>
                     {p.km_today > 0 && <span>{km(p.km_today)}</span>}
+                    {(p.calls_today > 0 || data.call_target > 0) && <span className="tiny" data-testid="team-calls">{p.calls_today || 0}{data.call_target > 0 ? ` / ${data.call_target}` : ''} calls · {talk(p.talk_seconds)}</span>}
                     <span className="tiny">{ago(p.minutes_ago)}</span>
                     {p.battery !== null && p.battery < 20 && <span className="tiny flex" style={{ color: 'var(--bad)' }}><BatteryLow size={14} />{p.battery}%</span>}
                   </div>

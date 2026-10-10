@@ -4,6 +4,7 @@
 //   - the version (versionName from package.json, versionCode from BUILD_NUMBER)
 //   - the "on duty" notification: its channel name, icon and colour
 //   - signing with your key, when the build is given one (ICRM_KEYSTORE…)
+//   - iCRM's own Java code (android-src/): the phone's call history and call recordings
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +65,31 @@ let manifest = fs.readFileSync(manifestFile, 'utf8');
 if (!manifest.includes('usesCleartextTraffic')) manifest = manifest.replace('<application', '<application\n        android:usesCleartextTraffic="false"');
 // 5. the sign-in and the work waiting to be sent stay on this phone (not in a Google backup)
 manifest = manifest.replace('android:allowBackup="true"', 'android:allowBackup="false"');
+// 6. the phone's call history (start, length, answered) and the dialer's call recordings - read only
+const perms = [
+  'android.permission.READ_CALL_LOG',
+  'android.permission.READ_MEDIA_AUDIO',
+  'android.permission.READ_EXTERNAL_STORAGE',
+  'android.permission.RECORD_AUDIO',
+];
+for (const p of perms) {
+  if (!manifest.includes(`"${p}"`)) manifest = manifest.replace('</manifest>', `    <uses-permission android:name="${p}" />\n</manifest>`);
+}
 fs.writeFileSync(manifestFile, manifest);
+
+// 7. copy iCRM's Java code (CallLogPlugin + MainActivity that switches it on)
+const javaSrc = path.join(root, 'android-src');
+const copyJava = (from, to) => {
+  for (const f of fs.readdirSync(from, { withFileTypes: true })) {
+    const a = path.join(from, f.name), b = path.join(to, f.name);
+    if (f.isDirectory()) { fs.mkdirSync(b, { recursive: true }); copyJava(a, b); } else fs.copyFileSync(a, b);
+  }
+};
+if (fs.existsSync(javaSrc)) {
+  const javaDir = path.join(app, 'src', 'main', 'java');
+  fs.mkdirSync(javaDir, { recursive: true });
+  copyJava(javaSrc, javaDir);
+  console.log('java: CallLogPlugin added');
+}
 
 console.log(`android ready: iCRM ${pkg.version} (${code})`);

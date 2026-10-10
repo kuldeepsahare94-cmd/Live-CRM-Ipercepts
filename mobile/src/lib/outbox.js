@@ -12,6 +12,7 @@
  * Route points have their own pieces ("pts.<n>", 200 points each).
  */
 import { get, set, keysWith } from './store';
+import { Network } from '@capacitor/network';
 import { req, ApiError } from './api';
 
 const listeners = new Set();
@@ -23,6 +24,9 @@ export function newRef(prefix = 'm') {
   return `${prefix}-${r}`;
 }
 export const list = () => get('outbox', []);
+// some items make what they send only when sent (a call recording is read from the phone then)
+const preparers = {};
+export const setPreparer = (kind, fn) => { preparers[kind] = fn; };
 const save = (items, info) => { set('outbox', items); tell(info); };
 const me = () => { const m = get('me'); return m ? m.id : null; };
 
@@ -57,7 +61,9 @@ export function flush() {
     let sent = 0;
     for (;;) {
       const items = list();
-      const next = mine(items).find((x) => x.state === 'waiting');
+      // (call recordings are big: they go after everything else, so they never hold the rest up)
+      const waiting = mine(items).filter((x) => x.state === 'waiting');
+      const next = waiting.find((x) => x.kind !== 'call-recording') || waiting[0];
       if (!next) break;
       // a visit's number, once its check-in has reached the server
       let path = next.path;
@@ -72,13 +78,26 @@ export function flush() {
         path = path.replace(m[0], String(id));
       }
       try {
-        const out = await req(next.method, path, get(`ob.${next.id}`) ?? undefined, { timeout: ['visit-files', 'expense', 'punch-in'].includes(next.kind) ? 90000 : 30000 });
+        let body = get(`ob.${next.id}`) ?? undefined;
+        if (preparers[next.kind]) body = await preparers[next.kind](body);
+        const out = await req(next.method, path, body, { timeout: next.kind === 'call-recording' ? 180000 : ['visit-files', 'expense', 'punch-in'].includes(next.kind) ? 90000 : 30000 });
         if (next.kind === 'check-in' && out && out.id) set('refs', { ...(get('refs', {}) || {}), [next.ref]: out.id });
         set(`ob.${next.id}`, null);
         save(list().filter((x) => x.id !== next.id), { done: next, answer: out });
         sent += 1;
       } catch (e) {
         if (e.status === 401) break;                     // signed out: kept until this person signs in again
+        if (e.permanent) { markFailed(next.id, e.message); continue; }
+        // a recording that does not get through on a working connection (too slow): a few tries, then given up
+        if (next.kind === 'call-recording' && e.offline) {
+          const up = await Network.getStatus().then((x) => x.connected).catch(() => false);
+          if (up) {
+            const tries = next.tries + 1;
+            if (tries >= 5) { markFailed(next.id, 'The recording could not be sent (the internet was too slow).'); continue; }
+            save(list().map((x) => (x.id === next.id ? { ...x, tries, last_error: e.message } : x)));
+            break;
+          }
+        }
         if (e.offline || !PERMANENT(e)) {
           const tries = next.tries + 1;
           if (!e.offline && tries >= MAX_TRIES) { markFailed(next.id, e.message); continue; }
@@ -87,6 +106,8 @@ export function flush() {
         }
         // a punch that the server already has (sent from another try) is not lost work
         if (e.status === 409 && (next.kind === 'punch-in' || next.kind === 'punch-out')) { remove(next.id); continue; }
+        // a call that the CRM already has (the same phone call) is not lost work either
+        if (e.status === 409 && next.kind === 'call') { remove(next.id); continue; }
         markFailed(next.id, e.message);
       }
     }

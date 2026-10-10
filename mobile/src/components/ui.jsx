@@ -1,10 +1,11 @@
 /* The small pieces every screen uses. */
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Home, Users, MapPin, Map as MapIcon, MoreHorizontal, Loader2, Search, WifiOff, CloudUpload, ReceiptText } from 'lucide-react';
+import { ArrowLeft, Home, Users, MapPin, Map as MapIcon, MoreHorizontal, Loader2, Search, WifiOff, CloudUpload, ReceiptText, Mic } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { GET, qs } from '../lib/api';
 import { mine } from '../lib/outbox';
+import { LANGS, voiceLang, setVoiceLang, listen as hear, joinText } from '../lib/voice';
 
 export function TopBar({ title, sub, back = true, right = null, onBack }) {
   const nav = useNavigate();
@@ -137,5 +138,44 @@ export function RecordPicker({ module, title, onPick, onClose, params = {} }) {
         </div>
       )}
     </Sheet>
+  );
+}
+
+/**
+ * A notes box with a microphone: tap the mic and speak (English, Hindi or Marathi);
+ * the words are added after what is already written.
+ */
+export function VoiceArea({ value, onChange, className = 'input', testid, ...rest }) {
+  const { say } = useApp();
+  const [lang, setLang] = useState(voiceLang);
+  const [busy, setBusy] = useState(false);
+  const latest = useRef(value);
+  latest.current = value;
+  const speak = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const said = await hear(lang);
+      if (said) onChange(joinText(latest.current || '', said));
+      else say('Nothing was heard. Tap the mic and speak.', 'info');
+    } catch (e) { say(e.message, 'error'); } finally { setBusy(false); }
+  };
+  const nextLang = () => {
+    const i = LANGS.findIndex((l) => l.code === lang);
+    const n = LANGS[(i + 1) % LANGS.length].code;
+    setLang(n); setVoiceLang(n);
+  };
+  return (
+    <div className="voice-area">
+      <textarea className={className} value={value || ''} onChange={(e) => onChange(e.target.value)} data-testid={testid} {...rest} />
+      <div className="voice-bar">
+        <button type="button" className="voice-lang" onClick={nextLang} aria-label="Language for speaking" data-testid={testid ? `${testid}-lang` : undefined}>
+          {(LANGS.find((l) => l.code === lang) || LANGS[0]).label}
+        </button>
+        <button type="button" className={`voice-mic${busy ? ' on' : ''}`} onClick={speak} aria-label="Speak" data-testid={testid ? `${testid}-mic` : undefined}>
+          {busy ? <Loader2 size={18} className="spin" /> : <Mic size={18} />}
+        </button>
+      </div>
+    </div>
   );
 }

@@ -7,7 +7,7 @@ import { useApp } from '../lib/app';
 import { checkOut, addVisitFiles } from '../lib/fieldwork';
 import { takePhoto, pickFiles } from '../lib/media';
 import { since, niceTime } from '../lib/format';
-import { TopBar, Empty, Field, StatusBars } from '../components/ui';
+import { TopBar, Empty, Field, StatusBars, VoiceArea } from '../components/ui';
 
 const OUTCOMES = ['Interested', 'Order taken', 'Follow-up needed', 'Not interested', 'Customer not there'];
 
@@ -74,7 +74,7 @@ export default function VisitOpen() {
           <div className="chips" data-testid="outcomes">
             {OUTCOMES.map((o) => <button key={o} type="button" className={`chip${outcome === o ? ' on' : ''}`} onClick={() => setOutcome(outcome === o ? '' : o)}>{o}</button>)}
           </div>
-          <Field label="Notes"><textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What was discussed" data-testid="visit-notes" /></Field>
+          <Field label="Notes"><VoiceArea value={notes} onChange={setNotes} placeholder="What was discussed" testid="visit-notes" /></Field>
           <Field label="Next step"><input className="input" value={next} onChange={(e) => setNext(e.target.value)} placeholder="Send the quote, demo on Monday…" /></Field>
         </div>
         {orderAccount && m('quotations') && m('quotations').can.create && (

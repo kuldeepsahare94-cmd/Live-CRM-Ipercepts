@@ -22,6 +22,7 @@ import Nearby from './screens/Nearby';
 import Team from './screens/Team';
 import OrderNew from './screens/OrderNew';
 import CallLog from './screens/CallLog';
+import PhoneCalls from './screens/PhoneCalls';
 import Expenses from './screens/Expenses';
 import More from './screens/More';
 import MyDay from './screens/MyDay';
@@ -84,6 +85,7 @@ export default function App() {
           <Route path="/team" element={<Signed><Team /></Signed>} />
           <Route path="/order/new" element={<Signed><OrderNew /></Signed>} />
           <Route path="/call/:module/:id" element={<Signed><CallLog /></Signed>} />
+          <Route path="/calls/phone" element={<Signed><PhoneCalls /></Signed>} />
           <Route path="/expenses" element={<Signed><Expenses /></Signed>} />
           <Route path="/more" element={<Signed><More /></Signed>} />
           <Route path="*" element={<Navigate to="/" replace />} />

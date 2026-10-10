@@ -8,7 +8,9 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Loader2, ChevronRight } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { getRecord, saveRecord, titleOf, EDITABLE } from '../lib/records';
-import { TopBar, Loading, Empty, Field, RecordPicker, Sheet, StatusBars } from '../components/ui';
+import { TopBar, Loading, Empty, Field, RecordPicker, Sheet, StatusBars, VoiceArea } from '../components/ui';
+import GeoPick from '../components/GeoPick';
+import { geoKind } from '../lib/geo';
 
 const LIST_MODULES = new Set(['leads', 'contacts', 'accounts', 'opportunities', 'quotations', 'subscriptions', 'meetings', 'calls', 'tasks', 'products']);
 const HIDDEN = new Set(['id', 'created_at', 'updated_at', 'created_by', 'related_module', 'related_record_id']);
@@ -26,11 +28,14 @@ const forInput = (f, v) => {
   return String(v);
 };
 
-function Input({ f, value, onChange, names, onPick }) {
+function Input({ f, value, onChange, names, onPick, values, onSet, isNew }) {
   const common = { className: 'input', 'data-testid': `f-${f.api_name}` };
+  // Country → State → City: linked lists (India by default)
+  const geo = values ? geoKind(f) : null;
+  if (geo) return <GeoPick kind={geo.kind} prefix={geo.prefix} value={value} onChange={onChange} values={values} onSet={onSet} isNew={isNew} testid={`f-${f.api_name}`} />;
   switch (f.type) {
     case 'textarea': case 'rich_text': case 'address':
-      return <textarea {...common} value={value} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value)} />;
+      return <VoiceArea value={value} placeholder={f.placeholder} onChange={onChange} testid={`f-${f.api_name}`} />;
     case 'number': case 'decimal': case 'currency': case 'percent':
       return <input {...common} type="number" inputMode="decimal" step="any" value={value} placeholder={f.placeholder} onChange={(e) => onChange(e.target.value)} />;
     case 'date': return <input {...common} type="date" value={value} onChange={(e) => onChange(e.target.value)} />;
@@ -141,10 +146,10 @@ export default function RecordForm() {
           <div className="card col" style={{ gap: 14 }}>
             {related && <div className="note info small">For: {params.get('related_name') || `${related.module} #${related.id}`}</div>}
             {fields.map((f) => (f.type === 'checkbox'
-              ? <Input key={f.api_name} f={f} value={values[f.api_name]} onChange={(v) => setValues({ ...values, [f.api_name]: v })} />
+              ? <Input key={f.api_name} f={f} value={values[f.api_name]} onChange={(v) => setValues((p) => ({ ...p, [f.api_name]: v }))} values={values} onSet={(k, v) => setValues((p) => ({ ...p, [k]: v }))} />
               : (
                 <Field key={f.api_name} label={`${f.label}${f.required ? ' *' : ''}`} hint={f.help}>
-                  <Input f={f} value={values[f.api_name]} names={names} onChange={(v) => setValues({ ...values, [f.api_name]: v })} onPick={() => setPicking(f)} />
+                  <Input f={f} value={values[f.api_name]} names={names} onChange={(v) => setValues((p) => ({ ...p, [f.api_name]: v }))} onPick={() => setPicking(f)} values={values} isNew={!id} onSet={(k, v) => setValues((p) => ({ ...p, [k]: v }))} />
                 </Field>
               )))}
             {!fields.length && <div className="muted">This form has no fields the app can fill in. Use the web.</div>}

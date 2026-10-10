@@ -2,14 +2,19 @@
  * Home: on duty or not (punch in / out), where I am now (an open visit),
  * today's meetings, quick actions, and the modules of this CRM.
  */
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route } from 'lucide-react';
-import { useApp } from '../lib/app';
+import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download } from 'lucide-react';
+import { App as CapApp } from '@capacitor/app';
+import { useApp, listen } from '../lib/app';
+import { GET } from '../lib/api';
+import { onOutbox } from '../lib/outbox';
+import { canReadPhone, phoneStatus, askCallLog, recentWithMatches, autoLogMissing, callBacks, pendingCall, markPendingShown, scanDue } from '../lib/calls';
+import { openOutside } from '../lib/location';
 import { get } from '../lib/store';
 import { punchIn, punchOut } from '../lib/fieldwork';
 import { takePhoto } from '../lib/media';
-import { km, niceTime, since } from '../lib/format';
+import { km, niceTime, since, talk } from '../lib/format';
 import { BottomNav, StatusBars } from '../components/ui';
 import { iconOf, colorOf } from '../components/icons';
 
@@ -107,6 +112,86 @@ function Meetings() {
   );
 }
 
+
+/** Calls today against the target, missed calls from customers to call back, calls not saved yet. */
+function CallsCard() {
+  const { boot, sync } = useApp();
+  const nav = useNavigate();
+  const rules = boot.calls || {};
+  const [today, setToday] = useState(null);
+  const [back, setBack] = useState([]);
+  const [notSaved, setNotSaved] = useState(0);
+  const [allowed, setAllowed] = useState(true);
+  const load = useCallback(async (force = false) => {
+    GET('/sfa/calls/today').then(setToday).catch(() => {});
+    if (!rules.scan_phone || !canReadPhone()) return;
+    if (!force && !scanDue()) return;
+    const st = await phoneStatus();
+    setAllowed(!!st.callLog);
+    if (!st.callLog) return;
+    try {
+      const r = await recentWithMatches({ since: Date.now() - 2 * 86400000 });
+      if (await autoLogMissing(r.calls)) sync();
+      setBack(callBacks(r.calls).slice(0, 5));
+      setNotSaved(r.calls.filter((c) => c.match && !c.logged).length);
+    } catch { /* offline: next time */ }
+  }, [rules.scan_phone, sync]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => listen(CapApp.addListener('resume', () => load())), [load]);
+  // a call reached the CRM: the count goes up
+  useEffect(() => onOutbox((_items, info) => { if (info && info.done && info.done.kind === 'call') GET('/sfa/calls/today').then(setToday).catch(() => {}); }), []);
+  if (!rules.enabled) return null;
+  const target = Number(rules.daily_target || (today && today.target) || 0);
+  const n = today ? today.calls : 0;
+  const pct = target ? Math.min(100, Math.round((n / target) * 100)) : 0;
+  return (
+    <div className="card col" style={{ gap: 10 }} data-testid="calls-card">
+      <div className="flex" style={{ alignItems: 'center' }}>
+        <span className="ic" style={{ background: '#EA580C1A', color: '#EA580C', borderRadius: 10, padding: 8, display: 'inline-flex' }}><PhoneCall size={18} /></span>
+        <div className="grow">
+          <div className="strong" data-testid="calls-today">{target ? `${n} / ${target} calls today` : `${n} call${n === 1 ? '' : 's'} today`}</div>
+          <div className="small muted">{today ? `${today.connected} answered · ${talk(today.seconds)} talk time` : 'Loading…'}</div>
+        </div>
+        {canReadPhone() && <button type="button" className="btn small ghost" onClick={() => nav('/calls/phone')} data-testid="open-phone-calls">Phone calls</button>}
+      </div>
+      {target > 0 && <div className="bar"><span style={{ width: `${pct}%`, background: pct >= 100 ? 'var(--ok)' : 'var(--brand)' }} /></div>}
+      {rules.scan_phone && canReadPhone() && !allowed && (
+        <button type="button" className="btn ghost block" onClick={async () => { if (await askCallLog()) load(true); }} data-testid="allow-call-log">Allow the call history (calls are saved by themselves)</button>
+      )}
+      {back.length > 0 && (
+        <div data-testid="call-backs">
+          <div className="card-title" style={{ color: 'var(--bad)' }}><PhoneMissed size={15} /> Call back</div>
+          {back.map((c) => (
+            <div key={c.ref} className="flex" style={{ alignItems: 'center', padding: '6px 0' }}>
+              <div className="grow">
+                <div className="strong small">{c.match.name}</div>
+                <div className="tiny muted">Missed at {niceTime(new Date(c.date).toISOString())} · {c.number}</div>
+              </div>
+              <button type="button" className="btn small good" onClick={() => nav(`/call/${c.match.module}/${c.match.id}?dial=1`)} data-testid="call-back"><Phone size={15} /> Call</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {notSaved > 0 && !rules.auto_log && <button type="button" className="note warn" style={{ textAlign: 'left', border: 0 }} onClick={() => nav('/calls/phone')} data-testid="not-saved">{notSaved} call{notSaved === 1 ? '' : 's'} with customers not saved yet — tap to log</button>}
+    </div>
+  );
+}
+
+/** A newer app is out (the CRM says so in Settings → Field force → Calls). */
+function UpdateBanner() {
+  const { boot } = useApp();
+  const [mine, setMine] = useState('');
+  useEffect(() => { CapApp.getInfo().then((i) => setMine(i.version)).catch(() => setMine(typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '')); }, []);
+  const latest = boot.latest_app_version;
+  const newer = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i += 1) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+  if (!latest || !mine || !newer(latest, mine)) return null;
+  return (
+    <button type="button" className="note info flex" style={{ border: 0, textAlign: 'left', width: '100%' }} onClick={() => boot.app_download_url && openOutside(boot.app_download_url)} data-testid="update-banner">
+      <Download size={18} /> <span className="grow">A new version of iCRM ({latest}) is ready.{boot.app_download_url ? ' Tap to download.' : ' Ask your administrator for it.'}</span>
+    </button>
+  );
+}
+
 export default function Home() {
   const { boot, day } = useApp();
   const nav = useNavigate();
@@ -118,11 +203,16 @@ export default function Home() {
     sfaOn && { label: 'Check in', icon: MapPin, color: '#2563EB', go: () => (onDuty ? nav('/visit/new') : nav('/visit/new?off=1')), id: 'checkin' },
     has('leads', 'create') && { label: 'New lead', icon: UserPlus, color: '#C026D3', go: () => nav('/m/leads/new'), id: 'lead' },
     has('quotations', 'create') && has('products') && { label: 'New order', icon: ShoppingCart, color: '#0891B2', go: () => nav('/order/new'), id: 'order' },
-    has('calls', 'create') && { label: 'Log a call', icon: PhoneCall, color: '#EA580C', go: () => nav(`/m/${has('leads') ? 'leads' : 'accounts'}`), id: 'call' },
+    has('calls', 'create') && { label: 'Log a call', icon: PhoneCall, color: '#EA580C', go: () => nav(canReadPhone() ? '/calls/phone' : `/m/${has('leads') ? 'leads' : 'accounts'}`), id: 'call' },
     boot.expenses && { label: 'Expense', icon: ReceiptText, color: '#0D9488', go: () => nav('/expenses?add=1'), id: 'expense' },
     sfaOn && { label: 'Nearby', icon: Navigation, color: '#16A34A', go: () => nav('/nearby'), id: 'nearby' },
   ].filter(Boolean);
   const hour = new Date().getHours();
+  // Android closed the app during a call: the call is filled in now
+  useEffect(() => {
+    const p = pendingCall();
+    if (p && !p.shown) { markPendingShown(); nav(`/call/${p.module}/${p.id}?after=1`); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="screen">
       <div className="hero">
@@ -131,6 +221,7 @@ export default function Home() {
       </div>
       <StatusBars />
       <div className="body lift">
+        <UpdateBanner />
         {sfaOn && <DutyCard />}
         <OpenVisit />
         {quick.length > 0 && (
@@ -142,6 +233,7 @@ export default function Home() {
             ))}
           </div>
         )}
+        <CallsCard />
         <Meetings />
         <div>
           <div className="card-title" style={{ padding: '0 4px' }}>Your CRM</div>

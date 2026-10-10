@@ -129,3 +129,15 @@ textarea.input { min-height: 90px; resize: vertical; }
 .dot.on { background: var(--ok); box-shadow: 0 0 0 4px var(--ok-soft); }
 .leaflet-container { font: inherit; }
 .pin-me { width: 18px; height: 18px; border-radius: 50%; background: var(--brand); border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(59, 91, 255, .25); }
+
+/* notes box with a microphone */
+.voice-area { position: relative; }
+.voice-area textarea { padding-bottom: 44px; }
+.voice-bar { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; align-items: center; }
+.voice-lang { height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-size: 12px; font-weight: 600; color: var(--muted); }
+.voice-mic { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--brand); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+.voice-mic.on { background: var(--bad); animation: pulse 1.2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(225, 29, 72, .45); } 100% { box-shadow: 0 0 0 12px rgba(225, 29, 72, 0); } }
+/* a progress bar (calls against the day's target) */
+.bar { height: 8px; border-radius: 999px; background: var(--line-soft); overflow: hidden; }
+.bar > span { display: block; height: 100%; border-radius: 999px; transition: width .3s; }

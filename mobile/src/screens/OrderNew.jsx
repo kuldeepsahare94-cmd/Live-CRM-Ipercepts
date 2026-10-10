@@ -9,7 +9,7 @@ import { Search, Package, Building2, ChevronRight, Loader2, Trash2 } from 'lucid
 import { useApp } from '../lib/app';
 import { GET, POST, qs, absolute } from '../lib/api';
 import { money, today, addDays } from '../lib/format';
-import { TopBar, Loading, Empty, Field, RecordPicker, Sheet, StatusBars } from '../components/ui';
+import { TopBar, Loading, Empty, Field, RecordPicker, Sheet, StatusBars, VoiceArea } from '../components/ui';
 
 function Stepper({ value, onChange, testid }) {
   return (
@@ -119,7 +119,7 @@ export default function OrderNew() {
               ))}
             </div>
             <Field label="Valid until"><input className="input" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></Field>
-            <Field label="Notes for the customer (optional)"><textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+            <Field label="Notes for the customer (optional)"><VoiceArea value={notes} onChange={setNotes} testid="order-notes" /></Field>
             <div className="flex between"><span className="muted">Total with tax, about</span><span className="strong" style={{ fontSize: 20 }}>{money(total)}</span></div>
             {error && <div className="note bad" data-testid="order-error">{error}</div>}
             <button type="button" className="btn primary block big" onClick={save} disabled={busy || !lines.length} data-testid="order-save">{busy ? <Loader2 className="spin" /> : null} Save the order</button>

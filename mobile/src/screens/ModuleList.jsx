@@ -76,7 +76,7 @@ export default function ModuleList() {
                   {r.amount !== null && r.amount !== undefined && <span className="strong" style={{ color: 'var(--ink)' }}>{money(r.amount)}</span>}
                   <StatusTag value={r.status} />
                 </div>
-                {r.phone && <button type="button" className="icon-btn" aria-label="Call" onClick={() => openOutside(`tel:${phoneFor(r.phone)}`)} style={{ color: 'var(--ok)' }}><Phone size={20} /></button>}
+                {r.phone && <button type="button" className="icon-btn" aria-label="Call" onClick={() => (['leads', 'contacts', 'accounts', 'opportunities'].includes(module) && modOf('calls') && modOf('calls').can.create ? nav(`/call/${module}/${r.id}?dial=1`) : openOutside(`tel:${phoneFor(r.phone)}`))} style={{ color: 'var(--ok)' }}><Phone size={20} /></button>}
               </div>
             ))}
           </div>

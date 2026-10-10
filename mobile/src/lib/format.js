@@ -50,3 +50,5 @@ export function phoneFor(raw, { whatsapp = false } = {}) {
   p = p.replace(/^\+/, '');
   return whatsapp ? p : `+${p}`;
 }
+/** a call's length: "45 s", "3 min 20 s" */
+export const talk = (s) => { const n = Math.max(0, Math.round(Number(s) || 0)); return n < 60 ? `${n} s` : `${Math.floor(n / 60)} min${n % 60 ? ` ${n % 60} s` : ''}`; };

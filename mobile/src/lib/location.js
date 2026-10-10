@@ -70,6 +70,8 @@ export async function here({ timeout = 20000, good = 60 } = {}) {
 let watcher = null;
 let webWatch = null;
 let timer = null;
+let beat = null;
+const HEARTBEAT = 5 * 60000;     // standing still (a long meeting): a point every 5 minutes, so the team map does not say "no signal"
 const stateListeners = new Set();
 export const onTracking = (fn) => { stateListeners.add(fn); return () => stateListeners.delete(fn); };
 let status = { on: false, last: null, latest: null, error: '' };
@@ -130,6 +132,18 @@ async function begin(rules) {
     }), () => tell({ error: 'Location is not allowed in this browser.' }), { enableHighAccuracy: true, maximumAge: 0 });
   }
   timer = setInterval(() => { flushPoints(); }, 60000);
+  // the watcher only answers when the phone moves: while still, a fresh fix now and then
+  beat = setInterval(async () => {
+    if (Date.now() - lastAt < HEARTBEAT - 20000) return;
+    try {
+      if (native) { const perm = await Geolocation.checkPermissions(); if (perm.location !== 'granted') return; }
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+      if (!pos || !pos.coords || Date.now() - lastAt < HEARTBEAT - 20000) return;
+      lastAt = Date.now();
+      keep({ at: new Date().toISOString(), lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy || 0), is_mock: false, source: 'still' });
+      flushPoints();
+    } catch { /* no fix now (indoors): the next try */ }
+  }, 60000);
   tell({ on: true, error: '' });
 }
 
@@ -140,7 +154,8 @@ export async function stopTracking() {
   if (webWatch !== null && typeof navigator !== 'undefined' && navigator.geolocation) navigator.geolocation.clearWatch(webWatch);
   watcher = null; webWatch = null;
   if (timer) clearInterval(timer);
-  timer = null;
+  if (beat) clearInterval(beat);
+  timer = null; beat = null;
   tell({ on: false });
   flushPoints();                                     // (sent in the background: stopping never waits for the network)
 }
