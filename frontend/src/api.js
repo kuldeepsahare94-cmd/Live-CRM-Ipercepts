@@ -409,6 +409,12 @@ export const api = {
   queryLeads: (body) => ask('/leads/query', body || {}),
   getLead: (id) => req('GET', `/leads/${id}`),
   createLead: (body) => createChecked('/leads', body),
+  // Visiting cards (components/cards/ScanCardModal.jsx). cardSend: a plain request — the card
+  // screen shows "already in the CRM" itself, so no duplicate pop-up.
+  cardsMeta: () => rawReq('GET', '/cards/meta', null, localStorage.getItem('cd_token')),
+  cardsRead: (body) => ask('/cards/read', body),
+  cardsCheck: (body) => ask('/cards/check', body),
+  cardSend: (method, path, body) => req(method, path, body),
   updateLead: (id, body) => req('PUT', `/leads/${id}`, body),
   deleteLead: (id) => req('DELETE', `/leads/${id}`),
   addLeadActivity: (id, body) => req('POST', `/leads/${id}/activities`, body),

@@ -1,10 +1,10 @@
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   CalendarDays,
   LayoutDashboard, Users as UsersIcon, Wallet, BarChart3, Settings as SettingsIcon,
   LogOut, UserCog, ShieldCheck, Palette, Menu, X, MessageCircle, Radio, ChevronRight,
-  ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy, ListOrdered, Headphones, ReceiptText, MapPinned,
+  ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy, ListOrdered, Headphones, ReceiptText, MapPinned, ScanLine,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api, noteNavigation, prefetchRoute } from '../api';
@@ -26,6 +26,8 @@ import DuplicateHost from './DuplicateDialog';
 import TelephonyHost, { TelephonyMenu } from './telephony/TelephonyHost';
 import { useTelephony } from './telephony/telephony';
 import ExpenseHost from './expenses/ExpenseHost';
+// Scan a visiting card (loaded the first time it is opened)
+const ScanCardModal = lazy(() => import('./cards/ScanCardModal'));
 import { useExpenseMeta } from './expenses/expenses';
 import { useFieldMeta } from './field/field';
 
@@ -270,6 +272,14 @@ export default function Layout() {
   // sidebar; that was wrong and has been reverted.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { user, logout } = useAuth();
+  // Scan a visiting card: the top-bar button, or any screen with the event "icrm:scan-card"
+  const [scanning, setScanning] = useState(false);
+  const canScan = ['leads', 'contacts', 'accounts'].some((m) => user?.permissions?.[m]?.create);
+  useEffect(() => {
+    const openScan = () => setScanning(true);
+    window.addEventListener('icrm:scan-card', openScan);
+    return () => window.removeEventListener('icrm:scan-card', openScan);
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const navigate = useNavigate();
@@ -373,6 +383,13 @@ export default function Layout() {
               <ChatWidget />
               <CalendarWidget />
               <NotificationBell />
+              {canScan && (
+                <button type="button" aria-label="Scan a visiting card" title="Scan a visiting card" onClick={() => setScanning(true)} data-testid="scan-card-open"
+                  className="h-9 px-2.5 rounded-xl flex items-center gap-1.5 text-sm font-medium shrink-0 hover:bg-[var(--color-canvas)]"
+                  style={{ color: 'var(--color-brand)', border: '1px solid var(--color-brand-border)' }}>
+                  <ScanLine className="w-[18px] h-[18px]" /><span className="hidden lg:inline">Scan card</span>
+                </button>
+              )}
               <button aria-label="Quick create" title="Quick create"
                 onClick={() => navigate('/leads')}
                 className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0"
@@ -446,6 +463,7 @@ export default function Layout() {
           from a lead / contact / account / deal. Nothing while it is off. */}
       <ErrorBoundary fallback={null}>
         <ExpenseHost />
+        {scanning && <ErrorBoundary fallback={null}><Suspense fallback={null}><ScanCardModal onClose={() => setScanning(false)} /></Suspense></ErrorBoundary>}
       </ErrorBoundary>
     </div>
   );

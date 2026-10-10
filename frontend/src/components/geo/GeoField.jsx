@@ -109,7 +109,9 @@ export function geoKind(field) {
 export function Combo({ value, onChange, options, placeholder, disabled, testid, allowNew = true, className = 'input w-full', top = null, onOpen }) {
   const [open, setOpenState] = useState(false);
   const moved = useRef(false);
-  const setOpen = (v) => { if (v && !open) { moved.current = false; if (onOpen) onOpen(); } setOpenState(v); };
+  // the value when the list was opened (Escape, or emptying the box, goes back to it)
+  const before = useRef(value);
+  const setOpen = (v) => { if (v && !open) { moved.current = false; before.current = value; if (onOpen) onOpen(); } setOpenState(v); };
   const [q, setQState] = useState('');
   const qRef = useRef('');
   const setQ = (v) => { qRef.current = v; setQState(v); };
@@ -158,7 +160,7 @@ export function Combo({ value, onChange, options, placeholder, disabled, testid,
       const exact = options.find((o) => norm(o) === norm(t));
       const only = shown.filter((o) => norm(o).startsWith(norm(t)));
       const v = exact || (only.length === 1 ? only[0] : (allowNew ? t : null));
-      if (v && norm(v) !== norm(value)) onChange(v);
+      if (v && v !== value) onChange(v);
     }
     setOpenState(false); setQ('');
   };
@@ -173,7 +175,11 @@ export function Combo({ value, onChange, options, placeholder, disabled, testid,
       // (Enter with nothing typed and no arrow used only closes the list: the value stays)
       if (!q.trim() && !moved.current) { setOpenState(false); return; }
       const it = items[hi]; if (it) pick(typeof it === 'string' ? it : it.add); else commit();
-    } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpenState(false); setQ(''); }
+    } else if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation();
+      if (allowNew && qRef.current.trim() && value !== before.current) onChange(before.current || '');
+      setOpenState(false); setQ('');
+    }
   };
   return (
     <div className="relative" ref={box}>
@@ -182,7 +188,13 @@ export function Combo({ value, onChange, options, placeholder, disabled, testid,
           className={className} style={{ paddingRight: 30 }} disabled={disabled} data-testid={testid}
           value={open ? q : (value || '')} placeholder={open ? (value || placeholder) : placeholder}
           onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
-          onChange={(e) => { setQ(e.target.value); setOpen(true); }} onKeyDown={key} onBlur={() => { if (open) commit(); }}
+          onChange={(e) => {
+            const t = e.target.value;
+            setQ(t); setOpen(true);
+            // a name that may be new is the field's value while it is typed, so the form knows it
+            // changed (its Save button is on) — the list's own spelling replaces it when the box is left
+            if (allowNew) { if (t.trim()) { if (t.trim() !== value) onChange(t.trim()); } else if (value !== before.current) onChange(before.current || ''); }
+          }} onKeyDown={key} onBlur={() => { if (open) commit(); }}
           role="combobox" aria-expanded={open} aria-autocomplete="list" autoComplete="off"
         />
         <ChevronDown className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--color-faint)' }} />
