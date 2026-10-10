@@ -5,8 +5,10 @@
  *                no signal, day over, not punched in), km and visits of today
  *   Day route    one person's day: the route on the map, punch in → visits →
  *                punch out with the km and time between, the visits with notes and photos
- *   Attendance   the register for a period: in / out, hours, km, visits, late —
+ *   Attendance   the register for a period: in / out, hours, km, visits, late, leave —
  *                totals per person (the km report) and a CSV
+ *   Plans        (v1.3) visit plans: approve / send back, plan against actual
+ *   Leave        (v1.3) leave requests: approve / send back, my own leave
  *
  * A sales person sees only themselves; a manager their team ("Reports to" on the
  * Users page); Super Admin and the roles chosen in Settings → Field force see everyone.
@@ -21,6 +23,9 @@ import {
 import { api } from '../../api';
 import { PageHeader, EmptyState } from '../../components/ui';
 import FieldMap from '../../components/field/FieldMap';
+import VisitRecording from '../../components/field/VisitRecording';
+import FieldPlans from './FieldPlans';
+import FieldLeave from './FieldLeave';
 import {
   useFieldMeta, loadFieldMeta, fieldFileUrl, STATE, ago, duration, km, niceDay, addDays, MODULE_LABEL, recordLink,
 } from '../../components/field/field';
@@ -343,6 +348,7 @@ function VisitItem({ n, visit: v, onPhoto }) {
           <Clock className="w-3.5 h-3.5" />{v.in_time}{v.out_time ? `–${v.out_time}` : ' (still there)'} · {duration(v.minutes)}
           {v.meeting_id && <span>· meeting</span>}
           {v.far && <span className="inline-flex items-center gap-1" style={{ color: 'var(--color-warning-strong)' }}><AlertTriangle className="w-3.5 h-3.5" />{v.in_distance_m} m from the customer's saved place</span>}
+          {v.auto_out && <span style={{ color: 'var(--color-warning-strong)' }}>· checked out by itself</span>}
         </div>
         {(v.outcome || v.notes || v.next_action) && (
           <div className="text-sm mt-1">
@@ -351,6 +357,7 @@ function VisitItem({ n, visit: v, onPhoto }) {
             {v.next_action && <div className="t-meta">Next: {v.next_action}</div>}
           </div>
         )}
+        {v.recording_id && <VisitRecording visitId={v.id} />}
         {files && files.length > 0 && (
           <div className="flex gap-2 mt-2 flex-wrap">
             {files.map((f) => (f.kind === 'photo' || f.kind === 'selfie'
@@ -424,7 +431,7 @@ function AttendanceTab({ meta, people, onOpenDay }) {
               <thead>
                 <tr className="text-left t-meta" style={{ borderBottom: '1px solid var(--color-line)' }}>
                   <th className="px-4 py-2 font-medium">Person</th><th className="px-3 py-2 font-medium text-right">Days worked</th><th className="px-3 py-2 font-medium text-right">Hours</th>
-                  <th className="px-3 py-2 font-medium text-right">Km</th><th className="px-3 py-2 font-medium text-right">Km a day</th><th className="px-3 py-2 font-medium text-right">Visits</th><th className="px-3 py-2 font-medium text-right">Late</th>
+                  <th className="px-3 py-2 font-medium text-right">Km</th><th className="px-3 py-2 font-medium text-right">Km a day</th><th className="px-3 py-2 font-medium text-right">Visits</th><th className="px-3 py-2 font-medium text-right">Late</th><th className="px-3 py-2 font-medium text-right">Leave</th>
                 </tr>
               </thead>
               <tbody>
@@ -437,6 +444,7 @@ function AttendanceTab({ meta, people, onOpenDay }) {
                     <td className="px-3 py-2 text-right tabular-nums">{t.days_present ? km(t.km / t.days_present) : '—'}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{t.visits}</td>
                     <td className="px-3 py-2 text-right tabular-nums" style={t.late ? { color: 'var(--color-warning-strong)' } : undefined}>{t.late || '—'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{t.days_leave ? `${t.days_leave} d` : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -457,7 +465,7 @@ function AttendanceTab({ meta, people, onOpenDay }) {
                   <tr key={`${r.user_id}-${r.day}`} style={{ borderBottom: '1px solid var(--color-line-soft)', opacity: r.present ? 1 : 0.55 }} data-testid="reg-row" data-present={r.present ? '1' : '0'}>
                     <td className="px-4 py-2 text-ink">{r.user_name}</td>
                     <td className="px-3 py-2 whitespace-nowrap">{niceDay(r.day)}</td>
-                    <td className="px-3 py-2">{r.present ? r.in_time : <span className="t-meta">Absent</span>}</td>
+                    <td className="px-3 py-2">{r.present ? r.in_time : r.leave ? <span className="text-xs font-semibold" style={{ color: '#DB2777' }} data-testid="reg-leave">On leave</span> : <span className="t-meta">Absent</span>}</td>
                     <td className="px-3 py-2">{r.out_time || (r.working ? <span style={{ color: 'var(--color-success)' }}>working</span> : '')}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.present ? r.hours.toFixed(1) : ''}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.present ? km(r.km) : ''}</td>
@@ -467,6 +475,7 @@ function AttendanceTab({ meta, people, onOpenDay }) {
                         {r.late && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--color-warning-soft)', color: 'var(--color-warning-strong)' }}>Late</span>}
                         {r.early_out && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--color-info-soft)', color: 'var(--color-info)' }}>Left early</span>}
                         {r.auto_out && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--color-danger-soft)', color: 'var(--color-danger)' }}>No punch out</span>}
+                        {r.leave && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: '#FCE7F3', color: '#BE185D' }}>{r.leave.type}{r.leave.half ? ' · half day' : ''}</span>}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right">{r.present && <button type="button" className="btn btn-ghost" style={SMALL} onClick={() => onOpenDay(r.user_id, r.day)} title="The route of this day"><Route className="w-4 h-4" /></button>}</td>
@@ -524,7 +533,7 @@ export default function FieldTeam() {
   }
 
   const manager = meta.is_manager || people.length > 1;
-  const tabs = [manager && ['live', 'Live'], ['day', manager ? 'Day route' : 'My day'], ['attendance', 'Attendance & km']].filter(Boolean);
+  const tabs = [manager && ['live', 'Live'], ['day', manager ? 'Day route' : 'My day'], ['attendance', 'Attendance & km'], meta.plan_on && ['plans', 'Plans'], meta.leave_on && ['leave', 'Leave']].filter(Boolean);
   const current = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
   const dayUser = params.get('user') || String(people.length && !people.some((p) => p.id === meta.me_id) ? people[0].id : meta.me_id || '');
   const day = /^\d{4}-\d{2}-\d{2}$/.test(params.get('day') || '') ? params.get('day') : meta.today;
@@ -554,6 +563,8 @@ export default function FieldTeam() {
       {current === 'live' && <LiveTab meta={meta} onOpenDay={openDay} />}
       {current === 'day' && <DayTab meta={meta} people={people} userId={dayUser} day={day} onChange={({ user, day: d }) => go('day', { user, day: d })} onPhoto={onPhoto} />}
       {current === 'attendance' && <AttendanceTab meta={meta} people={people} onOpenDay={openDay} />}
+      {current === 'plans' && <FieldPlans meta={meta} people={people} />}
+      {current === 'leave' && <FieldLeave meta={meta} people={people} />}
 
       {photo && <PhotoViewer id={photo.id} label={photo.label} onClose={() => setPhoto(null)} />}
     </div>

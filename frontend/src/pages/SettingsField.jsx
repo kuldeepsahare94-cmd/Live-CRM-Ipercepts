@@ -9,6 +9,9 @@
  *   Map          OpenStreetMap, or another map server
  *   Calls & app  calls from the app (auto log, the phone's calls, recordings, target, WhatsApp),
  *                call transcription and summary, the app's newest version
+ *   Plans & leave   (v1.3) visit plans and their approval, the route's speed, leave and its kinds
+ *   Reminders       (v1.3) the phone's reminders, punch out / check out by themselves
+ *   Meeting recording (v1.3) recording a meeting at a visit, and how the customer agrees
  *
  * Who may use it: Roles & Permissions → "Field force" (view = use the app; export = the CSV).
  */
@@ -19,7 +22,7 @@ import { api, absoluteApiBase } from '../api';
 import { PageHeader } from '../components/ui';
 import { fieldSettingsChanged } from '../components/field/field';
 
-const TABS = [['general', 'General'], ['attendance', 'Attendance'], ['tracking', 'Tracking & km'], ['visits', 'Visits'], ['calls', 'Calls & app'], ['expense', 'Km expense'], ['map', 'Map']];
+const TABS = [['general', 'General'], ['attendance', 'Attendance'], ['tracking', 'Tracking & km'], ['visits', 'Visits'], ['plans', 'Plans & leave'], ['reminders', 'Reminders'], ['meetings', 'Meeting recording'], ['calls', 'Calls & app'], ['expense', 'Km expense'], ['map', 'Map']];
 
 function Toggle({ on, onChange, label, testid }) {
   return (
@@ -49,7 +52,8 @@ function Num({ value, onChange, unit, step = 1, min, max, testid, width = 96 }) 
   );
 }
 
-const NUMBERS = ['interval_seconds', 'distance_filter_m', 'max_accuracy_m', 'max_speed_kmh', 'min_move_m', 'road_factor', 'auto_out_hours', 'visit_radius_m', 'km_expense_min', 'call_daily_target', 'call_recording_days'];
+const NUMBERS = ['interval_seconds', 'distance_filter_m', 'max_accuracy_m', 'max_speed_kmh', 'min_move_m', 'road_factor', 'auto_out_hours', 'visit_radius_m', 'km_expense_min', 'call_daily_target', 'call_recording_days',
+  'route_speed_kmh', 'remind_visit_minutes', 'visit_auto_out_m', 'visit_auto_out_hours', 'meeting_max_minutes'];
 
 export default function SettingsField() {
   const [payload, setPayload] = useState(null);
@@ -63,7 +67,7 @@ export default function SettingsField() {
   const take = (p) => {
     setPayload(p);
     const s = p.settings;
-    setF({ ...s, ...Object.fromEntries(NUMBERS.map((k) => [k, String(s[k] ?? '')])), km_expense_category_id: s.km_expense_category_id ? String(s.km_expense_category_id) : '', transcribe_key: '' });
+    setF({ ...s, ...Object.fromEntries(NUMBERS.map((k) => [k, String(s[k] ?? '')])), km_expense_category_id: s.km_expense_category_id ? String(s.km_expense_category_id) : '', transcribe_key: '', leave_types_text: (s.leave_types || []).join('\n') });
   };
   useEffect(() => { api.fieldSettings().then(take).catch((e) => setError(e.message || 'The settings could not be loaded.')); }, []);
   const set = (k, v) => { setF((x) => ({ ...x, [k]: v })); setSaved(false); };
@@ -74,6 +78,8 @@ export default function SettingsField() {
       const body = { ...f };
       NUMBERS.forEach((k) => { body[k] = body[k] === '' ? undefined : Number(body[k]); });
       body.km_expense_category_id = f.km_expense_category_id ? Number(f.km_expense_category_id) : null;
+      body.leave_types = String(f.leave_types_text || '').split('\n').map((x) => x.trim()).filter(Boolean);
+      delete body.leave_types_text;
       take(await api.saveFieldSettings(body));
       setSaved(true);
       fieldSettingsChanged();
@@ -173,6 +179,92 @@ export default function SettingsField() {
             <Row title="Find a customer's place from the address" hint="With OpenStreetMap's free address search (one address a second). Off: places come from visits or from the app's “the customer is here”.">
               <Toggle on={f.geocode} onChange={(v) => set('geocode', v)} label="Find from the address" testid="f-geocode" />
             </Row>
+          </>
+        )}
+
+        {tab === 'plans' && (
+          <>
+            <p className="text-sm font-semibold text-ink pt-4">Visit plans (beat plans)</p>
+            <Row title="People plan their visits" hint="In the app: My plan — the customers to visit each day (or a week ahead). The day is then measured: done, missed, not planned (Field team → Plans).">
+              <Toggle on={f.plan_on} onChange={(v) => set('plan_on', v)} label="Visit plans" testid="f-plan-on" />
+            </Row>
+            <Row title="The manager approves each plan" hint="A plan goes to the person's manager (Users → Reports to), who approves it or sends it back with a reason. Someone with nobody above them is approved at once.">
+              <Toggle on={f.plan_approval} onChange={(v) => set('plan_approval', v)} label="Plan approval" testid="f-plan-approval" />
+            </Row>
+            <Row title="Average speed in town" hint="For the travel time between stops of the day's best route.">
+              <Num value={f.route_speed_kmh} onChange={(v) => set('route_speed_kmh', v)} unit="km/h" min={5} max={80} testid="f-route-speed" />
+            </Row>
+            <p className="text-sm font-semibold text-ink pt-5">Leave</p>
+            <Row title="People ask for leave in the app" hint="Their manager approves it (in the app or Field team → Leave). The attendance shows “On leave” on those days — not absent, not late.">
+              <Toggle on={f.leave_on} onChange={(v) => set('leave_on', v)} label="Leave requests" testid="f-leave-on" />
+            </Row>
+            <Row title="Kinds of leave" hint="One on each line.">
+              <textarea className="input" style={{ width: 280, minHeight: 110 }} value={f.leave_types_text} onChange={(e) => set('leave_types_text', e.target.value)} data-testid="f-leave-types" />
+            </Row>
+          </>
+        )}
+
+        {tab === 'reminders' && (
+          <>
+            <p className="text-sm font-semibold text-ink pt-4">Reminders on the phone</p>
+            <Row title="“Time to punch in”" hint={`At the start of work (${f.work_start}), when the person has not punched in. Not on a day of leave.`}>
+              <Toggle on={f.remind_punch_in} onChange={(v) => set('remind_punch_in', v)} label="Punch in reminder" testid="f-remind-in" />
+            </Row>
+            <Row title="“Still punched in”" hint={`At the end of work (${f.work_end}), while still punched in.`}>
+              <Toggle on={f.remind_punch_out} onChange={(v) => set('remind_punch_out', v)} label="Punch out reminder" testid="f-remind-out" />
+            </Row>
+            <Row title="“Still at the customer?”" hint="After this many minutes checked in at a customer. 0 = never.">
+              <Num value={f.remind_visit_minutes} onChange={(v) => set('remind_visit_minutes', v)} unit="minutes" min={0} max={1440} testid="f-remind-visit" />
+            </Row>
+            <p className="text-sm font-semibold text-ink pt-5">By themselves</p>
+            <Row title="Punch out by itself at" hint="A day still open at this time is punched out at this time (marked “no punch out”). Empty = never (a day is still closed after the hours in Attendance).">
+              <span className="inline-flex items-center gap-2">
+                <input type="time" className="input" style={{ width: 130 }} value={f.auto_out_time} onChange={(e) => set('auto_out_time', e.target.value)} data-testid="f-auto-out-time" />
+                {f.auto_out_time && <button type="button" className="btn btn-ghost" onClick={() => set('auto_out_time', '')}>Never</button>}
+              </span>
+            </Row>
+            <Row title="Check out of a visit by itself when the person is this far away" hint="Two GPS points in a row further than this from where they checked in close the visit (at the first of them). 0 = never. 300 m or more works well.">
+              <Num value={f.visit_auto_out_m} onChange={(v) => set('visit_auto_out_m', v)} unit="metres" min={0} max={50000} testid="f-visit-auto-m" />
+            </Row>
+            <Row title="…or after" hint="A visit open longer than this is checked out by itself. 0 = never.">
+              <Num value={f.visit_auto_out_hours} onChange={(v) => set('visit_auto_out_hours', v)} unit="hours" step={0.5} min={0} max={24} testid="f-visit-auto-h" />
+            </Row>
+          </>
+        )}
+
+        {tab === 'meetings' && (
+          <>
+            <Row title="Record meetings at visits" hint="At a visit the app offers “Record the meeting”. The recording is kept with the visit; with “Recordings to text” on (Calls & app) the CRM writes it as text with a short summary.">
+              <Toggle on={f.meeting_rec_on} onChange={(v) => set('meeting_rec_on', v)} label="Meeting recording" testid="f-meet-on" />
+            </Row>
+            <Row title="How the customer agrees" hint="Recording someone needs their consent.">
+              <select className="input" style={{ width: 320 }} value={f.meeting_consent} onChange={(e) => set('meeting_consent', e.target.value)} data-testid="f-meet-consent">
+                <option value="spoken">Spoken: the customer says yes at the start of the recording</option>
+                <option value="otp" disabled={!payload.whatsapp_ready}>A code on WhatsApp the customer tells{payload.whatsapp_ready ? '' : ' (set up WhatsApp first)'}</option>
+                <option value="either" disabled={!payload.whatsapp_ready}>Either (the person chooses)</option>
+                <option value="none">No consent step</option>
+              </select>
+            </Row>
+            <Row title="The sentence read out" hint="The app shows it; it is read out at the start of the recording and the customer answers.">
+              <textarea className="input" style={{ width: 360, minHeight: 64 }} value={f.meeting_consent_text} onChange={(e) => set('meeting_consent_text', e.target.value)} data-testid="f-meet-text" />
+            </Row>
+            {['otp', 'either'].includes(f.meeting_consent) && (
+              <>
+                <Row title="WhatsApp template with the code" hint="An approved template of your WhatsApp account whose text has {{1}} for the 6-digit code (an “Authentication” template, e.g. “{{1}} is your code to agree to the recording of our meeting.”).">
+                  {payload.whatsapp_templates && payload.whatsapp_templates.length ? (
+                    <select className="input" style={{ width: 320 }} value={f.meeting_otp_template} onChange={(e) => { const t = payload.whatsapp_templates.find((x) => x.template_name === e.target.value); set('meeting_otp_template', e.target.value); if (t && t.language) set('meeting_otp_language', t.language); }} data-testid="f-meet-template">
+                      <option value="">Choose…</option>
+                      {payload.whatsapp_templates.map((t) => <option key={`${t.template_name}-${t.language}`} value={t.template_name}>{t.template_name} ({t.language}{t.status ? `, ${String(t.status).toLowerCase()}` : ''})</option>)}
+                    </select>
+                  ) : <input className="input" style={{ width: 260 }} value={f.meeting_otp_template} placeholder="template name" onChange={(e) => set('meeting_otp_template', e.target.value)} data-testid="f-meet-template" />}
+                </Row>
+                <Row title="Template language"><input className="input" style={{ width: 120 }} value={f.meeting_otp_language} onChange={(e) => set('meeting_otp_language', e.target.value)} /></Row>
+              </>
+            )}
+            <Row title="Longest recording" hint="The app stops by itself after this.">
+              <Num value={f.meeting_max_minutes} onChange={(v) => set('meeting_max_minutes', v)} unit="minutes" min={5} max={180} testid="f-meet-max" />
+            </Row>
+            <p className="t-meta py-3">Recordings are deleted after the days set in Calls & app (“Delete recordings after”).</p>
           </>
         )}
 

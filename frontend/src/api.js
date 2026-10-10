@@ -979,6 +979,20 @@ export const api = {
   saveFieldSettings: (body) => req('PUT', '/sfa/settings', body),
   callRecording: (callId) => req('GET', `/sfa/calls/${callId}/recording`),
   transcribeCall: (callId) => req('POST', `/sfa/calls/${callId}/transcribe`, {}),
+  // (v1.3) visit plans, leave, meeting recordings
+  fieldTeamPlans: (params) => req('GET', `/sfa/plans/team${qs(params)}`),
+  fieldMyPlans: (params) => req('GET', `/sfa/plans/mine${qs(params)}`),
+  fieldPlan: (id) => req('GET', `/sfa/plans/${id}`),
+  decideFieldPlan: (id, body) => req('POST', `/sfa/plans/${id}/decide`, body),
+  fieldPlanReport: (params) => req('GET', `/sfa/plans/report${qs(params)}`),
+  downloadFieldPlanReport: (params) => downloadFile(`/sfa/plans/report${qs({ ...params, format: 'csv' })}`, `plan-vs-actual-${params.from}-to-${params.to}.csv`),
+  fieldTeamLeaves: (params) => req('GET', `/sfa/leaves/team${qs(params)}`),
+  fieldMyLeaves: () => req('GET', '/sfa/leaves/mine'),
+  applyFieldLeave: (body) => req('POST', '/sfa/leaves', body),
+  cancelFieldLeave: (id) => req('POST', `/sfa/leaves/${id}/cancel`, {}),
+  decideFieldLeave: (id, body) => req('POST', `/sfa/leaves/${id}/decide`, body),
+  visitRecording: (id) => req('GET', `/sfa/visits/${id}/recording`),
+  transcribeVisit: (id) => req('POST', `/sfa/visits/${id}/recording/transcribe`, {}),
 
   // Expense management: expenses with bills, claims, approvals, advances, payment
   expenseMeta: () => req('GET', '/expenses/meta'),

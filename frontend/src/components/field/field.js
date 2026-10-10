@@ -99,6 +99,7 @@ export const STATE = {
   visiting: { label: 'At a customer', color: '#2563EB' },
   no_signal: { label: 'No signal', color: '#D97706' },
   done: { label: 'Day over', color: '#64748B' },
+  leave: { label: 'On leave', color: '#DB2777' },
   absent: { label: 'Not punched in', color: '#CBD5E1' },
 };
 export function ago(minutes) {

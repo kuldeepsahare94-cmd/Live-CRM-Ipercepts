@@ -109,6 +109,8 @@ body {
 .btn-secondary:hover { background: var(--color-canvas); }
 .btn-ghost { color: var(--color-muted); }
 .btn-ghost:hover { background: var(--color-canvas); color: var(--color-ink); }
+.btn-danger { background: var(--color-danger); color: #fff; }
+.btn-danger:hover { background: var(--color-danger-strong); }
 
 .input {
   /* `width: 100%` here is a plain class, which outranks Tailwind's `w-auto`

@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import { MapPinned, Loader2, ExternalLink, Trash2, Search, AlertTriangle } from 'lucide-react';
 import { api } from '../../api';
 import { useFieldMeta, duration } from './field';
+import VisitRecording from './VisitRecording';
 
 const SOURCE = { visit: 'from the first visit', manual: 'set from the phone', map: 'set on the map', geocode: 'found from the address' };
 const PLACE_MODULES = ['leads', 'contacts', 'accounts'];
@@ -90,6 +91,7 @@ export default function FieldVisitsPanel({ module, recordId, canEdit = false }) 
                     {v.far && <span className="inline-flex items-center gap-1 ml-1 text-xs" style={{ color: 'var(--color-warning-strong)' }}><AlertTriangle className="w-3.5 h-3.5" />{v.in_distance_m} m away</span>}
                   </div>
                   {(v.outcome || v.notes) && <div className="t-meta">{v.outcome ? `${v.outcome}. ` : ''}{v.notes}</div>}
+                  {v.recording_id && !v.others && <VisitRecording visitId={v.id} />}
                 </div>
               </li>
             );
