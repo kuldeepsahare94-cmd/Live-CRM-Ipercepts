@@ -166,34 +166,62 @@ function useLinks(calls) {
 // ---------------------------------------------------------------------------
 const RECORDING_PLACES = /call|record|recorder|sound_recorder|voice/i;
 const MAX_SEND = 12 * 1024 * 1024;   // a recording up to 12 MB (about 25 minutes of a phone's recording) is sent
+const squash = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9\u0900-\u097f]/g, '');
+/**
+ * How sure we are that a sound file is this call's recording (0–200).
+ * Phones name the file differently: the number (Xiaomi, Oppo…), the contact's
+ * name (Samsung, when the number is saved), or only a date. The recording
+ * starts when the call is answered and ends with it.
+ */
+export function scoreRecording(c, f) {
+  if (!f || !f.size || f.size > MAX_SEND) return -1;
+  let score = 0;
+  const name = `${f.name || ''}`;
+  if (c.digits && name.replace(/\D/g, '').includes(c.digits)) score += 50;
+  else if (c.digits && name.replace(/\D/g, '').includes(c.digits.slice(-7))) score += 30;
+  if (c.name && squash(c.name).length >= 3 && squash(name).includes(squash(c.name))) score += 40;
+  if (RECORDING_PLACES.test(`${f.path || ''} ${name}`)) score += 25;
+  const added = Number(f.added) || 0;
+  const modified = Number(f.modified) || added;
+  if (added && added >= c.date - 60000 && added <= c.end + 30000) score += 25;              // made during the call
+  if (modified && Math.abs(modified - c.end) < 180000) score += 20;                       // finished when the call ended
+  const len = (Number(f.duration) || 0) / 1000;
+  if (len && Math.abs(len - c.duration) <= Math.max(6, c.duration * 0.2)) score += 25;
+  else if (len && Math.abs(len - c.duration) > Math.max(30, c.duration)) score -= 30;   // clearly another length
+  return score;
+}
+export const RECORDING_SURE = 45;
+
+/** sound files saved around a time (ms), newest first */
+export async function audioAround(from, to) {
+  const p = plugin();
+  if (!p) return [];
+  try { return ((await p.findRecordings({ from, to })) || {}).files || []; } catch { return []; }
+}
+
 /** the dialer's recording of this call, or null */
 export async function findRecording(c) {
-  const p = plugin();
-  if (!p || !c || !c.connected || !c.duration) return null;
-  let files = [];
-  try { files = ((await p.findRecordings({ from: c.date - 60000, to: c.end + 10 * 60000 })) || {}).files || []; } catch { return null; }
-  const d = c.digits;
+  if (!plugin() || !c || !c.connected || !c.duration) return null;
+  const files = await audioAround(c.date - 120000, c.end + 15 * 60000);
   const used = new Set(get('rec_files', []) || []);         // (one file is one call's recording)
-  const scored = files.filter((f) => !used.has(f.id)).map((f) => {
-    let score = 0;
-    const name = `${f.name || ''}`;
-    if (d && name.replace(/\D/g, '').includes(d)) score += 50;
-    if (c.name && name.toLowerCase().includes(String(c.name).toLowerCase())) score += 30;
-    if (RECORDING_PLACES.test(`${f.path || ''} ${name}`)) score += 20;
-    const t = Math.max(Number(f.added) || 0, Number(f.modified) || 0);
-    const gap = Math.abs(t - c.end) / 1000;
-    if (gap < 120) score += 20; else if (gap < 600) score += 5;
-    const len = (Number(f.duration) || 0) / 1000;
-    if (len && Math.abs(len - c.duration) <= Math.max(5, c.duration * 0.15)) score += 25;
-    if (!f.size || f.size > MAX_SEND) score = -1;
-    return { f, score };
-  }).filter((x) => x.score >= 45).sort((a, b) => b.score - a.score);
+  const scored = files.filter((f) => !used.has(f.id)).map((f) => ({ f, score: scoreRecording(c, f) }))
+    .filter((x) => x.score >= RECORDING_SURE).sort((a, b) => b.score - a.score);
   return scored.length ? scored[0].f : null;
+}
+
+/** Send a chosen sound file as a call's recording (the call: its reference, or its number in the CRM). */
+export function queueRecordingFile({ ref, callId, file, duration }) {
+  const body = { media_id: file.id, file_name: file.name, mime: file.mime, duration: Math.round((Number(file.duration) || 0) / 1000) || duration || undefined };
+  if (callId) body.call_id = Number(callId); else body.client_ref = ref;
+  add({ kind: 'call-recording', label: 'Call recording', method: 'POST', path: '/sfa/call-recordings', ref: newRef('r'), body });
+  if (ref) set('rec_sent', [...(get('rec_sent', []) || []), ref].slice(-300));
+  set('rec_files', [...(get('rec_files', []) || []), file.id].slice(-300));
+  flush().catch(() => {});
 }
 
 /** Look for the recording a few times (the dialer writes it just after the call) and queue it with the call. */
 const looking = new Set();          // (one search per call at a time)
-export async function attachRecording(c, { delays = [3000, 12000, 30000] } = {}) {
+export async function attachRecording(c, { delays = [3000, 12000, 30000, 90000] } = {}) {
   const b = get('boot');
   if (!b || !b.calls || !b.calls.recordings || !c || !c.connected) return false;
   if (looking.has(c.ref) || (get('rec_sent', []) || []).includes(c.ref)) return true;
@@ -203,20 +231,19 @@ export async function attachRecording(c, { delays = [3000, 12000, 30000] } = {})
 async function lookFor(c, delays) {
   const st = await phoneStatus();
   if (!st.audio) return false;
-  const sent = new Set(get('rec_sent', []) || []);
   for (const ms of delays) {
     await wait(ms);
     const f = await findRecording(c);
-    if (f) {
-      add({ kind: 'call-recording', label: 'Call recording', method: 'POST', path: '/sfa/call-recordings', ref: newRef('r'),
-        body: { client_ref: c.ref, media_id: f.id, file_name: f.name, mime: f.mime, duration: Math.round((Number(f.duration) || 0) / 1000) || c.duration } });
-      set('rec_sent', [...sent, c.ref].slice(-300));
-      set('rec_files', [...(get('rec_files', []) || []), f.id].slice(-300));
-      flush().catch(() => {});
-      return true;
-    }
+    if (f) { queueRecordingFile({ ref: c.ref, file: f, duration: c.duration }); return true; }
   }
   return false;
+}
+/** calls of the last hours that are in the CRM but have no recording yet: looked for once more */
+export function recordingsLater(calls) {
+  const sent = new Set(get('rec_sent', []) || []);
+  for (const c of calls) {
+    if (c.connected && c.logged && !sent.has(c.ref) && Date.now() - c.end < 6 * 3600000) attachRecording(c, { delays: [0] }).catch(() => {});
+  }
 }
 
 /** the outbox reads the sound file only when it sends it (it is not kept twice on the phone) */
@@ -250,7 +277,8 @@ export async function recentWithMatches({ since = Date.now() - 2 * 86400000 } = 
   const logged = new Set([...(r.logged || []), ...waitingRefs(), ...(get('linked_refs', []) || [])]);
   set('call_matches', { at: Date.now(), matches: r.matches || {} });
   lastScan = Date.now();
-  return { calls: calls.map((c) => ({ ...c, match: (r.matches || {})[c.digits] || null, logged: logged.has(c.ref) })) };
+  const recorded = new Set(r.recorded || []);
+  return { calls: calls.map((c) => ({ ...c, match: (r.matches || {})[c.digits] || null, logged: logged.has(c.ref), recorded: recorded.has(c.ref) })) };
 }
 
 /**

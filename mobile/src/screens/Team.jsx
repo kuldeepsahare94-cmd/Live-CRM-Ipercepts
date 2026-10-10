@@ -17,7 +17,7 @@ export default function Team() {
   const load = useCallback(() => { GET('/sfa/live').then((x) => { setData(x); setError(''); }).catch((e) => setError(e.message)); }, []);
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, [load]);
   const pins = useMemo(() => (data ? data.people : []).filter((p) => p.lat !== null && p.state !== 'absent').map((p) => ({
-    id: p.id, lat: p.lat, lng: p.lng, color: STATE[p.state][1], text: p.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase(), title: p.name, onClick: () => setPerson(p),
+    id: p.id, lat: p.lat, lng: p.lng, color: STATE[p.state][1], text: p.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase(), title: p.name, sub: `${STATE[p.state][0]}${p.visit ? ` · ${p.visit.name}` : ''}${p.minutes_ago !== null && p.minutes_ago !== undefined ? ` · ${ago(p.minutes_ago)}` : ''}`, openText: 'Their day', onClick: () => setPerson(p),
   })), [data]);
   if (person) {
     return (
@@ -37,16 +37,16 @@ export default function Team() {
         {error && <div className="note bad">{error}</div>}
         {!data ? <Loading /> : !data.people.length ? <Empty title="Nobody in your team yet" /> : (
           <>
-            <div className="chips">{Object.keys(STATE).filter((k) => counts[k]).map((k) => <span key={k} className="chip"><span className="dot" style={{ background: STATE[k][1] }} /> {STATE[k][0]} · {counts[k]}</span>)}</div>
+            <div className="chips">{Object.keys(STATE).filter((k) => counts[k]).map((k) => <span key={k} className="status-chip" style={{ '--c': STATE[k][1] }}>{STATE[k][0]} · {counts[k]}</span>)}</div>
             <MapView pins={pins} fitKey={String(pins.length)} testid="team-map" />
-            <div className="list" data-testid="team-list">
+            <div className="list map-list" data-testid="team-list">
               {data.people.map((p) => (
                 <button key={p.id} type="button" className="row" onClick={() => setPerson(p)}>
                   <Avatar name={p.name} />
                   <div className="main">
                     <div className="title">{p.name}</div>
                     <div className="line">
-                      <span style={{ color: STATE[p.state][1], fontWeight: 600 }}>{STATE[p.state][0]}</span>
+                      <span className="status-chip" style={{ '--c': STATE[p.state][1] }}>{STATE[p.state][0]}</span>
                       {p.visit ? ` · ${p.visit.name}` : ''}{p.in_time ? ` · in ${p.in_time}` : ''}{p.late ? ' (late)' : ''}
                     </div>
                   </div>

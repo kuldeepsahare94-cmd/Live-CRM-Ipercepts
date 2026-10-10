@@ -63,14 +63,14 @@ function chooseFiles({ accept, capture, multiple }) {
 }
 
 /** The camera. Returns null when the person closed it. */
-export async function takePhoto({ selfie = false } = {}) {
-  const max = selfie ? 640 : 1280;
+export async function takePhoto({ selfie = false, max: maxIn = 0, gallery = false } = {}) {
+  const max = maxIn || (selfie ? 640 : 1280);
   if (native) {
     const { Camera, CameraResultType, CameraSource, CameraDirection } = await import('@capacitor/camera');
     try {
       const photo = await Camera.getPhoto({
         quality: 75, width: max, height: max, allowEditing: false, correctOrientation: true, saveToGallery: false,
-        resultType: CameraResultType.DataUrl, source: CameraSource.Camera, direction: selfie ? CameraDirection.Front : CameraDirection.Rear,
+        resultType: CameraResultType.DataUrl, source: gallery ? CameraSource.Prompt : CameraSource.Camera, direction: selfie ? CameraDirection.Front : CameraDirection.Rear,
       });
       const out = await shrink(photo.dataUrl, max);
       return { ...out, file_name: `${selfie ? 'selfie' : 'photo'}-${Date.now()}.jpg` };
@@ -80,7 +80,7 @@ export async function takePhoto({ selfie = false } = {}) {
       throw new Error('The camera could not be opened.');
     }
   }
-  const [file] = await chooseFiles({ accept: 'image/*', capture: selfie ? 'user' : 'environment' });
+  const [file] = await chooseFiles(gallery ? { accept: 'image/*' } : { accept: 'image/*', capture: selfie ? 'user' : 'environment' });
   if (!file) return null;
   const out = await shrink(await fileToDataUrl(file), max);
   return { ...out, file_name: `${selfie ? 'selfie' : 'photo'}-${Date.now()}.jpg` };

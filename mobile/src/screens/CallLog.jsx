@@ -10,14 +10,15 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Phone, Loader2, MessageCircle, CheckCircle2, PhoneOff, Clock } from 'lucide-react';
+import { Phone, Loader2, MessageCircle, CheckCircle2, PhoneOff, Clock, FileAudio } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 import { useApp, listen } from '../lib/app';
 import { GET } from '../lib/api';
 import { titleOf, phoneOf } from '../lib/records';
 import { addDays, today, niceTime, talk } from '../lib/format';
 import { get } from '../lib/store';
-import { startCall, pendingCall, clearPendingCall, findPhoneCall, callBody, queueCall, attachRecording, whatsappAfter, phoneStatus, askCallLog, askAudio, canReadPhone, linkLater, digits10 } from '../lib/calls';
+import { startCall, pendingCall, clearPendingCall, findPhoneCall, callBody, queueCall, attachRecording, whatsappAfter, phoneStatus, askCallLog, askAudio, canReadPhone, linkLater, digits10, queueRecordingFile } from '../lib/calls';
+import RecordingPicker from '../components/RecordingPicker';
 import { TopBar, Loading, Field, StatusBars, VoiceArea } from '../components/ui';
 
 const FALLBACK = { yes: ['Interested', 'Call back later', 'Not interested', 'Already purchased'], no: ['No answer', 'Busy', 'Switched off', 'Wrong number'] };
@@ -61,6 +62,8 @@ export default function CallLog() {
   const handled = useRef(false);
   const tapAt = useRef(0);
   const [late, setLate] = useState(false);
+  const [pickRec, setPickRec] = useState(false);
+  const [recDone, setRecDone] = useState(false);
 
   useEffect(() => {
     GET(`/${module}/${id}`).then((r) => { setRow(r); if (module === 'leads') setStatus(r.status || ''); }).catch((e) => setError(e.message));
@@ -189,6 +192,10 @@ export default function CallLog() {
                 late ? <div className="tiny muted" data-testid="call-late">The call is not in the phone's call history yet. Save now: its real time and length are added by themselves later.</div>
                   : <div className="tiny muted" data-testid="call-guess">The phone's call history could not be read{guess ? `: about ${Math.max(1, Math.round(guess / 60))} min since you tapped Call` : ''}.</div>
               )}
+              {call && call.connected && canReadPhone() && !recDone && (
+                <button type="button" className="btn ghost" onClick={() => setPickRec(true)} data-testid="call-add-rec"><FileAudio size={18} /> Add recording</button>
+              )}
+              {recDone && <div className="tiny" style={{ color: 'var(--ok)' }}>The recording is being sent.</div>}
               {phone && <button type="button" className="btn ghost" onClick={() => whatsappAfter(phone, name)} data-testid="call-whatsapp"><MessageCircle size={18} /> WhatsApp {rules.whatsapp_text ? 'message' : ''}</button>}
             </div>
           )}
@@ -221,6 +228,14 @@ export default function CallLog() {
             {follow === 'pick' && <Field label="When"><input className="input" type="datetime-local" value={followAt} onChange={(e) => setFollowAt(e.target.value)} data-testid="follow-at" /></Field>}
             {follow && follow !== 'pick' && <div className="tiny muted">{quick.find((q) => q.key === follow).when.toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>}
           </div>
+          {pickRec && call && (
+            <RecordingPicker call={call} onClose={() => setPickRec(false)}
+              onPick={(f) => {
+                // (the call must reach the CRM first: saved now when it is not yet)
+                if (!autoSaved) { queueCall(callBody({ module, id, call, number: phone }), `Call with ${name}`); setAutoSaved(true); }
+                queueRecordingFile({ ref: call.ref, file: f, duration: call.duration }); setPickRec(false); setRecDone(true); sync();
+              }} />
+          )}
           {error && <div className="note bad" data-testid="call-error">{error}</div>}
           <button type="button" className="btn primary block big" onClick={save} disabled={busy} data-testid="call-save">{busy ? <Loader2 className="spin" /> : null} {autoSaved ? 'Save the outcome' : 'Save the call'}</button>
           {autoSaved && <button type="button" className="btn ghost block" onClick={() => nav(-1)} data-testid="call-done">Done (the call is already saved)</button>}

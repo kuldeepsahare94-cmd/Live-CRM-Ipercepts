@@ -1,64 +1,202 @@
 /*
- * A map (Leaflet, inside the app — no download needed). Map pictures come
- * from OpenStreetMap, or the map service set in Settings → Field force.
- *   me       { lat, lng } — a blue dot
- *   pins     [{ id, lat, lng, color, text, title, onClick }]
- *   line     [[lat, lng], …] — a route
+ * The map (v1.2): a modern vector map (MapLibre + OpenFreeMap — free, no key),
+ * or the map service set in Settings → Field force (a {z}/{x}/{y} address).
+ * Phones without WebGL, or when the map server cannot be reached, get the plain
+ * map (LeafletMap) with the same pins.
+ *
+ *   me       { lat, lng } — "you are here" (a blue dot that pulses)
+ *   pins     [{ id, lat, lng, color, text, title, sub, onClick, openText }]
+ *            tap a pin: a card slides up (title, sub, "Open" when onClick)
+ *   line     [[lat, lng], …] — a route (a glowing line, start and end marked)
+ *   fitKey   when it changes the map shows everything again
  */
-import { useEffect, useRef } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import { useEffect, useRef, useState } from 'react';
+import { Plus, Minus, Maximize2, X, ChevronRight } from 'lucide-react';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import { useApp } from '../lib/app';
+import LeafletMap from './LeafletMap';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const okColor = (c) => (/^#[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '#3B5BFF');
-const OSM = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const VECTOR_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+const INDIA = [79.09, 21.15];
+const okColor = (c) => (/^#[0-9a-fA-F]{3,8}$/.test(String(c || '')) ? c : '#4F46E5');
+const okNum = (p) => Number.isFinite(p.lat) && Number.isFinite(p.lng);
 
-function pinIcon(p) {
-  const html = `<div style="position:relative;width:30px;height:38px"><div style="position:absolute;inset:0 0 8px 0;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${okColor(p.color)};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)"></div><div style="position:absolute;left:0;top:0;width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:#fff;font:600 11px system-ui">${esc(String(p.text || '').slice(0, 3))}</div></div>`;
-  return L.divIcon({ html, className: 'app-pin', iconSize: [30, 38], iconAnchor: [15, 36] });
+let glOk = null;
+export function webglWorks() {
+  if (glOk !== null) return glOk;
+  try {
+    const c = document.createElement('canvas');
+    glOk = !!(c.getContext('webgl2') || c.getContext('webgl'));
+  } catch { glOk = false; }
+  return glOk;
 }
 
-export default function MapView({ me, pins = [], line = null, fitKey = '', tall = false, testid = 'map' }) {
+/* The style: the company's own map pictures, or the free vector map. */
+export function styleFor(tilesUrl, attribution) {
+  if (!tilesUrl) return VECTOR_STYLE;
+  return {
+    version: 8,
+    sources: { base: { type: 'raster', tiles: [tilesUrl], tileSize: 256, maxzoom: 19, attribution: String(attribution || '') } },
+    layers: [{ id: 'base', type: 'raster', source: 'base' }],
+  };
+}
+
+function pinElement(p, onTap) {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = 'gl-pin';
+  el.style.setProperty('--pin', okColor(p.color));
+  el.title = p.title || '';
+  el.setAttribute('aria-label', p.title || 'Place');
+  const face = document.createElement('span');
+  face.className = 'gl-pin-face';
+  face.textContent = String(p.text || '').slice(0, 3);
+  el.appendChild(face);
+  const tip = document.createElement('span');
+  tip.className = 'gl-pin-tip';
+  el.appendChild(tip);
+  el.addEventListener('click', (e) => { e.stopPropagation(); onTap(p); });
+  return el;
+}
+function meElement() {
+  const el = document.createElement('div');
+  el.className = 'gl-me';
+  el.innerHTML = '<span class="gl-me-halo"></span><span class="gl-me-dot"></span>';
+  return el;
+}
+function endElement(kind) {
+  const el = document.createElement('div');
+  el.className = `gl-end ${kind}`;
+  return el;
+}
+
+export default function MapView(props) {
+  const { me, pins = [], line = null, fitKey = '', tall = false, testid = 'map' } = props;
   const { boot } = useApp();
+  const sfa = (boot && boot.sfa) || {};
+  const tiles = sfa.map_tiles_url || '';
+  const credit = sfa.map_attribution || '';
+  const [plain, setPlain] = useState(() => !webglWorks());
+  const [state, setState] = useState('loading');
+  const [card, setCard] = useState(null);
   const box = useRef(null);
   const map = useRef(null);
-  const layer = useRef(null);
+  const lib = useRef(null);
+  const marks = useRef([]);
   const fitted = useRef(null);
-  const tiles = (boot && boot.sfa && boot.sfa.map_tiles_url) || OSM;
-  const credit = boot && boot.sfa && boot.sfa.map_tiles_url ? esc(boot.sfa.map_attribution || '') : '&copy; OpenStreetMap';
+  const all = useRef([]);
 
+  // the map itself (again when the company's map address changes)
   useEffect(() => {
-    const m = L.map(box.current, { zoomControl: false, attributionControl: true }).setView(me ? [me.lat, me.lng] : [21.15, 79.09], me ? 14 : 5);
-    L.tileLayer(tiles, { maxZoom: 19, attribution: credit }).addTo(m);
-    L.control.zoom({ position: 'bottomright' }).addTo(m);
-    layer.current = L.layerGroup().addTo(m);
-    map.current = m;
-    return () => { try { m.stop(); m.off(); m.remove(); } catch { /* gone */ } map.current = null; fitted.current = null; };
-  }, [tiles]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (plain) return undefined;
+    let gone = false; let m = null; let timer = null;
+    setState('loading');
+    import('maplibre-gl').then((mod) => {
+      if (gone || !box.current) return;
+      const maplibregl = mod.default || mod;
+      lib.current = maplibregl;
+      let loaded = false;
+      try {
+        m = new maplibregl.Map({
+          container: box.current,
+          style: styleFor(tiles, credit),
+          center: me ? [me.lng, me.lat] : INDIA,
+          zoom: me ? 14 : 4,
+          attributionControl: { compact: true },
+          dragRotate: false,
+          pitchWithRotate: false,
+          fadeDuration: 120,
+        });
+      } catch { setPlain(true); return; }
+      if (m.touchZoomRotate) m.touchZoomRotate.disableRotation();
+      map.current = m;
+      const fail = () => { if (!loaded && !gone) { gone = true; setPlain(true); } };
+      timer = setTimeout(fail, 15000);
+      m.on('error', (e) => { if (!loaded && !(e && e.sourceId)) fail(); });
+      m.on('load', () => {
+        loaded = true; clearTimeout(timer);
+        m.addSource('route', { type: 'geojson', lineMetrics: true, data: { type: 'FeatureCollection', features: [] } });
+        m.addLayer({ id: 'route-glow', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#7C3AED', 'line-width': 14, 'line-opacity': 0.18, 'line-blur': 6 } });
+        m.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 8 } });
+        m.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-width': 4.5, 'line-gradient': ['interpolate', ['linear'], ['line-progress'], 0, '#06B6D4', 0.5, '#4F46E5', 1, '#7C3AED'] } });
+        setState('ready');
+      });
+      m.on('click', () => setCard(null));
+    }).catch(() => { if (!gone) setPlain(true); });
+    return () => {
+      gone = true; clearTimeout(timer);
+      marks.current.forEach((k) => k.remove()); marks.current = [];
+      if (m) { try { m.remove(); } catch { /* gone */ } }
+      map.current = null; fitted.current = null;
+    };
+  }, [tiles, credit, plain]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // what is drawn on it
   useEffect(() => {
-    const m = map.current; const g = layer.current;
-    if (!m || !g) return;
-    g.clearLayers();
-    const all = [];
-    if (line && line.length > 1) { L.polyline(line, { color: '#3B5BFF', weight: 4, opacity: 0.8 }).addTo(g); line.forEach((p) => all.push(p)); }
-    pins.forEach((p) => {
-      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return;
-      const mk = L.marker([p.lat, p.lng], { icon: pinIcon(p), title: p.title || '' });
-      if (p.onClick) mk.on('click', p.onClick);
-      mk.addTo(g); all.push([p.lat, p.lng]);
+    const m = map.current; const gl = lib.current;
+    if (plain || state !== 'ready' || !m || !gl) return;
+    marks.current.forEach((k) => k.remove()); marks.current = [];
+    const pts = [];
+    const route = (line || []).filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    const src = m.getSource('route');
+    if (src) src.setData({ type: 'FeatureCollection', features: route.length > 1 ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route.map((p) => [p[1], p[0]]) } }] : [] });
+    if (route.length > 1) {
+      route.forEach((p) => pts.push([p[1], p[0]]));
+      marks.current.push(new gl.Marker({ element: endElement('start') }).setLngLat([route[0][1], route[0][0]]).addTo(m));
+      marks.current.push(new gl.Marker({ element: endElement('end') }).setLngLat([route[route.length - 1][1], route[route.length - 1][0]]).addTo(m));
+    }
+    pins.filter(okNum).forEach((p) => {
+      const k = new gl.Marker({ element: pinElement(p, setCard), anchor: 'bottom' }).setLngLat([p.lng, p.lat]).addTo(m);
+      marks.current.push(k); pts.push([p.lng, p.lat]);
     });
-    if (me) {
-      L.marker([me.lat, me.lng], { icon: L.divIcon({ html: '<div class="pin-me"></div>', className: '', iconSize: [18, 18], iconAnchor: [9, 9] }), interactive: false }).addTo(g);
-      all.push([me.lat, me.lng]);
+    if (me && okNum(me)) {
+      marks.current.push(new gl.Marker({ element: meElement() }).setLngLat([me.lng, me.lat]).addTo(m));
+      pts.push([me.lng, me.lat]);
     }
-    if (fitted.current !== fitKey && all.length) {
-      fitted.current = fitKey;
-      if (all.length === 1) m.setView(all[0], 15, { animate: false });
-      else m.fitBounds(L.latLngBounds(all), { padding: [36, 36], maxZoom: 16, animate: false });
-    }
-  }, [me, pins, line, fitKey]);
+    all.current = pts;
+    if (fitted.current !== fitKey && pts.length) { fitted.current = fitKey; showAll(false); }
+  }, [state, plain, me, pins, line, fitKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return <div ref={box} className={`map${tall ? ' tall' : ''}`} data-testid={testid} />;
+  // the card belongs to a pin that is still there
+  useEffect(() => { if (card && !pins.some((p) => p.id === card.id)) setCard(null); }, [pins, card]);
+
+  // a map in a box that changed size must be told
+  useEffect(() => {
+    if (plain || state !== 'ready' || !box.current || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => { try { if (map.current) map.current.resize(); } catch { /* removed */ } });
+    ro.observe(box.current);
+    return () => ro.disconnect();
+  }, [state, plain]);
+
+  function showAll(animate = true) {
+    const m = map.current; const gl = lib.current; const pts = all.current;
+    if (!m || !gl || !pts.length) return;
+    if (pts.length === 1) { m.jumpTo({ center: pts[0], zoom: 15 }); return; }
+    const b = pts.reduce((bb, p) => bb.extend(p), new gl.LngLatBounds(pts[0], pts[0]));
+    m.fitBounds(b, { padding: { top: 64, bottom: 36, left: 40, right: 60 }, maxZoom: 16, animate, duration: animate ? 600 : 0 });
+  }
+
+  if (plain) return <LeafletMap {...props} />;
+  return (
+    <div className={`map gl-map${tall ? ' tall' : ''}`} data-testid={testid} data-state={state} data-engine="vector">
+      <div ref={box} className="gl-box" style={{ position: 'absolute', inset: 0 }} />
+      {state === 'loading' && <div className="gl-loading"><span className="gl-shimmer" />Loading the map…</div>}
+      <div className="gl-ctrl" role="group" aria-label="Map">
+        <button type="button" aria-label="Zoom in" onClick={() => map.current && map.current.zoomIn()}><Plus size={18} /></button>
+        <button type="button" aria-label="Zoom out" onClick={() => map.current && map.current.zoomOut()}><Minus size={18} /></button>
+        <button type="button" aria-label="Show all" onClick={() => showAll(true)} data-testid={`${testid}-fit`}><Maximize2 size={16} /></button>
+      </div>
+      {card && (
+        <div className="gl-card" data-testid={`${testid}-card`}>
+          <span className="gl-card-dot" style={{ background: okColor(card.color) }}>{String(card.text || '').slice(0, 3)}</span>
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="strong ellipsis">{card.title || 'Place'}</div>
+            {card.sub && <div className="tiny muted ellipsis">{card.sub}</div>}
+          </div>
+          {card.onClick && <button type="button" className="btn small primary" onClick={() => { const c = card; setCard(null); c.onClick(); }} data-testid={`${testid}-open`}>{card.openText || 'Open'}<ChevronRight size={16} /></button>}
+          <button type="button" className="icon-btn" aria-label="Close" onClick={() => setCard(null)}><X size={18} /></button>
+        </div>
+      )}
+    </div>
+  );
 }

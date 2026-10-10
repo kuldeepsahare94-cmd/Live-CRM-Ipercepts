@@ -4,12 +4,12 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download } from 'lucide-react';
+import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download, ScanLine } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 import { useApp, listen } from '../lib/app';
 import { GET } from '../lib/api';
 import { onOutbox } from '../lib/outbox';
-import { canReadPhone, phoneStatus, askCallLog, recentWithMatches, autoLogMissing, callBacks, pendingCall, markPendingShown, scanDue } from '../lib/calls';
+import { canReadPhone, phoneStatus, askCallLog, recentWithMatches, autoLogMissing, callBacks, pendingCall, markPendingShown, scanDue, recordingsLater } from '../lib/calls';
 import { openOutside } from '../lib/location';
 import { get } from '../lib/store';
 import { punchIn, punchOut } from '../lib/fieldwork';
@@ -132,6 +132,7 @@ function CallsCard() {
     try {
       const r = await recentWithMatches({ since: Date.now() - 2 * 86400000 });
       if (await autoLogMissing(r.calls)) sync();
+      recordingsLater(r.calls);
       setBack(callBacks(r.calls).slice(0, 5));
       setNotSaved(r.calls.filter((c) => c.match && !c.logged).length);
     } catch { /* offline: next time */ }
@@ -202,6 +203,7 @@ export default function Home() {
   const quick = [
     sfaOn && { label: 'Check in', icon: MapPin, color: '#2563EB', go: () => (onDuty ? nav('/visit/new') : nav('/visit/new?off=1')), id: 'checkin' },
     has('leads', 'create') && { label: 'New lead', icon: UserPlus, color: '#C026D3', go: () => nav('/m/leads/new'), id: 'lead' },
+    ['leads', 'contacts', 'accounts'].some((m) => has(m, 'create')) && { label: 'Scan card', icon: ScanLine, color: '#7C3AED', go: () => nav('/scan-card'), id: 'scan' },
     has('quotations', 'create') && has('products') && { label: 'New order', icon: ShoppingCart, color: '#0891B2', go: () => nav('/order/new'), id: 'order' },
     has('calls', 'create') && { label: 'Log a call', icon: PhoneCall, color: '#EA580C', go: () => nav(canReadPhone() ? '/calls/phone' : `/m/${has('leads') ? 'leads' : 'accounts'}`), id: 'call' },
     boot.expenses && { label: 'Expense', icon: ReceiptText, color: '#0D9488', go: () => nav('/expenses?add=1'), id: 'expense' },

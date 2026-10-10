@@ -1,13 +1,16 @@
 /* One record: what it is, what can be done with it (call, WhatsApp, go there, check in, order…), its details. */
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Phone, MessageCircle, Navigation, MapPin, Pencil, ShoppingCart, CheckSquare, CalendarPlus, PhoneCall, Crosshair, Check, Loader2 } from 'lucide-react';
+import { Phone, MessageCircle, Navigation, MapPin, Pencil, ShoppingCart, CheckSquare, CalendarPlus, PhoneCall, Crosshair, Check, Loader2, FileAudio } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { GET, PUT, qs, absolute } from '../lib/api';
 import { getRecord, titleOf, phoneOf, show } from '../lib/records';
 import { here, navigateTo, openOutside } from '../lib/location';
 import { money, niceDate, niceTime, phoneFor } from '../lib/format';
-import { TopBar, StatusBars, Loading, Empty, StatusTag, BottomNav } from '../components/ui';
+import { TopBar, StatusBars, Loading, Empty, StatusTag, BottomNav, Avatar } from '../components/ui';
+import Record360 from '../components/Record360';
+import RecordingPicker from '../components/RecordingPicker';
+import { canReadPhone, digits10, queueRecordingFile } from '../lib/calls';
 import { VISIT_MODULES, PLACE_MODULES } from '../components/icons';
 
 const ORDER_FROM = { accounts: 'account_id', contacts: 'account_id', opportunities: 'account_id' };
@@ -27,6 +30,8 @@ export default function RecordView() {
   const [place, setPlace] = useState(undefined);
   const [visits, setVisits] = useState([]);
   const [busy, setBusy] = useState('');
+  const [pickRec, setPickRec] = useState(false);
+  const [recSent, setRecSent] = useState(false);
   const sfa = boot.sfa.enabled;
   const visitable = sfa && VISIT_MODULES.includes(module);
 
@@ -35,7 +40,7 @@ export default function RecordView() {
     getRecord(module, id, mod ? mod.fields : []).then(setData).catch((e) => setError(e.message));
     if (visitable) {
       GET(`/sfa/places/${module}/${id}`).then((x) => setPlace(x.place)).catch(() => setPlace(null));
-      GET(`/sfa/visits${qs({ related_module: module, related_record_id: id })}`).then((x) => setVisits(x.rows.slice(0, 5))).catch(() => setVisits([]));
+      if (!['leads', 'contacts', 'accounts', 'opportunities'].includes(module)) GET(`/sfa/visits${qs({ related_module: module, related_record_id: id })}`).then((x) => setVisits(x.rows.slice(0, 5))).catch(() => setVisits([]));
     }
   }, [module, id, mod, visitable]);
   useEffect(() => { load(); }, [load]);
@@ -80,18 +85,35 @@ export default function RecordView() {
   ].filter(Boolean);
 
   const detail = mod.fields.filter((f) => f.detail !== false && show(f, values[f.api_name], row) !== '' && !['id'].includes(f.api_name));
+  const is360 = ['leads', 'contacts', 'accounts', 'opportunities'].includes(module);
+  const detailsCard = (
+    <div className="card">
+      <div className="card-title">Details</div>
+      <dl className="kv" data-testid="details">
+        {detail.map((f) => [<dt key={`${f.api_name}-k`}>{f.label}</dt>, <dd key={`${f.api_name}-v`}>{show(f, values[f.api_name], row)}</dd>])}
+      </dl>
+    </div>
+  );
+  // a call: its recording (the phone's file can be chosen by hand when it was not found)
+  const callStart = module === 'calls' ? Date.parse(String(row.start_time || row.created_at || '').replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(String(row.start_time || '')) ? '' : 'Z')) : 0;
+  const callFor = module === 'calls' && callStart ? { date: callStart, end: row.end_time ? Date.parse(row.end_time) : callStart + (Number(row.duration_seconds) || 0) * 1000, duration: Number(row.duration_seconds) || 0, digits: digits10(row.phone_number), name: '' } : null;
   return (
     <div className="screen">
       <TopBar title={title} sub={mod.singular} right={mod.can.edit && <Link className="icon-btn" to={`/m/${module}/${id}/edit`} aria-label="Edit" data-testid="edit"><Pencil size={20} /></Link>} />
       <StatusBars />
       <div className="body">
-        <div className="card col">
-          <div className="flex between wrap">
-            <div className="strong" style={{ fontSize: 18 }}>{title}</div>
+        <div className="card hero-card col" data-testid="record-head">
+          <div className="flex" style={{ alignItems: 'center', gap: 12 }}>
+            <Avatar name={title} />
+            <div className="grow">
+              <div className="strong" style={{ fontSize: 18, lineHeight: 1.2 }}>{title}</div>
+              {(row.account_name || row.city || row.state) && <div className="muted small">{[row.account_name, row.city, row.state].filter(Boolean).join(' · ')}</div>}
+            </div>
             <StatusTag value={status} />
           </div>
-          {(row.account_name || row.city) && <div className="muted small">{[row.account_name, row.city].filter(Boolean).join(' · ')}</div>}
-          {row.grand_total !== undefined && row.grand_total !== null && <div className="strong" style={{ fontSize: 20 }}>{money(row.grand_total)}</div>}
+          {row.grand_total !== undefined && row.grand_total !== null && <div className="strong grad-text" style={{ fontSize: 22 }}>{money(row.grand_total)}</div>}
+          {row.amount !== undefined && row.amount !== null && module === 'opportunities' && <div className="strong grad-text" style={{ fontSize: 22 }}>{money(row.amount)}</div>}
+          {phone && <div className="tiny muted flex"><Phone size={12} /> {phone}</div>}
           {place && <div className="tiny faint flex"><MapPin size={12} /> Place saved{place.source === 'visit' ? ' from a visit' : ''}</div>}
         </div>
         {actions.length > 0 && <div className="tiles" data-testid="actions">{actions.map((a) => <Action key={a.testid} {...a} />)}</div>}
@@ -110,14 +132,22 @@ export default function RecordView() {
           </div>
         )}
 
-        <div className="card">
-          <div className="card-title">Details</div>
-          <dl className="kv" data-testid="details">
-            {detail.map((f) => [<dt key={`${f.api_name}-k`}>{f.label}</dt>, <dd key={`${f.api_name}-v`}>{show(f, values[f.api_name], row)}</dd>])}
-          </dl>
-        </div>
+        {module === 'calls' && (
+          <div className="card col" data-testid="call-recording">
+            <div className="card-title"><FileAudio size={15} /> Recording</div>
+            {row.call_recording_url ? <audio controls preload="none" src={absolute(row.call_recording_url)} className="rec-audio" />
+              : recSent ? <div className="small" style={{ color: 'var(--ok)' }}>The recording is being sent.</div>
+                : <div className="small muted">No recording yet.</div>}
+            {!row.call_recording_url && !recSent && callFor && canReadPhone() && Number(row.connected) === 1 && (
+              <button type="button" className="btn outline" onClick={() => setPickRec(true)} data-testid="call-add-rec"><FileAudio size={18} /> Add recording from this phone</button>
+            )}
+          </div>
+        )}
+        {pickRec && callFor && <RecordingPicker call={callFor} onClose={() => setPickRec(false)} onPick={(f) => { queueRecordingFile({ callId: row.id, file: f, duration: callFor.duration }); setPickRec(false); setRecSent(true); }} />}
 
-        {visitable && visits.length > 0 && (
+        {is360 ? <Record360 module={module} id={id} details={detailsCard} /> : detailsCard}
+
+        {!is360 && visitable && visits.length > 0 && (
           <div>
             <div className="card-title" style={{ padding: '0 4px' }}>Visits</div>
             <div className="list">
@@ -129,27 +159,8 @@ export default function RecordView() {
             </div>
           </div>
         )}
-        {module === 'accounts' && <Related title="Contacts" module="contacts" rows={row.contacts} label={(r) => [r.first_name, r.last_name].filter(Boolean).join(' ')} sub={(r) => r.mobile || r.job_title} />}
-        {['accounts', 'contacts'].includes(module) && <Related title="Deals" module="opportunities" rows={row.opportunities} label={(r) => r.opportunity_name} sub={(r) => money(r.amount)} />}
-        {['accounts', 'contacts', 'opportunities'].includes(module) && <Related title="Orders / quotations" module="quotations" rows={row.quotations} label={(r) => r.quote_number} sub={(r) => `${money(r.grand_total)} · ${r.status || ''}`} />}
       </div>
       <BottomNav />
-    </div>
-  );
-}
-
-function Related({ title, module, rows, label, sub }) {
-  if (!Array.isArray(rows) || !rows.length) return null;
-  return (
-    <div>
-      <div className="card-title" style={{ padding: '0 4px' }}>{title}</div>
-      <div className="list">
-        {rows.slice(0, 10).map((r) => (
-          <Link key={r.id} to={`/m/${module}/${r.id}`} className="row" style={{ color: 'inherit' }}>
-            <div className="main"><div className="title">{label(r) || `#${r.id}`}</div><div className="line">{sub(r)}</div></div>
-          </Link>
-        ))}
-      </div>
     </div>
   );
 }

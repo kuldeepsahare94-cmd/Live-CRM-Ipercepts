@@ -1,7 +1,9 @@
 /* Me, the CRM, what waits to be sent, tracking help, sign out. */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, RefreshCw, Trash2, Building2, BatteryWarning, MapPin, CloudUpload } from 'lucide-react';
+import { LogOut, RefreshCw, Trash2, Building2, BatteryWarning, MapPin, CloudUpload, FileAudio, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { canReadPhone } from '../lib/calls';
 import { useApp } from '../lib/app';
 import { get } from '../lib/store';
 import { serverUrl } from '../lib/api';
@@ -9,7 +11,7 @@ import { remove as outboxRemove, pointCount, mine } from '../lib/outbox';
 import { openLocationSettings, isNative } from '../lib/location';
 import { TopBar, BottomNav, Avatar, StatusBars } from '../components/ui';
 
-const VERSION = '1.0.0';
+const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '';
 
 export default function More() {
   const { boot, outbox: all, sync, tracking, say, resetPerson, refreshBoot } = useApp();
@@ -79,6 +81,14 @@ export default function More() {
               <div>3. Location permission: <b>Allow while using the app</b>, and keep GPS on.</div>
             </div>
           </div>
+        )}
+
+        {canReadPhone() && boot.calls && boot.calls.enabled && (
+          <Link to="/calls/recordings" className="card flex" style={{ color: 'inherit', alignItems: 'center' }} data-testid="open-rec-check">
+            <FileAudio size={20} color="var(--brand)" />
+            <div className="grow"><div className="strong">Call recordings check</div><div className="tiny muted">What the app finds on this phone; choose a recording by hand</div></div>
+            <ChevronRight size={18} className="faint" />
+          </Link>
         )}
 
         <button type="button" className="btn outline block" onClick={signOut} data-testid="sign-out" style={{ color: 'var(--bad)' }}><LogOut size={18} /> Sign out</button>

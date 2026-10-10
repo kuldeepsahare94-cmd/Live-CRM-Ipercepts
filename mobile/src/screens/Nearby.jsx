@@ -29,7 +29,7 @@ export default function Nearby() {
     } catch (e) { setError(e.message); setRows([]); }
   }, [radius]);
   useEffect(() => { load(); }, [load]);
-  const pins = useMemo(() => (rows || []).map((r) => ({ id: `${r.module}-${r.id}`, lat: r.lat, lng: r.lng, color: colorOf(r.module), text: (r.name || '?').slice(0, 1).toUpperCase(), title: r.name, onClick: () => nav(`/m/${r.module}/${r.id}`) })), [rows, nav]);
+  const pins = useMemo(() => (rows || []).map((r) => ({ id: `${r.module}-${r.id}`, lat: r.lat, lng: r.lng, color: colorOf(r.module), text: (r.name || '?').slice(0, 1).toUpperCase(), title: r.name, sub: `${LABEL[r.module]} · ${distanceText(r.distance_m)}${r.sub ? ` · ${r.sub}` : ''}`, onClick: () => nav(`/m/${r.module}/${r.id}`) })), [rows, nav]);
   if (!boot.sfa.enabled) return <div className="screen"><TopBar title="Nearby" back={false} /><Empty title="Field force is not switched on." /><BottomNav /></div>;
   return (
     <div className="screen">
@@ -42,14 +42,15 @@ export default function Nearby() {
         {!rows ? <Loading text="Finding where you are…" /> : !rows.length ? (
           <Empty icon={MapPinOff} title={`No saved customer within ${radius} km`}>Customers get a place at their first visit, or with "Customer is here" on their page.</Empty>
         ) : (
-          <div className="list" data-testid="near-list">
+          <div className="list map-list" data-testid="near-list">
             {rows.map((r) => (
               <div key={`${r.module}-${r.id}`} className="row">
+                <span className="map-badge" style={{ '--c': colorOf(r.module) }}>{(r.name || '?').slice(0, 1).toUpperCase()}</span>
                 <button type="button" className="main" style={{ textAlign: 'left' }} onClick={() => nav(`/m/${r.module}/${r.id}`)}>
                   <div className="title">{r.name}</div>
                   <div className="line">{LABEL[r.module]}{r.sub ? ` · ${r.sub}` : ''}{r.last_visit_at ? ` · visited ${niceDate(r.last_visit_at)}` : ''}</div>
                 </button>
-                <div className="end">{distanceText(r.distance_m)}</div>
+                <span className="dist-pill">{distanceText(r.distance_m)}</span>
                 <button type="button" className="icon-btn" style={{ color: 'var(--brand)' }} aria-label="Directions" onClick={() => navigateTo(r.lat, r.lng)}><Navigation size={20} /></button>
               </div>
             ))}

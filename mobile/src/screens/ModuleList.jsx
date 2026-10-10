@@ -1,7 +1,7 @@
 /* A list of a module: search, mine only, more pages, a + to add. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Plus, Search, Phone, Inbox } from 'lucide-react';
+import { Plus, Search, Phone, Inbox, ScanLine } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { GET, qs, absolute } from '../lib/api';
 import { money, niceDate, phoneFor } from '../lib/format';
@@ -49,7 +49,8 @@ export default function ModuleList() {
   const Icon = iconOf(module);
   return (
     <div className="screen">
-      <TopBar title={mod.plural} sub={rows ? `${total} ${total === 1 ? mod.singular.toLowerCase() : mod.plural.toLowerCase()}` : ''} />
+      <TopBar title={mod.plural} sub={rows ? `${total} ${total === 1 ? mod.singular.toLowerCase() : mod.plural.toLowerCase()}` : ''}
+        right={['leads', 'contacts', 'accounts'].includes(module) && mod.can.create ? <button type="button" className="icon-btn" aria-label="Scan a visiting card" onClick={() => nav('/scan-card')} data-testid="list-scan"><ScanLine size={21} /></button> : null} />
       <StatusBars />
       <div className="body">
         <div className="search"><Search size={18} /><input className="input" type="search" placeholder={`Search ${mod.plural.toLowerCase()}`} value={q} onChange={(e) => setQ(e.target.value)} data-testid="list-search" /></div>
