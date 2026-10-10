@@ -2,14 +2,15 @@
  * Home: on duty or not (punch in / out), where I am now (an open visit),
  * today's meetings, quick actions, and the modules of this CRM.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download, ScanLine, ClipboardList, CalendarOff, CheckCheck, ChevronRight } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 import { useApp, listen } from '../lib/app';
 import { GET } from '../lib/api';
 import { onOutbox } from '../lib/outbox';
-import { canReadPhone, phoneStatus, askCallLog, recentWithMatches, autoLogMissing, callBacks, pendingCall, markPendingShown, scanDue, recordingsLater } from '../lib/calls';
+import { canReadPhone, phoneStatus, askCallLog, recentWithMatches, autoLogMissing, callBacks, pendingCall, markPendingShown, scanDue, recordingsLater, callAsks, recentCached, scanAge } from '../lib/calls';
+import AfterCalls from '../components/AfterCalls';
 import { openOutside } from '../lib/location';
 import { get, set } from '../lib/store';
 import { punchIn, punchOut } from '../lib/fieldwork';
@@ -122,6 +123,8 @@ function CallsCard() {
   const [back, setBack] = useState([]);
   const [notSaved, setNotSaved] = useState(0);
   const [allowed, setAllowed] = useState(true);
+  const [phoneList, setPhoneList] = useState(() => recentCached());      // the phone's calls (for "After your calls")
+  const [, setTick] = useState(0);
   const load = useCallback(async (force = false) => {
     GET('/sfa/calls/today').then(setToday).catch(() => {});
     if (!rules.scan_phone || !canReadPhone()) return;
@@ -135,12 +138,23 @@ function CallsCard() {
       recordingsLater(r.calls);
       setBack(callBacks(r.calls).slice(0, 5));
       setNotSaved(r.calls.filter((c) => c.match && !c.logged).length);
+      setPhoneList(r.calls);
     } catch { /* offline: next time */ }
   }, [rules.scan_phone, sync]);
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => listen(CapApp.addListener('resume', () => load())), [load]);
+  // (Home opened again: what it shows is at most a few seconds old)
+  useEffect(() => { load(scanAge() > 10000); }, [load]);
+  // (back from the dialer: the call just made is looked at at once)
+  useEffect(() => listen(CapApp.addListener('resume', () => load(true))), [load]);
   // a call reached the CRM: the count goes up
-  useEffect(() => onOutbox((_items, info) => { if (info && info.done && info.done.kind === 'call') GET('/sfa/calls/today').then(setToday).catch(() => {}); }), []);
+  // (a call or a recording reached the CRM: the questions after the calls are worked out again)
+  const again = useRef(null);
+  useEffect(() => onOutbox((_items, info) => {
+    if (info && info.done && info.done.kind === 'call') GET('/sfa/calls/today').then(setToday).catch(() => {});
+    if (info && info.done && ['call', 'call-recording'].includes(info.done.kind)) { clearTimeout(again.current); again.current = setTimeout(() => load(true), 1500); }
+    setTick((n) => n + 1);
+  }), [load]);
+  useEffect(() => () => clearTimeout(again.current), []);
+  const asks = callAsks(phoneList);
   if (!rules.enabled) return null;
   const target = Number(rules.daily_target || (today && today.target) || 0);
   const n = today ? today.calls : 0;
@@ -173,6 +187,7 @@ function CallsCard() {
           ))}
         </div>
       )}
+      <AfterCalls asks={asks} onChange={() => load(true)} max={3} onMore={() => nav('/calls/phone')} />
       {notSaved > 0 && !rules.auto_log && <button type="button" className="note warn" style={{ textAlign: 'left', border: 0 }} onClick={() => nav('/calls/phone')} data-testid="not-saved">{notSaved} call{notSaved === 1 ? '' : 's'} with customers not saved yet — tap to log</button>}
     </div>
   );

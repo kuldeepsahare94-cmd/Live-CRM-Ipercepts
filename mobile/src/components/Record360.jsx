@@ -59,7 +59,7 @@ export function Timeline({ items, linkable }) {
       {items.map((it) => {
         const k = KIND[it.type] || KIND.note;
         const Icon = it.type === 'call' && !it.connected ? PhoneMissed : k.icon;
-        const to = it.module && linkable(it.module) ? `/m/${it.module}/${it.id}` : null;
+        const to = it.type === 'visit' ? `/visits/${it.id}` : it.module && linkable(it.module) ? `/m/${it.module}/${it.id}` : null;
         const body = (
           <>
             <div className="tl-head">
@@ -68,13 +68,15 @@ export function Timeline({ items, linkable }) {
             </div>
             {it.sub && <div className="tl-sub">{it.sub}</div>}
             <div className="tl-when"><Clock size={11} /> {when(it.at)} · {ago(it.at)}</div>
-            {it.recording && <Rec src={it.recording} />}
           </>
         );
+        // (the player is outside the link: tapping play does not open the call)
         return (
           <div key={`${it.type}-${it.id}`} className="tl-item" data-type={it.type}>
             <span className="tl-node" style={{ '--c': k.color }}><Icon size={15} /></span>
-            {to ? <Link to={to} className="tl-card" style={{ color: 'inherit' }}>{body}</Link> : <div className="tl-card">{body}</div>}
+            {to
+              ? <div className="tl-card"><Link to={to} style={{ color: 'inherit', display: 'block' }} data-testid={`tl-open-${it.type}`}>{body}</Link>{it.recording && <Rec src={it.recording} />}</div>
+              : <div className="tl-card">{body}{it.recording && <Rec src={it.recording} />}</div>}
           </div>
         );
       })}
@@ -86,7 +88,7 @@ function List({ tab, rows, linkable }) {
   const R = (r) => {
     switch (tab) {
       case 'calls': return { to: 'calls', title: r.call_subject || 'Call', line: [r.direction, r.connected ? talk(r.duration_seconds) : 'not answered', r.call_outcome].filter(Boolean).join(' · '), when: r.at, extra: <Rec src={r.call_recording_url} />, note: r.notes };
-      case 'visits': return { title: r.user_name ? `Visit by ${r.user_name}` : 'Visit', line: [r.out_at ? `${niceTime(toIso(r.at))}–${niceTime(toIso(r.out_at))}` : 'there now', r.outcome].filter(Boolean).join(' · '), when: r.at, note: r.notes };
+      case 'visits': return { path: `/visits/${r.id}`, title: r.user_name ? `Visit by ${r.user_name}` : 'Visit', line: [r.out_at ? `${niceTime(toIso(r.at))}–${niceTime(toIso(r.out_at))}` : 'there now', r.outcome, r.recording ? 'recorded' : ''].filter(Boolean).join(' · '), when: r.at, note: r.notes };
       case 'quotations': return { to: 'quotations', title: r.quote_number, line: r.status, amount: r.grand_total, when: r.at };
       case 'opportunities': return { to: 'opportunities', title: r.opportunity_name, line: [r.stage, r.expected_close_date ? `closes ${niceDate(r.expected_close_date)}` : ''].filter(Boolean).join(' · '), amount: r.amount, when: r.at };
       case 'meetings': return { to: 'meetings', title: r.meeting_title, line: [r.status, r.outcome].filter(Boolean).join(' · '), when: r.at };
@@ -105,18 +107,21 @@ function List({ tab, rows, linkable }) {
     <div className="list glow-list" data-testid={`r360-list-${tab}`}>
       {rows.map((r) => {
         const x = R(r);
-        const inner = (
-          <div className="main">
+        const text = (
+          <>
             <div className="flex between"><div className="title">{x.title || `#${r.id}`}</div>{x.amount !== undefined && x.amount !== null && <span className="strong small" style={{ color: 'var(--ink)' }}>{money(x.amount)}</span>}</div>
             {x.line && <div className="line">{x.line}</div>}
             {x.note && <div className="tiny muted" style={{ whiteSpace: 'normal' }}>{x.note}</div>}
             {x.when && <div className="tiny faint">{when(x.when)}</div>}
-            {x.extra}
-          </div>
+          </>
         );
-        return x.to && linkable(x.to)
-          ? <Link key={r.id} to={`/m/${x.to}/${r.id}`} className="row" style={{ color: 'inherit' }}>{inner}</Link>
-          : <div key={r.id} className="row">{inner}</div>;
+        const path = x.path || (x.to && linkable(x.to) ? `/m/${x.to}/${r.id}` : null);
+        // (a row with a recording: its text opens the record, the player stays playable)
+        if (path && x.extra && r.call_recording_url) {
+          return <div key={r.id} className="row" data-testid={`r360-row-${tab}`}><div className="main"><Link to={path} style={{ color: 'inherit', display: 'block' }}>{text}</Link>{x.extra}</div></div>;
+        }
+        if (path) return <Link key={r.id} to={path} className="row" style={{ color: 'inherit' }} data-testid={`r360-row-${tab}`}><div className="main">{text}{x.extra}</div></Link>;
+        return <div key={r.id} className="row"><div className="main">{text}{x.extra}</div></div>;
       })}
     </div>
   );

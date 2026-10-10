@@ -16,7 +16,7 @@
  */
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { get, set } from './store';
-import { add, flush, list as outboxList, mine, newRef, setPreparer } from './outbox';
+import { add, flush, list as outboxList, mine, newRef, setPreparer, setAfterFail, retry } from './outbox';
 import { POST } from './api';
 import { openOutside } from './location';
 import { phoneFor } from './format';
@@ -210,10 +210,10 @@ export async function findRecording(c) {
 }
 
 /** Send a chosen sound file as a call's recording (the call: its reference, or its number in the CRM). */
-export function queueRecordingFile({ ref, callId, file, duration }) {
+export function queueRecordingFile({ ref, callId, file, duration, label }) {
   const body = { media_id: file.id, file_name: file.name, mime: file.mime, duration: Math.round((Number(file.duration) || 0) / 1000) || duration || undefined };
   if (callId) body.call_id = Number(callId); else body.client_ref = ref;
-  add({ kind: 'call-recording', label: 'Call recording', method: 'POST', path: '/sfa/call-recordings', ref: newRef('r'), body });
+  add({ kind: 'call-recording', label: label || 'Call recording', method: 'POST', path: '/sfa/call-recordings', ref: newRef('r'), call_ref: ref || null, call_id: callId ? Number(callId) : null, body });
   if (ref) set('rec_sent', [...(get('rec_sent', []) || []), ref].slice(-300));
   set('rec_files', [...(get('rec_files', []) || []), file.id].slice(-300));
   flush().catch(() => {});
@@ -246,18 +246,63 @@ export function recordingsLater(calls) {
   }
 }
 
-/** the outbox reads the sound file only when it sends it (it is not kept twice on the phone) */
+/**
+ * The outbox reads the sound file only when it sends it (it is not kept twice on the phone).
+ * The phone is asked for the file by its id and, when that fails, by its name (a phone can
+ * give the file a new id once its dialer has finished writing it). A file the phone does not
+ * give yet is tried again later (6 times, over about 20 minutes) before it is shown as not sent.
+ */
 export async function recordingBody(body) {
   if (!body || body.data || body.media_id === undefined) return body;
   const p = plugin();
   if (!p) throw Object.assign(new Error('The recording can only be sent from the phone.'), { permanent: true });
   try {
-    const r = await p.readAudio({ id: body.media_id, maxBytes: MAX_SEND });
+    const r = await p.readAudio({ id: Number(body.media_id), name: body.file_name || '', maxBytes: MAX_SEND });
+    if (!r || !r.data) throw new Error('the phone gave an empty file');
     const { media_id: _m, ...rest } = body;
     return { ...rest, data: r.data };
   } catch (e) {
-    throw Object.assign(new Error(/TOO_BIG|too big/i.test(String(e && (e.code || e.message))) ? 'The recording is too big (more than 12 MB).' : 'The recording is no longer on the phone.'), { permanent: true });
+    const why = String((e && (e.code || e.message)) || '');
+    if (/TOO_BIG|too big/i.test(why)) throw Object.assign(new Error('The recording is too big (more than 12 MB).'), { permanent: true });
+    if (/NO_PERMISSION|no permission/i.test(why)) {
+      throw Object.assign(new Error('Waiting: allow “Music and audio” for iCRM (phone Settings → Apps → iCRM → Permissions).'), {
+        later: 120000, maxTries: 12, finalMessage: 'Not sent: iCRM may not read the phone’s recordings. Allow “Music and audio” for iCRM, then tap “Try again”.',
+      });
+    }
+    const detail = String((e && e.message) || '').replace(/^the file could not be read:\s*/i, '').slice(0, 120);
+    throw Object.assign(new Error('Waiting: the phone has not given the recording yet. It is tried again by itself.'), {
+      later: 60000, maxTries: 6,
+      finalMessage: `Not sent: the phone did not give the recording “${body.file_name || 'file'}”${detail ? ` (${detail})` : ''}. Tap “Try again”, or choose it in More → Call recordings check.`,
+    });
   }
+}
+// a recording that could not be sent: its call may look for one again, and the file may be chosen again
+setAfterFail('call-recording', (body, item) => {
+  const ref = (item && item.call_ref) || (body && body.client_ref);
+  if (ref) set('rec_sent', (get('rec_sent', []) || []).filter((r) => r !== ref));
+  if (body && body.media_id !== undefined) set('rec_files', (get('rec_files', []) || []).filter((id) => id !== body.media_id));
+});
+/** (1.3.1) recordings that 1.3.0 could not send — its phone part lost the file's id — are tried once more */
+export function retryOldRecordings() {
+  if (get('rec_retry_131')) return 0;
+  set('rec_retry_131', true);
+  let n = 0;
+  for (const x of outboxList()) {
+    if (x.kind === 'call-recording' && x.state === 'failed') { retry(x.id); n += 1; }
+  }
+  return n;
+}
+
+/** Where each call's recording is, for the screens: { [call ref]: 'saved' | 'sending' | 'failed' } */
+export function recordingStates(recordedRefs = []) {
+  const out = {};
+  for (const x of mine(outboxList())) {
+    if (x.kind !== 'call-recording') continue;
+    const ref = x.call_ref || ((get(`ob.${x.id}`) || {}).client_ref);
+    if (ref) out[ref] = x.state === 'failed' ? 'failed' : 'sending';
+  }
+  for (const r of recordedRefs) out[r] = 'saved';
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +314,10 @@ export async function recordingBody(body) {
 let lastScan = 0;
 /** Home looks at the phone's calls at most once a minute (the CRM is asked for the names each time) */
 export const scanDue = () => Date.now() - lastScan > 60000;
+export const scanAge = () => Date.now() - lastScan;
+// the last scan's calls, while the app is open (a screen opened again shows them at once)
+let lastCalls = [];
+export const recentCached = () => lastCalls;
 export async function recentWithMatches({ since = Date.now() - 2 * 86400000 } = {}) {
   const calls = await phoneCalls({ since, limit: 200 });
   if (!calls.length) return { calls: [] };
@@ -278,8 +327,79 @@ export async function recentWithMatches({ since = Date.now() - 2 * 86400000 } = 
   set('call_matches', { at: Date.now(), matches: r.matches || {} });
   lastScan = Date.now();
   const recorded = new Set(r.recorded || []);
-  return { calls: calls.map((c) => ({ ...c, match: (r.matches || {})[c.digits] || null, logged: logged.has(c.ref), recorded: recorded.has(c.ref) })) };
+  const saved = r.saved || {};
+  const links = linksNow();
+  const out = {
+    calls: calls.map((c) => {
+      const s = saved[c.ref] || null;
+      // (a call with a number the CRM does not know, saved to a customer by hand: shown with that customer)
+      const link = links[c.ref] ? { module: links[c.ref].module, id: links[c.ref].id, name: links[c.ref].name, linked: true } : null;
+      return {
+        ...c, match: (r.matches || {})[c.digits] || link, logged: logged.has(c.ref), recorded: recorded.has(c.ref),
+        call_id: s ? s.call_id : null, recording_url: s ? s.recording_url : null,
+      };
+    }),
+  };
+  lastCalls = out.calls;
+  return out;
 }
+
+// ---------------------------------------------------------------------------
+// After a call (v1.3.1): what the app could not do by itself is asked
+//   - a number the CRM does not know: "Save this call to which customer?" or "Not for the CRM"
+//   - a saved call whose recording was not found: "Choose the recording" or "No recording"
+// ---------------------------------------------------------------------------
+const DAY = 86400000;
+function linksNow() {
+  const all = get('call_links', {}) || {};
+  const out = {};
+  for (const [k, v] of Object.entries(all)) if (v && Date.now() - (v.at || 0) < 7 * DAY) out[k] = v;
+  return out;
+}
+const listOf = (key) => new Set(get(key, []) || []);
+const addTo = (key, value, max = 300) => set(key, [...(get(key, []) || []).filter((x) => x !== value), value].slice(-max));
+
+/** what to ask about the calls of the last day, newest first: [{ kind: 'link' | 'recording', call }] */
+export function callAsks(calls) {
+  const b = get('boot');
+  if (!b || !b.calls || !b.calls.enabled || !calls) return [];
+  const skip = listOf('call_skip');
+  const never = listOf('call_never');
+  const recSkip = listOf('rec_skip');
+  const sent = listOf('rec_sent');
+  const waiting = waitingRefs();
+  const states = recordingStates(calls.filter((c) => c.recorded).map((c) => c.ref));
+  const links = linksNow();
+  const out = [];
+  for (const c of [...calls].sort((x, y) => y.date - x.date)) {
+    if (Date.now() - c.date > DAY || !c.connected || !c.duration) continue;
+    if (!c.match) {
+      if (c.digits && !skip.has(c.ref) && !never.has(c.digits) && !waiting.has(c.ref) && !links[c.ref]) out.push({ kind: 'link', call: c });
+      continue;
+    }
+    if (!b.calls.recordings || !c.logged || c.recorded || recSkip.has(c.ref)) continue;
+    const st = states[c.ref];
+    // (the app looks for the recording for 2 minutes after the call; asked after that)
+    if (st === 'sending' || st === 'saved' || (sent.has(c.ref) && st !== 'failed')) continue;
+    if (Date.now() - c.end > 3 * 60000) out.push({ kind: 'recording', call: c });
+  }
+  return out;
+}
+/** save a call with a number the CRM does not know to a customer the person chose */
+export function linkCall(c, rec) {
+  lastScan = 0;                          // (the next screen looks at the calls again)
+  set('call_links', { ...linksNow(), [c.ref]: { module: rec.module, id: Number(rec.id), name: rec.name || '', at: Date.now() } });
+  queueCall(callBody({ module: rec.module, id: rec.id, call: c, number: c.number, outcome: { source: 'phone' } }), `Call with ${rec.name || 'customer'}`);
+  flush().catch(() => {});
+  attachRecording(c, { delays: [0, 8000] }).catch(() => {});
+}
+/** "Not for the CRM": this call (or every call with this number) is not asked about again */
+export function skipCall(c, { always = false } = {}) {
+  addTo('call_skip', c.ref);
+  if (always && c.digits) addTo('call_never', c.digits, 500);
+}
+/** "No recording": not asked again for this call */
+export const skipRecording = (c) => addTo('rec_skip', c.ref);
 
 /**
  * Calls with customers that are not in the CRM yet: saved by themselves when the

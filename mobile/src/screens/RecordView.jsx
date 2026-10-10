@@ -20,6 +20,30 @@ function Action({ icon: Icon, label, onClick, to, color = 'var(--brand)', testid
   return to ? <Link to={to} className="tile" data-testid={testid}>{inner}</Link> : <button type="button" className="tile" onClick={onClick} data-testid={testid}>{inner}</button>;
 }
 
+/** a call: who it was with (v1.3.1) — the customer's name, status and number, tap to open */
+function CallWith({ module, id, phone }) {
+  const { module: modOf } = useApp();
+  const [rec, setRec] = useState(null);
+  const m = modOf(module);
+  useEffect(() => { if (m) GET(`/${module}/${id}`).then(setRec).catch(() => setRec(false)); }, [module, id, m]);
+  const name = rec ? titleOf(module, rec) : '';
+  const status = rec ? (rec.status || rec.contact_status || rec.account_status || rec.stage_name || '') : '';
+  const body = (
+    <>
+      <Avatar name={name || '?'} />
+      <div className="grow" style={{ minWidth: 0 }}>
+        <div className="tiny muted">Call with · {m ? m.singular : module}</div>
+        <div className="strong">{rec === null ? '…' : name || `#${id}`}</div>
+        {(phone || (rec && phoneOf(rec))) && <div className="tiny muted flex"><Phone size={12} /> {phone || phoneOf(rec)}</div>}
+      </div>
+      {status && <StatusTag value={status} />}
+    </>
+  );
+  return m
+    ? <Link to={`/m/${module}/${id}`} className="card flex" style={{ color: 'inherit', alignItems: 'center', gap: 12 }} data-testid="call-with">{body}</Link>
+    : <div className="card flex" style={{ alignItems: 'center', gap: 12 }} data-testid="call-with">{body}</div>;
+}
+
 export default function RecordView() {
   const { module, id } = useParams();
   const { module: modOf, boot, day, say, module: m } = useApp();
@@ -132,6 +156,9 @@ export default function RecordView() {
           </div>
         )}
 
+        {module === 'calls' && row.related_module && row.related_record_id && (
+          <CallWith module={row.related_module} id={row.related_record_id} phone={row.phone_number} />
+        )}
         {module === 'calls' && (
           <div className="card col" data-testid="call-recording">
             <div className="card-title"><FileAudio size={15} /> Recording</div>
@@ -152,9 +179,9 @@ export default function RecordView() {
             <div className="card-title" style={{ padding: '0 4px' }}>Visits</div>
             <div className="list">
               {visits.map((v) => (
-                <div key={v.id} className="row">
+                <Link key={v.id} to={`/visits/${v.id}`} className="row" style={{ color: 'inherit' }} data-testid="record-visit">
                   <div className="main"><div className="title">{v.user_name} · {niceDate(v.in_at)}</div><div className="line">{niceTime(v.in_at)}{v.out_at ? `–${niceTime(v.out_at)}` : ''}{v.outcome ? ` · ${v.outcome}` : ''}{v.notes ? ` · ${v.notes}` : ''}</div></div>
-                </div>
+                </Link>
               ))}
             </div>
           </div>

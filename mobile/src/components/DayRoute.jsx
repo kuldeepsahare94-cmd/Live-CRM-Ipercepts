@@ -1,6 +1,7 @@
 /* A person's day: the route on the map, km between stops, the visits. */
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Mic } from 'lucide-react';
 import { GET, qs } from '../lib/api';
 import { km, niceDate, niceTime, today, addDays } from '../lib/format';
 import { Loading, Empty } from './ui';
@@ -58,7 +59,7 @@ export default function DayRoute({ userId }) {
           {data.visits.length > 0 && (
             <div className="list map-list" data-testid="route-visits">
               {data.visits.map((v, i) => (
-                <div key={v.id} className="row"><span className="map-badge" style={{ '--c': v.far ? '#D97706' : '#2563EB' }}>{i + 1}</span><div className="main"><div className="title">{i + 1}. {v.related_name || 'Visit'}</div><div className="line">{v.in_time}{v.out_time ? `–${v.out_time}` : ' (there now)'}{v.outcome ? ` · ${v.outcome}` : ''}{v.notes ? ` · ${v.notes}` : ''}</div></div>{v.far && <span className="tag warn">far</span>}</div>
+                <Link key={v.id} to={`/visits/${v.id}`} className="row" style={{ color: 'inherit' }} data-testid="route-visit"><span className="map-badge" style={{ '--c': v.far ? '#D97706' : '#2563EB' }}>{i + 1}</span><div className="main"><div className="title">{i + 1}. {v.related_name || 'Visit'}</div><div className="line">{v.in_time}{v.out_time ? `–${v.out_time}` : ' (there now)'}{v.outcome ? ` · ${v.outcome}` : ''}{v.notes ? ` · ${v.notes}` : ''}</div></div>{v.recording_id ? <Mic size={15} color="var(--brand)" /> : null}{v.far && <span className="tag warn">far</span>}</Link>
               ))}
             </div>
           )}

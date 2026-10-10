@@ -10,6 +10,7 @@ import { GET, onSignedOut, renewIfOld } from './api';
 import { flush, flushPoints, onOutbox, list as outboxList, mine } from './outbox';
 import { startTracking, stopTracking, onTracking, trackingStatus } from './location';
 import { refreshReminders } from './reminders';
+import { retryOldRecordings } from './calls';
 
 const Ctx = createContext(null);
 // a Capacitor listener: removed even when the screen goes away before it was ready
@@ -80,6 +81,8 @@ export function AppProvider({ children }) {
     refreshReminders(boot, day).then((list) => set('reminders', list.map((x) => ({ id: x.id, at: x.at.toISOString(), title: x.title })))).catch(() => {});
   }, [boot, day]);
   useEffect(() => onSignedOut((msg) => setSignedOut(msg || 'Please sign in again.')), []);
+  // (1.3.1) call recordings that 1.3.0 could not send are tried once more
+  useEffect(() => { if (boot && get('token') && retryOldRecordings()) sync(); }, [boot, sync]);
 
   // the internet comes and goes
   useEffect(() => {

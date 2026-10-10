@@ -30,6 +30,9 @@ export const setPreparer = (kind, fn) => { preparers[kind] = fn; };
 // …and some clean up after they reached the server (a meeting recording is removed from the phone)
 const afterSend = {};
 export const setAfterSend = (kind, fn) => { afterSend[kind] = fn; };
+// …or after they could not be saved (a call recording can then be chosen again) — v1.3.1
+const afterFail = {};
+export const setAfterFail = (kind, fn) => { afterFail[kind] = fn; };
 // the big ones (sound files) go last, with more time
 const BIG = new Set(['call-recording', 'meeting-recording']);
 const save = (items, info) => { set('outbox', items); tell(info); };
@@ -56,8 +59,16 @@ let sending = null;
 const MAX_TRIES = 8;           // a server error 8 times in a row: shown as "could not be saved", not tried for ever
 const PERMANENT = (e) => e instanceof ApiError && e.status >= 400 && e.status < 500 && ![401, 408, 425, 429].includes(e.status);
 function markFailed(id, message) {
+  const item = list().find((x) => x.id === id);
   save(list().map((x) => (x.id === id ? { ...x, state: 'failed', last_error: message } : x)));
+  if (item && afterFail[item.kind]) { try { afterFail[item.kind](get(`ob.${id}`), item); } catch { /* cleaning only */ } }
 }
+/** "Try again" on something that could not be saved: it waits to be sent once more. */
+export function retry(id) {
+  save(list().map((x) => (x.id === id ? { ...x, state: 'waiting', tries: 0, next_at: undefined, last_error: undefined } : x)));
+}
+// (an item that asked to be tried later waits until then; the others go on)
+const due = (x, now) => !(x.next_at && x.next_at > now);
 
 /** Send what is waiting (this person's), in order. Returns how many were sent. */
 export function flush() {
@@ -67,7 +78,8 @@ export function flush() {
     for (;;) {
       const items = list();
       // (call recordings are big: they go after everything else, so they never hold the rest up)
-      const waiting = mine(items).filter((x) => x.state === 'waiting');
+      const now = Date.now();
+      const waiting = mine(items).filter((x) => x.state === 'waiting' && due(x, now));
       const next = waiting.find((x) => !BIG.has(x.kind)) || waiting[0];
       if (!next) break;
       // a visit's number, once its check-in has reached the server
@@ -84,7 +96,7 @@ export function flush() {
       }
       try {
         let body = get(`ob.${next.id}`) ?? undefined;
-        if (preparers[next.kind]) body = await preparers[next.kind](body);
+        if (preparers[next.kind]) body = await preparers[next.kind](body, next);
         const out = await req(next.method, path, body, { timeout: BIG.has(next.kind) ? 300000 : ['visit-files', 'expense', 'punch-in'].includes(next.kind) ? 90000 : 30000 });
         if (next.kind === 'check-in' && out && out.id) set('refs', { ...(get('refs', {}) || {}), [next.ref]: out.id });
         if (afterSend[next.kind]) { try { await afterSend[next.kind](get(`ob.${next.id}`), out); } catch { /* cleaning only */ } }
@@ -93,6 +105,13 @@ export function flush() {
         sent += 1;
       } catch (e) {
         if (e.status === 401) break;                     // signed out: kept until this person signs in again
+        // not ready yet (the phone did not give the recording): tried again later, the rest goes on
+        if (e.later) {
+          const tries = next.tries + 1;
+          if (tries >= (e.maxTries || 6)) { markFailed(next.id, e.finalMessage || e.message); continue; }
+          save(list().map((x) => (x.id === next.id ? { ...x, tries, last_error: e.message, next_at: Date.now() + e.later * tries } : x)));
+          continue;
+        }
         if (e.permanent) { markFailed(next.id, e.message); continue; }
         // a recording that does not get through on a working connection (too slow): a few tries, then given up
         if (BIG.has(next.kind) && e.offline) {

@@ -10,6 +10,8 @@ import { useApp } from '../lib/app';
 import { getRecord, saveRecord, titleOf, EDITABLE } from '../lib/records';
 import { TopBar, Loading, Empty, Field, RecordPicker, Sheet, StatusBars, VoiceArea } from '../components/ui';
 import GeoPick from '../components/GeoPick';
+import { get, set } from '../lib/store';
+import { linkCall } from '../lib/calls';
 import { geoKind } from '../lib/geo';
 
 const LIST_MODULES = new Set(['leads', 'contacts', 'accounts', 'opportunities', 'quotations', 'subscriptions', 'meetings', 'calls', 'tasks', 'products']);
@@ -133,6 +135,9 @@ export default function RecordForm() {
       if (out.duplicate) { setDup(out); return; }
       if (out.warning) say(out.warning, 'error'); else say(id ? 'Saved.' : `${mod.singular} added.`, 'ok');
       const newId = (out.row && out.row.id) || id;
+      // a new lead / customer made for a call the CRM did not know (v1.3.1): the call is saved on it
+      const ac = !id && params.get('after_call') ? get('after_call') : null;
+      if (ac && ac.ref === params.get('after_call') && newId) { linkCall(ac, { module, id: newId, name: titleOf(module, { ...all, ...(out.row || {}) }) }); set('after_call', null); }
       nav(`/m/${module}/${newId}`, { replace: true });
     } catch (e) { setError(e.offline ? 'No internet: this needs the internet. Try again when online.' : e.message); } finally { setBusy(false); }
   };
@@ -145,6 +150,7 @@ export default function RecordForm() {
         <form className="body" onSubmit={(e) => { e.preventDefault(); save(); }}>
           <div className="card col" style={{ gap: 14 }}>
             {related && <div className="note info small">For: {params.get('related_name') || `${related.module} #${related.id}`}</div>}
+            {!id && params.get('after_call') && <div className="note info small" data-testid="form-after-call">The call is saved on this {mod.singular.toLowerCase()} with its recording.</div>}
             {fields.map((f) => (f.type === 'checkbox'
               ? <Input key={f.api_name} f={f} value={values[f.api_name]} onChange={(v) => setValues((p) => ({ ...p, [f.api_name]: v }))} values={values} onSet={(k, v) => setValues((p) => ({ ...p, [k]: v }))} />
               : (
@@ -167,7 +173,11 @@ export default function RecordForm() {
           <div className="col">
             <div className="note warn">{dup.message}</div>
             {(dup.duplicate.matches || []).slice(0, 3).map((x) => (
-              x.id ? <button key={x.id} type="button" className="btn outline block" onClick={() => nav(`/m/${module}/${x.id}`, { replace: true })}>Open {x.title || titleOf(module, x)}</button> : null
+              x.id ? <button key={x.id} type="button" className="btn outline block" onClick={() => {
+                const ac = !id && params.get('after_call') ? get('after_call') : null;
+                if (ac && ac.ref === params.get('after_call')) { linkCall(ac, { module, id: x.id, name: x.title || titleOf(module, x) }); set('after_call', null); say('The call is saved on it.', 'ok'); }
+                nav(`/m/${module}/${x.id}`, { replace: true });
+              }}>Open {x.title || titleOf(module, x)}</button> : null
             ))}
             {dup.duplicate.can_create !== false && <button type="button" className="btn primary block" onClick={() => { setDup(null); save('create'); }} data-testid="dup-create">Add it anyway</button>}
             <button type="button" className="btn ghost block" onClick={() => setDup(null)}>Back to the form</button>

@@ -7,8 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, FileAudio, RefreshCw } from 'lucide-react';
 import { useApp } from '../lib/app';
-import { get } from '../lib/store';
-import { phoneStatus, askCallLog, askAudio, recentWithMatches, phoneCalls, audioAround, scoreRecording, RECORDING_SURE, queueRecordingFile, canReadPhone } from '../lib/calls';
+import { phoneStatus, askCallLog, askAudio, recentWithMatches, phoneCalls, audioAround, scoreRecording, RECORDING_SURE, queueRecordingFile, canReadPhone, recordingStates } from '../lib/calls';
 import { niceDate, niceTime, talk } from '../lib/format';
 import { TopBar, Loading, Empty, StatusBars } from '../components/ui';
 
@@ -20,7 +19,7 @@ const Yes = ({ ok, children }) => (
 );
 
 export default function RecordingsCheck() {
-  const { boot, say } = useApp();
+  const { boot, say, sync } = useApp();
   const [st, setSt] = useState(null);
   const [calls, setCalls] = useState(null);
   const [error, setError] = useState('');
@@ -34,12 +33,13 @@ export default function RecordingsCheck() {
     let list = [];
     try { list = (await recentWithMatches({ since: Date.now() - 2 * 86400000 })).calls; }
     catch (e) { setError(e.offline ? 'No internet: the CRM names cannot be looked up. The phone part is still shown.' : e.message); list = await phoneCalls({ since: Date.now() - 2 * 86400000 }).catch(() => []); }
-    const sent = new Set(get('rec_sent', []) || []);
+    // (what the CRM really has — "saved" — and what is still on its way or could not be sent)
+    const states = recordingStates(list.filter((c) => c.recorded).map((c) => c.ref));
     const last = list.filter((c) => c.connected && c.duration > 0).slice(0, 5);
     const out = [];
     for (const c of last) {
       const files = s.audio ? await audioAround(c.date - 120000, c.end + 15 * 60000) : [];
-      out.push({ ...c, sent: sent.has(c.ref) || !!c.recorded, files: files.map((f) => ({ ...f, score: scoreRecording(c, f) })).sort((a, b) => b.score - a.score).slice(0, 6) });
+      out.push({ ...c, rec: states[c.ref] || '', files: files.map((f) => ({ ...f, score: scoreRecording(c, f) })).sort((a, b) => b.score - a.score).slice(0, 6) });
     }
     setCalls(out);
   }, []);
@@ -48,8 +48,9 @@ export default function RecordingsCheck() {
   const use = (c, f) => {
     if (!c.logged && !c.match) { say('This call is not in the CRM (the number is not a lead or customer).', 'error'); return; }
     if (!c.logged) { say('Save the call first (Phone calls → Log), then add its recording.', 'error'); return; }
-    queueRecordingFile({ ref: c.ref, file: f, duration: c.duration });
+    queueRecordingFile({ ref: c.ref, file: f, duration: c.duration, label: `Call recording: ${c.match ? c.match.name : c.number}` });
     say('The recording is being sent.', 'ok');
+    sync();
     load();
   };
 
@@ -73,9 +74,13 @@ export default function RecordingsCheck() {
           <div key={c.ref} className="card col" style={{ gap: 6 }} data-testid="rec-call">
             <div className="flex between">
               <div className="strong">{c.match ? c.match.name : (c.name || c.number)}</div>
-              {c.sent ? <span className="tag ok">recording sent</span> : <span className="tag warn">no recording yet</span>}
+              {c.rec === 'saved' ? <span className="tag ok" data-testid="rec-state">saved in CRM</span>
+                : c.rec === 'sending' ? <span className="tag info" data-testid="rec-state">sending…</span>
+                  : c.rec === 'failed' ? <span className="tag bad" data-testid="rec-state">not sent</span>
+                    : <span className="tag warn" data-testid="rec-state">no recording yet</span>}
             </div>
             <div className="tiny muted">{niceDate(iso(c.date))} {niceTime(iso(c.date))} · {talk(c.duration)} · {c.type === 'out' ? 'outgoing' : 'incoming'}{c.match ? (c.logged ? ' · in the CRM' : ' · not saved in the CRM yet') : ' · number not in the CRM'}</div>
+            {c.rec === 'saved' && c.recording_url && <audio controls preload="none" src={c.recording_url} className="rec-audio" data-testid="rec-check-audio" />}
             {!c.files.length && <div className="note small">No sound file around this call. Is “record calls automatically” on in the phone's own Phone app?</div>}
             {c.files.map((f) => (
               <div key={f.id} className="flex" style={{ alignItems: 'center', gap: 8, borderTop: '1px solid var(--line-soft)', paddingTop: 6 }}>
@@ -84,7 +89,7 @@ export default function RecordingsCheck() {
                   <div className="small" style={{ wordBreak: 'break-all' }}>{f.name}</div>
                   <div className="tiny faint">{f.path || '—'} · {niceTime(iso(f.added))}{f.duration ? ` · ${talk(Math.round(f.duration / 1000))}` : ''} · match {Math.max(0, f.score)}</div>
                 </div>
-                {!c.sent && <button type="button" className="btn small primary" onClick={() => use(c, f)} data-testid="rec-use">Use</button>}
+                {c.rec !== 'saved' && c.rec !== 'sending' && <button type="button" className="btn small primary" onClick={() => use(c, f)} data-testid="rec-use">Use</button>}
               </div>
             ))}
           </div>

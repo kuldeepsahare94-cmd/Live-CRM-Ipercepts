@@ -7,7 +7,7 @@ import { canReadPhone } from '../lib/calls';
 import { useApp } from '../lib/app';
 import { get } from '../lib/store';
 import { serverUrl } from '../lib/api';
-import { remove as outboxRemove, pointCount, mine } from '../lib/outbox';
+import { remove as outboxRemove, retry as outboxRetry, pointCount, mine } from '../lib/outbox';
 import { openLocationSettings, isNative } from '../lib/location';
 import { TopBar, BottomNav, Avatar, StatusBars } from '../components/ui';
 
@@ -58,8 +58,9 @@ export default function More() {
               {points > 0 && <div className="small flex between"><span>{points} route point{points === 1 ? '' : 's'}</span><span className="tag info">waiting</span></div>}
               {failed.map((x) => (
                 <div key={x.id} className="col" style={{ gap: 4, borderTop: '1px solid var(--line-soft)', paddingTop: 8 }}>
-                  <div className="small flex between"><span className="strong">{x.label || x.kind}</span><button type="button" className="icon-btn" onClick={() => outboxRemove(x.id)} aria-label="Remove"><Trash2 size={18} /></button></div>
+                  <div className="small flex between"><span className="strong">{x.label || x.kind}</span><button type="button" className="icon-btn" onClick={() => { if (window.confirm('Remove it? It will not reach the CRM.')) outboxRemove(x.id); }} aria-label="Remove"><Trash2 size={18} /></button></div>
                   <div className="note bad small">{x.last_error}</div>
+                  <button type="button" className="btn small outline" onClick={() => { outboxRetry(x.id); sync(); }} data-testid="outbox-retry"><RefreshCw size={15} /> Try again</button>
                 </div>
               ))}
             </>

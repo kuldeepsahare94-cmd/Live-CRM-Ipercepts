@@ -20,6 +20,7 @@ import RecordView from './screens/RecordView';
 import RecordForm from './screens/RecordForm';
 import VisitStart from './screens/VisitStart';
 import VisitOpen from './screens/VisitOpen';
+import VisitView from './screens/VisitView';
 import Nearby from './screens/Nearby';
 import Team from './screens/Team';
 import OrderNew from './screens/OrderNew';
@@ -89,6 +90,7 @@ export default function App() {
           <Route path="/m/:module/:id/edit" element={<Signed><RecordForm /></Signed>} />
           <Route path="/visit/new" element={<Signed><VisitStart /></Signed>} />
           <Route path="/visit" element={<Signed><VisitOpen /></Signed>} />
+          <Route path="/visits/:id" element={<Signed><VisitView /></Signed>} />
           <Route path="/nearby" element={<Signed><Nearby /></Signed>} />
           <Route path="/team" element={<Signed><Team /></Signed>} />
           <Route path="/order/new" element={<Signed><OrderNew /></Signed>} />
