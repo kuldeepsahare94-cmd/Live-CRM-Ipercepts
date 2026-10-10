@@ -4,7 +4,8 @@
  * summary. Used on the lead's Calls tab and on a call's own page.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { FileText, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { FileText, Loader2, RefreshCw, Sparkles, Phone, UserRound } from 'lucide-react';
 import { api } from '../../api';
 
 // an https recording plays here; on a plain http page (testing) so does an http one
@@ -84,7 +85,48 @@ const fmtTime = (raw) => {
 const length = (s) => { const n = Math.max(0, Math.round(Number(s) || 0)); return `${Math.floor(n / 60)} min ${String(n % 60).padStart(2, '0')} s`; };
 const SOURCE_TEXT = { app: 'Called from the mobile app', phone: "Found in the phone's call history" };
 
-/** A call's own page: when it started and ended, how long, from where, the recording and its text. */
+const WITH_LABEL = { leads: 'Lead', contacts: 'Contact', accounts: 'Account', opportunities: 'Deal', tickets: 'Ticket' };
+const pathOf = (module, id) => (module === 'leads' ? `/leads/${id}` : `/records/${module}/${id}`);
+const nameOf = (m, r) => (m === 'leads' ? r.student_name || r.name
+  : m === 'contacts' ? [r.first_name, r.last_name].filter(Boolean).join(' ')
+    : m === 'accounts' ? r.account_name : m === 'opportunities' ? r.opportunity_name : r.subject || r.name) || '';
+const statusOf = (m, r) => (m === 'opportunities' ? r.stage_name || r.stage || '' : r.status || r.contact_status || r.account_status || r.lead_status || '');
+const numberOf = (r) => r.mobile || r.phone || r.whatsapp || r.alternate_mobile || '';
+
+/** Who the call was with (v1.3.1): the customer's name (opens it), its status and number. */
+export function CallWith({ record }) {
+  const module = record.related_module;
+  const id = record.related_record_id;
+  const [rec, setRec] = useState(undefined);
+  useEffect(() => {
+    if (!module || !id) return;
+    let on = true;
+    const get = module === 'leads' ? api.getLead(id) : api.universalGet({ api_name: module, table_name: module }, id);
+    get.then((r) => { if (on) setRec(r || null); }).catch(() => { if (on) setRec(null); });
+    return () => { on = false; };
+  }, [module, id]);
+  if (!module || !id) {
+    return <p className="t-meta mb-3" data-testid="call-with-none">Not linked to a lead or customer{record.phone_number ? ` · ${record.phone_number}` : ''}.</p>;
+  }
+  const name = rec ? nameOf(module, rec) : '';
+  const status = rec ? statusOf(module, rec) : '';
+  const number = record.phone_number || (rec ? numberOf(rec) : '');
+  return (
+    <div className="flex items-center gap-3 flex-wrap rounded-xl px-3 py-2.5 mb-4" style={{ background: 'var(--color-canvas-alt)', border: '1px solid var(--color-line-soft)' }} data-testid="call-with">
+      <span className="w-9 h-9 rounded-full flex items-center justify-center text-white shrink-0" style={{ background: 'linear-gradient(135deg, #818CF8, #4338CA)' }}><UserRound className="w-4 h-4" /></span>
+      <div className="min-w-0 flex-1">
+        <p className="t-meta">Call with · {WITH_LABEL[module] || module}</p>
+        {rec === null
+          ? <p className="text-sm text-ink">{WITH_LABEL[module] || 'Record'} #{id} <span className="t-meta">(you cannot open it)</span></p>
+          : <Link to={pathOf(module, id)} className="text-sm font-semibold hover:underline" style={{ color: 'var(--color-brand)' }} data-testid="call-with-name">{rec === undefined ? '…' : name || `#${id}`}</Link>}
+      </div>
+      {number && <span className="text-sm text-ink inline-flex items-center gap-1" data-testid="call-with-number"><Phone className="w-3.5 h-3.5" /> {number}</span>}
+      {status && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand)' }} data-testid="call-with-status">{status}</span>}
+    </div>
+  );
+}
+
+/** A call's own page: who it was with, when it started and ended, how long, from where, the recording and its text. */
 export function CallFactsPanel({ record }) {
   if (!record) return null;
   const source = record.provider ? `Telephony (${record.provider})` : SOURCE_TEXT[record.call_source] || 'Logged by hand';
@@ -99,6 +141,7 @@ export function CallFactsPanel({ record }) {
   return (
     <section className="card p-5 mb-4" data-testid="call-facts-panel">
       <h3 className="text-sm font-semibold text-ink mb-3">The call</h3>
+      <CallWith record={record} />
       <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
         {facts.map(([k, v]) => (
           <div key={k}><dt className="t-meta">{k}</dt><dd className="text-ink">{v}</dd></div>

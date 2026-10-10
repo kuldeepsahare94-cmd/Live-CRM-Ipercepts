@@ -644,13 +644,13 @@ export default function Customer360() {
           {tasks.length === 0 ? <SectionEmpty icon={CheckSquare} tint="#4F46E5" text="Nothing outstanding." /> : (
             <div className="space-y-2">
               {tasks.map((t) => (
-                <div key={t.id} className="flex items-center justify-between gap-3 p-2 -mx-2">
+                <Link key={t.id} to={`/records/tasks/${t.id}`} className="flex items-center justify-between gap-3 p-2 -mx-2 rounded-lg hover:bg-[var(--color-canvas)]" data-testid="c360-task">
                   <div className="min-w-0">
                     <div className="text-sm text-ink truncate">{t.task_title}</div>
                     <div className="t-meta">Due {dt(t.due_date)}</div>
                   </div>
                   <Badge status={t.priority} size="xs">{t.priority}</Badge>
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -705,8 +705,11 @@ export default function Customer360() {
             <div className="space-y-3 max-h-[420px] overflow-y-auto thin-scroll">
               {timeline.map((t) => {
                 const Icon = TIMELINE_ICON[t.type] || Activity;
+                // each item opens its own record (v1.3.1)
+                const to = { call: 'calls', meeting: 'meetings', note: 'notes', email: 'emails' }[t.type];
+                const Row = to ? Link : 'div';
                 return (
-                  <div key={`${t.type}-${t.id}`} className="flex gap-3">
+                  <Row key={`${t.type}-${t.id}`} {...(to ? { to: `/records/${to}/${t.id}` } : {})} className="flex gap-3 rounded-lg p-1 -m-1 hover:bg-[var(--color-canvas)]" data-testid="c360-timeline-item">
                     <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
                       style={{ background: 'var(--color-neutral-soft)', color: 'var(--color-neutral)' }}>
                       <Icon className="w-3.5 h-3.5" />
@@ -718,7 +721,7 @@ export default function Customer360() {
                         {t.duration_seconds ? ` · ${Math.round(t.duration_seconds / 60)}m` : ''} · {dt(t.at)}
                       </div>
                     </div>
-                  </div>
+                  </Row>
                 );
               })}
             </div>

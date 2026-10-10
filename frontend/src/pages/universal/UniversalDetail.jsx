@@ -6,7 +6,7 @@ import NoAccess from '../../components/NoAccess';
 import { usePermissions } from '../../context/usePermissions';
 import StatusBadge from '../../components/StatusBadge';
 import { friendlyError } from '../../components/ui';
-import { getFieldValue, formatFieldValue, renderFieldValue, FieldInput, recordTitle } from './fieldUtils';
+import { getFieldValue, formatFieldValue, renderFieldValue, FieldInput, recordTitle, fieldLabel } from './fieldUtils';
 
 import { computeFollowupStatus, findFollowupField } from './followupUtils';
 import AddRelatedModal, { canCreateRelation, relationTargetModule } from './AddRelatedModal';
@@ -1189,7 +1189,7 @@ export default function UniversalDetail() {
                     {section.fields.flat().map((apiName) => {
                       const f = fields.find((x) => x.api_name === apiName);
                       if (!f) return null;
-                      return <DetailRow key={apiName} label={f.label}
+                      return <DetailRow key={apiName} label={fieldLabel(f)}
                         value={renderFieldValue(record, f)} />;
                     })}
                   </dl>
@@ -1209,7 +1209,7 @@ export default function UniversalDetail() {
                   </div>
                   <dl>
                     {group.fields.map((f) => (
-                      <DetailRow key={f.id} label={f.label}
+                      <DetailRow key={f.id} label={fieldLabel(f)}
                         value={renderFieldValue(record, f)} />
                     ))}
                   </dl>
@@ -1256,12 +1256,15 @@ export default function UniversalDetail() {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} className="border-b border-line/60 transition-colors"
+                  // the whole row opens the record (v1.3.1), not only its first cell
+                  <tr key={row.id} className={`border-b border-line/60 transition-colors${relationRecordPath(key, row.id) ? ' cursor-pointer' : ''}`}
+                    data-testid={`subpanel-row-${key}`}
+                    onClick={(e) => { const href = relationRecordPath(key, row.id); if (href && !e.target.closest('a, button, audio, input')) navigate(href); }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = `${accentFor(module.api_name).solid}0A`; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}>
                     {subpanelColumns(rows[0]).map((k, ci) => {
                       const empty = row[k] === null || row[k] === undefined || row[k] === '';
-                      const text = empty ? '—' : String(row[k]);
+                      const text = empty ? (ci === 0 ? 'Open' : '—') : String(row[k]);
                       const href = ci === 0 ? relationRecordPath(key, row.id) : null;
                       return (
                         <td key={k} className={`py-3 px-4 ${ci === 0 ? 'font-medium' : 'text-slate-600'}`}>

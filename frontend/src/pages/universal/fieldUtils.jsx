@@ -2,6 +2,7 @@
 
 import { GeoInput, geoKind } from '../../components/geo/GeoField';
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Search, X, Check, ChevronDown } from 'lucide-react';
 import { api } from '../../api';
 import { requestLabel, subscribe } from './lookupCache';
@@ -34,7 +35,8 @@ export function formatFieldValue(value, field) {
   if (field.field_type === 'currency') return `₹${Number(value).toLocaleString('en-IN')}`;
   if (field.field_type === 'percent') return `${value}%`;
   if (field.field_type === 'date') return String(value).slice(0, 10);
-  if (field.field_type === 'datetime') return String(value).replace('T', ' ').slice(0, 16);
+  if (field.field_type === 'datetime') return datetimeText(value, field);
+  if (field.api_name === 'related_module' && RELATED_LABEL[String(value)]) return RELATED_LABEL[String(value)];
   // A choice whose stored value differs from what it says (e.g. Billing
   // Frequency stores 3 and reads "3 months", or an option an admin renamed)
   // shows its label. The stored value never changes when a label does.
@@ -57,6 +59,10 @@ export function formatFieldValue(value, field) {
 // formatFieldValue stays string-only for exports, initials and tooltips.
 export function renderFieldValue(record, field) {
   const value = getFieldValue(record, field);
+  // "Related Record ID" 133 → the record's name, a link to it (calls, meetings, tasks, notes…)
+  if (field.api_name === 'related_record_id' && record && record.related_module && value) {
+    return <RelatedValue module={record.related_module} id={value} />;
+  }
   if (field.field_type === 'lookup') {
     return <LookupValue module={field.lookup_module} value={value} />;
   }
@@ -72,6 +78,49 @@ export function renderFieldValue(record, field) {
     );
   }
   return formatFieldValue(value, field);
+}
+
+// The modules a call / meeting / task / note can belong to (related_module), as people say them.
+export const RELATED_LABEL = { leads: 'Lead', contacts: 'Contact', accounts: 'Account', opportunities: 'Deal', deals: 'Deal', tickets: 'Ticket', quotations: 'Quotation', subscriptions: 'Subscription', invoices: 'Invoice' };
+// leads and payments have their own pages; everything else the universal one
+export const recordPath = (module, id) => (module === 'leads' ? `/leads/${id}` : module === 'payments' ? `/payments/${id}` : `/records/${module}/${id}`);
+
+/**
+ * A date and time for reading. A moment the server or the phone wrote with its zone
+ * ("2026-10-10T12:15:08.000Z") is shown in this computer's time (17:45 in India), not
+ * as it is stored; a time typed in a form ("2026-10-10T17:45") stays as it was typed.
+ * The CRM's own stamps (created_at…, "2026-10-10 12:15:08") are UTC, so they move too.
+ */
+export function datetimeText(value, field = {}) {
+  const raw = String(value);
+  const zoned = /[zZ]|[+-]\d\d:?\d\d$/.test(raw);
+  const stamp = /^(created_at|updated_at|last_activity_at|completed_at|closed_at)$/.test(field.api_name || '') && /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(raw);
+  if (zoned || stamp) {
+    const d = new Date(zoned ? raw : `${raw.replace(' ', 'T')}Z`);
+    if (!Number.isNaN(d.getTime())) {
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+  }
+  return raw.replace('T', ' ').slice(0, 16);
+}
+
+/** what a field is called on screen: the two "related" columns get plain names (an admin's own label stays) */
+export function fieldLabel(f) {
+  if (f.api_name === 'related_record_id' && /^related record id$/i.test(f.label || '')) return 'Related To';
+  if (f.api_name === 'related_module' && /^related module$/i.test(f.label || '')) return 'Related Type';
+  return f.label;
+}
+
+export function RelatedValue({ module, id }) {
+  const [, force] = useState(0);
+  useEffect(() => subscribe(() => force((n) => n + 1)), []);
+  const label = requestLabel(module, id);
+  const text = label === null ? '…' : label === '' ? `${RELATED_LABEL[module] || module} #${id}` : label;
+  return (
+    <Link to={recordPath(module, id)} onClick={(e) => e.stopPropagation()} className="hover:underline font-medium"
+      style={{ color: 'var(--color-brand)' }} data-testid="related-link">{text}</Link>
+  );
 }
 
 function DirectoryValue({ field, value }) {

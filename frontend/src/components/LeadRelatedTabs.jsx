@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Paperclip, Download, PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, CheckSquare, TrendingUp } from 'lucide-react';
 import { api } from '../api';
 import { MeetingList } from './MeetingCard';
 import { RecordingPlayer, CallTranscript } from './calls/CallRecording';
+import { datetimeText } from '../pages/universal/fieldUtils';
 
 /* ---------------------------------------------------------------------------
    These are REAL tables, not invented ones. calls/meetings/tasks/notes/
@@ -23,6 +24,17 @@ import { RecordingPlayer, CallTranscript } from './calls/CallRecording';
 
 function tableModule(apiName) {
   return { api_name: apiName, table_name: apiName };
+}
+
+// A row opens its record (v1.3.1) — except a click on the player, a link or a button in it.
+function useOpenRow() {
+  const navigate = useNavigate();
+  return (path) => ({
+    role: 'link', tabIndex: 0, title: 'Open',
+    className: 'cursor-pointer rounded-md hover:bg-[var(--color-canvas)] transition-colors',
+    onClick: (e) => { if (e.target.closest('audio, a, button, details, summary, input, textarea')) return; navigate(path); },
+    onKeyDown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) navigate(path); },
+  });
 }
 
 const mmss = (total) => {
@@ -46,6 +58,7 @@ const SOURCE = { app: 'App', phone: 'Phone' };
 const clock = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); };
 export function CallsTab({ leadId, refreshKey = 0 }) {
   const [rows, setRows] = useState(null);
+  const open = useOpenRow();
   useEffect(() => {
     let cancelled = false;
     api.universalList(tableModule('calls'), { related_module: 'leads', related_record_id: leadId })
@@ -63,12 +76,13 @@ export function CallsTab({ leadId, refreshKey = 0 }) {
         const inbound = c.direction === 'Inbound';
         const missed = real && inbound && !c.connected;
         const Icon = !real ? PhoneCall : (missed ? PhoneMissed : (inbound ? PhoneIncoming : PhoneOutgoing));
+        const o = open(`/records/calls/${c.id}`);
         return (
-          <div key={c.id} className="flex items-start gap-3 text-sm border-l-2 border-line pl-3 py-1">
+          <div key={c.id} {...o} className={`flex items-start gap-3 text-sm border-l-2 border-line pl-3 py-1 ${o.className}`} data-testid="lead-call-row">
             <Icon className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: missed ? 'var(--color-danger)' : 'var(--color-brand)' }} />
             <div className="min-w-0 flex-1">
               <div className="text-ink font-medium flex items-center gap-2 flex-wrap">
-                {c.call_subject || c.call_outcome || 'Call'}
+                <Link to={`/records/calls/${c.id}`} className="hover:underline" data-testid="lead-call-open">{c.call_subject || c.call_outcome || 'Call'}</Link>
                 {ivr && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand)' }}>IVR</span>}
                 {!ivr && SOURCE[c.call_source] && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-canvas-alt)', color: 'var(--color-muted)' }} title={c.call_source === 'app' ? 'Called from the mobile app' : 'Found in the phone\'s call history'} data-testid="call-source">{SOURCE[c.call_source]}</span>}
                 {ivr && !c.call_outcome && !missed && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-danger-soft)', color: 'var(--color-danger)' }}>Not disposed</span>}
@@ -108,6 +122,7 @@ export function MeetingsTab({ leadId, refreshKey = 0 }) {
 
 export function TasksTab({ leadId }) {
   const [rows, setRows] = useState(null);
+  const open = useOpenRow();
   useEffect(() => {
     api.universalList(tableModule('tasks'), { related_module: 'leads', related_record_id: leadId })
       .then(setRows).catch(() => setRows([]));
@@ -116,15 +131,15 @@ export function TasksTab({ leadId }) {
   if (rows.length === 0) return <p className="t-meta py-3">No tasks linked to this lead.</p>;
   return (
     <div className="space-y-2">
-      {rows.map((t) => (
-        <div key={t.id} className="flex items-start gap-3 text-sm border-l-2 border-line pl-3 py-1">
+      {rows.map((t) => { const o = open(`/records/tasks/${t.id}`); return (
+        <div key={t.id} {...o} className={`flex items-start gap-3 text-sm border-l-2 border-line pl-3 py-1 ${o.className}`} data-testid="lead-task-row">
           <CheckSquare className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: t.status === 'Completed' ? 'var(--color-success)' : 'var(--color-brand)' }} />
           <div className="min-w-0 flex-1">
-            <div className="text-ink font-medium">{t.task_title}</div>
+            <Link to={`/records/tasks/${t.id}`} className="text-ink font-medium hover:underline block">{t.task_title || 'Task'}</Link>
             <div className="t-meta">{t.status}{t.due_date ? ` · Due ${String(t.due_date).slice(0, 10)}` : ''}{t.priority ? ` · ${t.priority}` : ''}</div>
           </div>
         </div>
-      ))}
+      ); })}
     </div>
   );
 }
@@ -184,6 +199,7 @@ export function DealsTab({ lead }) {
 
 export function NotesTab({ leadId }) {
   const [rows, setRows] = useState(null);
+  const open = useOpenRow();
   useEffect(() => {
     api.universalList(tableModule('notes'), { related_module: 'leads', related_record_id: leadId })
       .then(setRows).catch(() => setRows([]));
@@ -192,12 +208,13 @@ export function NotesTab({ leadId }) {
   if (rows.length === 0) return <p className="t-meta py-3">No notes in the shared notes log for this lead.</p>;
   return (
     <div className="space-y-2">
-      {rows.map((n) => (
-        <div key={n.id} className="text-sm border-l-2 border-line pl-3 py-1">
-          <div className="text-ink">{n.body}</div>
-          <div className="t-meta mt-0.5">{String(n.created_at || '').slice(0, 16)}</div>
+      {rows.map((n) => { const o = open(`/records/notes/${n.id}`); return (
+        <div key={n.id} {...o} className={`text-sm border-l-2 border-line pl-3 py-1 ${o.className}`} data-testid="lead-note-row">
+          {n.title && <div className="text-ink font-medium">{n.title}</div>}
+          <div className="text-ink">{String(n.body || '').replace(/<[^>]+>/g, ' ').trim()}</div>
+          <div className="t-meta mt-0.5">{datetimeText(n.created_at || '', { api_name: 'created_at' })}</div>
         </div>
-      ))}
+      ); })}
     </div>
   );
 }

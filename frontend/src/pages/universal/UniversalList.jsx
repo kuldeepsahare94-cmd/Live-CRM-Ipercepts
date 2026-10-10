@@ -13,7 +13,7 @@ import { api } from '../../api';
 import { usePermissions } from '../../context/usePermissions';
 import StatusBadge from '../../components/StatusBadge';
 import { downloadCSV } from '../../utils/csv';
-import { getFieldValue, formatFieldValue, renderFieldValue, FieldInput, recordTitle } from './fieldUtils';
+import { getFieldValue, formatFieldValue, renderFieldValue, FieldInput, recordTitle, fieldLabel } from './fieldUtils';
 import { cachedLabel } from './lookupCache';
 import { computeFollowupStatus, findFollowupField } from './followupUtils';
 import { pickCardField, extrasFor } from './listKpis';
@@ -633,7 +633,7 @@ export default function UniversalList() {
                 <RowCheckbox checked={pageSelected} indeterminate={!pageSelected && somePageSelected}
                   label="Select all on this page" onChange={() => selection.setMany(pageIds, !pageSelected)} />
               </th>
-              {listFields.map((f) => <th key={f.id} className="py-3 px-4 font-medium">{f.label}</th>)}
+              {listFields.map((f) => <th key={f.id} className="py-3 px-4 font-medium">{fieldLabel(f)}</th>)}
               {listFields.length === 0 && <th className="py-3 px-4 font-medium">Record</th>}
               {/* A deal's stage is not one of its fields, so it gets its own
                   column — the cards above count it, the rows should show it. */}
