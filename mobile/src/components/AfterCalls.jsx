@@ -7,9 +7,9 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PhoneForwarded, FileAudio, UserPlus, Search, X, ChevronRight } from 'lucide-react';
+import { PhoneForwarded, FileAudio, UserPlus, Search, X, ChevronRight, ChevronDown } from 'lucide-react';
 import { useApp } from '../lib/app';
-import { set } from '../lib/store';
+import { get, set } from '../lib/store';
 import { linkCall, skipCall, skipRecording, queueRecordingFile } from '../lib/calls';
 import { niceDate, niceTime, talk } from '../lib/format';
 import { Sheet, RecordPicker } from './ui';
@@ -25,8 +25,11 @@ const facts = (c) => `${WORD[c.type] || 'Call'} · ${niceDate(iso(c.date))} ${ni
  * @param onChange something was answered (the list is worked out again)
  * @param max      how many are shown (the rest: "N more")
  */
-export default function AfterCalls({ asks, onChange, max = 3, onMore }) {
+export default function AfterCalls({ asks, onChange, max = 3, onMore, foldable = false }) {
   const { module: modOf, say, sync, boot } = useApp();
+  // (Home: folded until opened; remembered on the phone)
+  const [open, setOpen] = useState(() => !foldable || !!get('fold_asks_open'));
+  const toggle = () => { set('fold_asks_open', !open); setOpen(!open); };
   const nav = useNavigate();
   const [linking, setLinking] = useState(null);       // the call being saved to a customer
   const [module, setModule] = useState('');
@@ -47,8 +50,13 @@ export default function AfterCalls({ asks, onChange, max = 3, onMore }) {
 
   return (
     <div className="col after-calls" style={{ gap: 10 }} data-testid="after-calls">
-      <div className="card-title"><PhoneForwarded size={15} /> After your calls</div>
-      {shown.map(({ kind, call: c }) => (
+      {foldable ? (
+        <button type="button" className="fold-head" onClick={toggle} aria-expanded={open} data-testid="after-calls-toggle">
+          <PhoneForwarded size={15} /> <span className="grow">After your calls</span><span className="seg-n">{list.length}</span>
+          {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+        </button>
+      ) : <div className="card-title"><PhoneForwarded size={15} /> After your calls</div>}
+      {open && shown.map(({ kind, call: c }) => (
         <div key={`${kind}-${c.ref}`} className="ask" data-testid={`ask-${kind}`}>
           <div className="flex between" style={{ alignItems: 'flex-start' }}>
             <div className="grow" style={{ minWidth: 0 }}>
@@ -62,7 +70,7 @@ export default function AfterCalls({ asks, onChange, max = 3, onMore }) {
             <>
               <div className="small">This number is not in the CRM. Save the call to a customer?</div>
               <div className="ask-btns">
-                {mods.length > 0 && <button type="button" className="btn small primary" onClick={() => { setLinking(c); setModule(''); }} data-testid="ask-link"><Search size={15} /> Choose customer</button>}
+                {mods.length > 0 && <button type="button" className="btn small primary" onClick={() => { setLinking(c); setModule(''); }} data-testid="ask-choose"><Search size={15} /> Choose customer</button>}
                 {canLead && <button type="button" className="btn small outline" onClick={() => newLead(c)} data-testid="ask-lead"><UserPlus size={15} /> New lead</button>}
                 <button type="button" className="btn small ghost" onClick={() => { skipCall(c); done('Not saved in the CRM.'); }} data-testid="ask-skip">Not for CRM</button>
               </div>
@@ -79,7 +87,7 @@ export default function AfterCalls({ asks, onChange, max = 3, onMore }) {
           )}
         </div>
       ))}
-      {list.length > shown.length && onMore && (
+      {open && list.length > shown.length && onMore && (
         <button type="button" className="btn ghost small" onClick={onMore} data-testid="ask-more">{list.length - shown.length} more <ChevronRight size={15} /></button>
       )}
 

@@ -109,7 +109,7 @@ export function callBody({ module, id, call, number, outcome = {} }) {
     phone_number: number || c.number || undefined,
     direction: c.direction || 'Outbound',
     connected: outcome.connected !== undefined ? outcome.connected : !!c.connected,
-    disposition: outcome.disposition || autoOutcome(c),
+    disposition: outcome.disposition || (outcome.connected !== undefined && !c.date ? (outcome.connected ? 'Connected' : 'No answer') : autoOutcome(c)),
     duration_seconds: c.duration !== undefined ? c.duration : outcome.duration_seconds,
     start_time: start,
     end_time: c.end ? new Date(c.end).toISOString() : undefined,
@@ -359,8 +359,12 @@ function linksNow() {
 const listOf = (key) => new Set(get(key, []) || []);
 const addTo = (key, value, max = 300) => set(key, [...(get(key, []) || []).filter((x) => x !== value), value].slice(-max));
 
-/** what to ask about the calls of the last day, newest first: [{ kind: 'link' | 'recording', call }] */
-export function callAsks(calls) {
+const startOfToday = () => { const t = new Date(); t.setHours(0, 0, 0, 0); return t.getTime(); };
+/**
+ * what to ask about the calls, newest first: [{ kind: 'link' | 'recording', call }]
+ * @param since  from when (ms): Home asks about today's calls only; "Phone calls" about the last day
+ */
+export function callAsks(calls, { since = startOfToday() } = {}) {
   const b = get('boot');
   if (!b || !b.calls || !b.calls.enabled || !calls) return [];
   const skip = listOf('call_skip');
@@ -372,7 +376,7 @@ export function callAsks(calls) {
   const links = linksNow();
   const out = [];
   for (const c of [...calls].sort((x, y) => y.date - x.date)) {
-    if (Date.now() - c.date > DAY || !c.connected || !c.duration) continue;
+    if (c.date < Math.max(since, Date.now() - DAY) || !c.connected || !c.duration) continue;
     if (!c.match) {
       if (c.digits && !skip.has(c.ref) && !never.has(c.digits) && !waiting.has(c.ref) && !links[c.ref]) out.push({ kind: 'link', call: c });
       continue;

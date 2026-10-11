@@ -142,7 +142,13 @@ export default function CallLog() {
   }, [row]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = () => {
-    if (connected === null || !disposition) { setError('Say if the call connected, and how it went.'); return; }
+    // (the outcome is not required — v1.3.2: a call saved by itself needs nothing more; the remark,
+    // the lead's status or a follow-up can be saved alone)
+    const statusChanged = module === 'leads' && status && row && status !== row.status;
+    if (autoSaved && !disposition && connected === (call ? call.connected : null) && !notes.trim() && !statusChanged && !follow) {
+      clearPendingCall(); say('Call saved.', 'ok'); nav(-1); return;
+    }
+    const isConnected = connected !== null ? connected : call ? call.connected : false;
     let followUpAt;
     if (follow) {
       const when = follow === 'pick' ? new Date(followAt) : quickTimes().find((q) => q.key === follow).when;
@@ -154,7 +160,7 @@ export default function CallLog() {
     const body = callBody({
       module, id, call, number: phone,
       outcome: {
-        ref: ref.current, mode: 'update', connected, disposition, notes: notes.trim() || undefined,
+        ref: ref.current, mode: 'update', connected: isConnected, disposition: disposition || undefined, notes: notes.trim() || undefined,
         lead_status: module === 'leads' && status && status !== row.status ? status : undefined,
         follow_up_at: followUpAt, duration_seconds: call ? undefined : guess || undefined,
       },
@@ -201,7 +207,7 @@ export default function CallLog() {
           )}
 
           <div className="card col" style={{ gap: 12 }}>
-            <div className="card-title">How did it go?</div>
+            <div className="card-title">How did it go? <span className="tiny faint" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>(if you like)</span></div>
             <div className="chips">
               <button type="button" className={`chip${connected === true ? ' on' : ''}`} onClick={() => { setConnected(true); setDisposition(''); }} data-testid="call-connected">Spoke to them</button>
               <button type="button" className={`chip${connected === false ? ' on' : ''}`} onClick={() => { setConnected(false); setDisposition(''); }} data-testid="call-not">Did not connect</button>

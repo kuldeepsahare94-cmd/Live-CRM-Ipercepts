@@ -64,7 +64,7 @@ export default function PhoneCalls() {
           </div>
         )}
         {error && <div className="note bad">{error}</div>}
-        {rows && rows.length > 0 && callAsks(rows).length > 0 && <div className="card"><AfterCalls asks={callAsks(rows)} onChange={load} max={10} /></div>}
+        {rows && rows.length > 0 && callAsks(rows, { since: 0 }).length > 0 && <div className="card"><AfterCalls asks={callAsks(rows, { since: 0 })} onChange={load} max={10} /></div>}
         {allowed && !rows && <Loading />}
         {allowed && rows && !rows.length && !error && <Empty icon={Phone} title="No calls" />}
         {rows && rows.length > 0 && (

@@ -1,7 +1,7 @@
 /* The small pieces every screen uses. */
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Home, Users, MapPin, Map as MapIcon, MoreHorizontal, Loader2, Search, WifiOff, CloudUpload, ReceiptText, Mic } from 'lucide-react';
+import { ArrowLeft, Home, Users, MapPin, Map as MapIcon, MoreHorizontal, Loader2, Search, WifiOff, CloudUpload, ReceiptText, Mic, Check } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { GET, qs } from '../lib/api';
 import { mine } from '../lib/outbox';
@@ -105,8 +105,15 @@ export function Field({ label, hint, children }) {
 }
 
 /** Choose a record of a module (a customer for a visit or an order). */
-export function RecordPicker({ module, title, onPick, onClose, params = {} }) {
+/**
+ * Choose a record (search). With `multi`: tick several, then "Add N" (onDone gets the rows) — v1.3.2;
+ * `already` (ids) are shown ticked and cannot be chosen again.
+ */
+export function RecordPicker({ module, title, onPick, onClose, params = {}, multi = false, onDone, already = [] }) {
   const [q, setQ] = useState('');
+  const [chosen, setChosen] = useState([]);           // (multi) the rows ticked, in the order they were ticked
+  const has = (id) => chosen.some((x) => x.id === id);
+  const tick = (r) => setChosen((c) => (c.some((x) => x.id === r.id) ? c.filter((x) => x.id !== r.id) : [...c, r]));
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const seq = useRef(0);
@@ -130,11 +137,22 @@ export function RecordPicker({ module, title, onPick, onClose, params = {} }) {
       {rows && !rows.length && <Empty title="Nothing found" />}
       {rows && rows.length > 0 && (
         <div className="list flat" style={{ boxShadow: 'none', border: '1px solid var(--line)' }}>
-          {rows.map((r) => (
-            <button type="button" key={r.id} className="row" onClick={() => onPick(r)} data-testid="picker-row">
-              <div className="main"><div className="title">{r.title}</div>{r.sub && <div className="line">{r.sub}</div>}</div>
-            </button>
-          ))}
+          {rows.map((r) => {
+            const old = multi && already.includes(Number(r.id));
+            return (
+              <button type="button" key={r.id} className="row" disabled={old} onClick={() => (multi ? tick(r) : onPick(r))} data-testid="picker-row">
+                {multi && <span className={`tickbox${has(r.id) || old ? ' on' : ''}`} aria-hidden="true">{(has(r.id) || old) && <Check size={14} />}</span>}
+                <div className="main"><div className="title">{r.title}</div>{(old ? 'Already in the plan' : r.sub) && <div className="line">{old ? 'Already in the plan' : r.sub}</div>}</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {multi && (
+        <div className="picker-foot">
+          <button type="button" className="btn primary block big" disabled={!chosen.length} onClick={() => onDone(chosen)} data-testid="picker-done">
+            {chosen.length ? `Add ${chosen.length}` : 'Tick the ones to add'}
+          </button>
         </div>
       )}
     </Sheet>

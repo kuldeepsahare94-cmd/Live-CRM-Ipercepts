@@ -42,6 +42,14 @@ export function stateOfCity(g, country, city) {
   return hits.length === 1 ? hits[0] : null;
 }
 const RE = /^(?:(billing|shipping|mailing|permanent|current|office|home|other|registered|delivery)_)?(country|state|city)$/;
+const ADDRESS_RE = /^(?:(billing|shipping|mailing|permanent|current|office|home|other|registered|delivery)_)?(address|address_line|address_line_1|address1|street|street_address)$/;
+/** { prefix } for an address field (v1.3.2: typed with suggestions, or "Use my location"), or null */
+export function addressKind(f) {
+  if (!f || (f.type && !['text', 'textarea', 'address', 'rich_text'].includes(f.type))) return null;
+  const m = String(f.api_name || '').match(ADDRESS_RE);
+  if (m) return { prefix: m[1] ? `${m[1]}_` : '' };
+  return f.type === 'address' ? { prefix: '' } : null;
+}
 /** { kind, prefix } for a country / state / city field, or null */
 export function geoKind(f) {
   if (!f || (f.type && !['text', 'dropdown'].includes(f.type)) || (f.type === 'dropdown' && f.options && f.options.length)) return null;

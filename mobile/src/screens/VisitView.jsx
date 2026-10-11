@@ -72,15 +72,26 @@ export default function VisitView() {
   const { module: modOf } = useApp();
   const [v, setV] = useState(null);
   const [error, setError] = useState('');
+  const [addr, setAddr] = useState(null);         // the check-in / check-out addresses (v1.3.2)
+  const [looking, setLooking] = useState(false);
   useEffect(() => {
-    GET(`/sfa/visits/${id}`).then(setV).catch((e) => setError(e.offline ? 'No internet: the visit shows when you are online.' : e.message));
+    GET(`/sfa/visits/${id}`).then((x) => {
+      setV(x);
+      if (x.others) return;
+      setAddr({ in_address: x.in_address, out_address: x.out_address });
+      // (not found yet: asked now — the server keeps them)
+      const missing = (x.in_lat !== null && x.in_lat !== undefined && !x.in_address) || (x.out_lat !== null && x.out_lat !== undefined && !x.out_address);
+      if (missing) { setLooking(true); GET(`/sfa/visits/${id}/addresses`).then(setAddr).catch(() => {}).finally(() => setLooking(false)); }
+    }).catch((e) => setError(e.offline ? 'No internet: the visit shows when you are online.' : e.message));
   }, [id]);
   if (error) return <div className="screen"><TopBar title="Visit" /><div className="body"><div className="note bad" data-testid="visit-view-error">{error}</div></div><BottomNav /></div>;
   if (!v) return <div className="screen"><TopBar title="Visit" /><Loading /></div>;
   const inAt = toIso(v.in_at); const outAt = toIso(v.out_at);
   const canOpen = v.related_module && v.related_record_id && modOf(v.related_module);
   const photos = (v.files || []).filter((f) => /image/.test(f.mime || '') || f.kind === 'photo').length;
-  const place = v.in_lat !== null && v.in_lat !== undefined && v.in_lng !== null && v.in_lng !== undefined ? { lat: v.in_lat, lng: v.in_lng } : null;
+  const at = (k) => (v[`${k}_lat`] !== null && v[`${k}_lat`] !== undefined && v[`${k}_lng`] !== null && v[`${k}_lng`] !== undefined ? { lat: v[`${k}_lat`], lng: v[`${k}_lng`] } : null);
+  const places = [['in', 'Check-in', at('in'), inAt], ['out', 'Check-out', at('out'), outAt]].filter((x) => x[2]);
+  const maps = (p) => openOutside(`https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`);
   return (
     <div className="screen">
       <TopBar title="Visit" sub={v.related_name || ''} />
@@ -107,7 +118,23 @@ export default function VisitView() {
           {v.notes && <div className="small" style={{ whiteSpace: 'pre-wrap' }} data-testid="visit-view-notes">{v.notes}</div>}
           {v.far && <div className="note warn small flex"><AlertTriangle size={15} /> Checked in far from the customer's saved place.</div>}
           {v.auto_out && <div className="tiny muted">Checked out by itself.</div>}
-          {place && <button type="button" className="btn small outline" onClick={() => openOutside(`https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lng}`)} data-testid="visit-view-map"><Navigation size={15} /> Where the check-in was</button>}
+          {places.length > 0 && (
+            <div className="col visit-places" style={{ gap: 8 }} data-testid="visit-places">
+              {places.map(([k, label, p, when]) => {
+                const text = addr && addr[`${k}_address`];
+                return (
+                  <div key={k} className="flex visit-place" style={{ alignItems: 'flex-start', gap: 10 }} data-testid={`visit-${k}-place`}>
+                    <MapPin size={18} color={k === 'in' ? 'var(--ok)' : 'var(--bad)'} style={{ marginTop: 2, flex: 'none' }} />
+                    <div className="grow" style={{ minWidth: 0 }}>
+                      <div className="tiny muted">{label}{when ? ` · ${niceTime(when)}` : ''}</div>
+                      <div className="small" data-testid={`visit-${k}-address`}>{text || (addr === null || looking ? 'Finding the address…' : 'No address found — see it on the map')}</div>
+                    </div>
+                    <button type="button" className="icon-btn" aria-label={`${label} on the map`} onClick={() => maps(p)} data-testid={k === 'in' ? 'visit-view-map' : 'visit-view-map-out'}><Navigation size={18} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           {v.others && <div className="tiny faint">The place, the notes and the recording are seen by the person and their managers only.</div>}
         </div>
         {v.recording_id && <Recording visitId={v.id} />}

@@ -147,9 +147,9 @@ function DayPlan({ day }) {
                       <div className="line">{LABEL[it.related_module]}{it.visit ? ` · visited ${it.visit.in_time}${it.visit.outcome ? ` · ${it.visit.outcome}` : ''}` : ''}
                         {editable && it.state && plan && day === t && <span className={`tag ${STATE[it.state][1]}`} style={{ marginLeft: 6 }}>{STATE[it.state][0]}</span>}</div>
                       {editable ? (
-                        <div className="flex" style={{ gap: 6, marginTop: 6 }}>
-                          <input className="input small-input grow" placeholder="Why (payment, demo…)" value={it.purpose || ''} onChange={(e) => setItems(items.map((x, j) => (j === i ? { ...x, purpose: e.target.value } : x)))} data-testid="plan-purpose" />
-                          <input className="input small-input" type="time" style={{ width: 96 }} value={it.at_time || ''} onChange={(e) => setItems(items.map((x, j) => (j === i ? { ...x, at_time: e.target.value } : x)))} />
+                        <div className="plan-fields">
+                          <input className="input small-input" placeholder="Why (payment, demo…)" value={it.purpose || ''} onChange={(e) => setItems(items.map((x, j) => (j === i ? { ...x, purpose: e.target.value } : x)))} data-testid="plan-purpose" />
+                          <label className="plan-time">Time <input className="input small-input" type="time" value={it.at_time || ''} onChange={(e) => setItems(items.map((x, j) => (j === i ? { ...x, at_time: e.target.value } : x)))} data-testid="plan-time" /> <span className="tiny faint">(if you like)</span></label>
                         </div>
                       ) : it.purpose ? <div className="line">{it.purpose}</div> : null}
                     </div>
@@ -174,7 +174,7 @@ function DayPlan({ day }) {
             )}
             {editable && (
               <>
-                <button type="button" className="btn outline block" onClick={() => setChoose(true)} data-testid="plan-add"><Plus size={18} /> Add a customer</button>
+                <button type="button" className="btn outline block" onClick={() => setChoose(true)} data-testid="plan-add"><Plus size={18} /> Add customers</button>
                 <Field label="Note for your manager"><textarea className="input" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Area, target for the day…" /></Field>
                 {error && <div className="note bad" data-testid="plan-error">{error}</div>}
                 <div className="flex" style={{ gap: 8 }}>
@@ -199,17 +199,21 @@ function DayPlan({ day }) {
         )}
       </div>
       {choose && (
-        <Sheet title="Add a customer" onClose={() => setChoose(false)}>
+        <Sheet title="Add customers" onClose={() => setChoose(false)}>
           <div className="col">
-            {mods.map((m) => <button key={m} type="button" className="btn outline block" onClick={() => { setChoose(false); setPicking(m); }} data-testid={`plan-pick-${m}`}>{(modOf(m) || {}).singular || LABEL[m]}</button>)}
+            {mods.map((m) => <button key={m} type="button" className="btn outline block" onClick={() => { setChoose(false); setPicking(m); }} data-testid={`plan-pick-${m}`}>{(modOf(m) || {}).plural || LABEL[m]}</button>)}
           </div>
         </Sheet>
       )}
       {picking && (
-        <RecordPicker module={picking} title={`Choose a ${((modOf(picking) || {}).singular || LABEL[picking]).toLowerCase()}`} onClose={() => setPicking('')}
-          onPick={(r) => {
-            if (!items.some((x) => x.related_module === picking && x.related_record_id === r.id)) setItems([...items, { related_module: picking, related_record_id: r.id, name: r.title, purpose: '', at_time: '' }]);
-            else say('Already in the plan.');
+        <RecordPicker module={picking} multi title={`Tick the ${((modOf(picking) || {}).plural || `${LABEL[picking]}s`).toLowerCase()} to visit`} onClose={() => setPicking('')}
+          already={items.filter((x) => x.related_module === picking).map((x) => Number(x.related_record_id))}
+          onDone={(rows) => {
+            // (several at once — v1.3.2)
+            const add = rows.filter((r) => !items.some((x) => x.related_module === picking && Number(x.related_record_id) === Number(r.id)))
+              .map((r) => ({ related_module: picking, related_record_id: r.id, name: r.title, purpose: '', at_time: '' }));
+            setItems([...items, ...add]);
+            say(`${add.length} added to the plan.`, 'ok');
             setPicking('');
           }} />
       )}

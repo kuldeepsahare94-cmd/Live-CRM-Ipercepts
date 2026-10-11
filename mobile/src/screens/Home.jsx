@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download, ScanLine, ClipboardList, CalendarOff, CheckCheck, ChevronRight } from 'lucide-react';
+import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download, ScanLine, ClipboardList, CalendarOff, CheckCheck, ChevronRight, ChevronDown, Play, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 import { useApp, listen } from '../lib/app';
 import { GET } from '../lib/api';
@@ -114,6 +114,47 @@ function Meetings() {
 }
 
 
+/** Today's calls (v1.3.2): the ones counted above — who, when, how long, the recording. Folded until opened. */
+const toIso = (v) => { const s = String(v || ''); if (!s) return ''; return /[zZ]|[+-]\d\d:?\d\d$/.test(s) || s.length <= 10 ? s : `${s.replace(' ', 'T')}Z`; };
+function TodayCalls({ rows }) {
+  const { module: modOf } = useApp();
+  const nav = useNavigate();
+  const [open, setOpen] = useState(() => !!get('fold_today_open'));
+  const [playing, setPlaying] = useState(0);
+  if (!rows.length) return null;
+  const toggle = () => { set('fold_today_open', !open); setOpen(!open); };
+  const go = (r) => {
+    if (modOf('calls')) nav(`/m/calls/${r.id}`);
+    else if (r.related_module && modOf(r.related_module)) nav(`/m/${r.related_module}/${r.related_record_id}`);
+  };
+  return (
+    <div className="col after-calls" style={{ gap: 8 }} data-testid="today-calls">
+      <button type="button" className="fold-head" onClick={toggle} aria-expanded={open} data-testid="today-calls-toggle">
+        <PhoneCall size={15} /> <span className="grow">Today's calls</span><span className="seg-n">{rows.length}</span>
+        {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+      </button>
+      {open && (
+        <div className="list flat" style={{ boxShadow: 'none', border: '1px solid var(--line-soft)' }}>
+          {rows.map((r) => {
+            const Icon = !r.connected ? PhoneMissed : r.direction === 'Inbound' ? PhoneIncoming : PhoneOutgoing;
+            return (
+              <div key={r.id} className="row" style={{ flexWrap: 'wrap' }} data-testid="today-call">
+                <Icon size={18} color={r.connected ? 'var(--ok)' : 'var(--bad)'} />
+                <div className="main" role="link" onClick={() => go(r)}>
+                  <div className="title">{r.name || r.phone_number || r.subject || 'Call'}</div>
+                  <div className="line">{niceTime(toIso(r.at))}{r.duration_seconds ? ` · ${talk(r.duration_seconds)}` : ''}{r.connected ? '' : ' · not answered'}{r.outcome ? ` · ${r.outcome}` : ''}</div>
+                </div>
+                {r.recording_url && <button type="button" className="icon-btn" aria-label="Play the recording" onClick={() => setPlaying(playing === r.id ? 0 : r.id)} data-testid="today-call-play"><Play size={18} /></button>}
+                {playing === r.id && <audio controls autoPlay preload="none" src={r.recording_url} className="rec-audio" style={{ flexBasis: '100%' }} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Calls today against the target, missed calls from customers to call back, calls not saved yet. */
 function CallsCard() {
   const { boot, sync } = useApp();
@@ -126,7 +167,7 @@ function CallsCard() {
   const [phoneList, setPhoneList] = useState(() => recentCached());      // the phone's calls (for "After your calls")
   const [, setTick] = useState(0);
   const load = useCallback(async (force = false) => {
-    GET('/sfa/calls/today').then(setToday).catch(() => {});
+    GET('/sfa/calls/today?rows=1').then(setToday).catch(() => {});
     if (!rules.scan_phone || !canReadPhone()) return;
     if (!force && !scanDue()) return;
     const st = await phoneStatus();
@@ -149,7 +190,7 @@ function CallsCard() {
   // (a call or a recording reached the CRM: the questions after the calls are worked out again)
   const again = useRef(null);
   useEffect(() => onOutbox((_items, info) => {
-    if (info && info.done && info.done.kind === 'call') GET('/sfa/calls/today').then(setToday).catch(() => {});
+    if (info && info.done && info.done.kind === 'call') GET('/sfa/calls/today?rows=1').then(setToday).catch(() => {});
     if (info && info.done && ['call', 'call-recording'].includes(info.done.kind)) { clearTimeout(again.current); again.current = setTimeout(() => load(true), 1500); }
     setTick((n) => n + 1);
   }), [load]);
@@ -187,7 +228,8 @@ function CallsCard() {
           ))}
         </div>
       )}
-      <AfterCalls asks={asks} onChange={() => load(true)} max={3} onMore={() => nav('/calls/phone')} />
+      <TodayCalls rows={(today && today.rows) || []} />
+      <AfterCalls asks={asks} onChange={() => load(true)} max={3} onMore={() => nav('/calls/phone')} foldable />
       {notSaved > 0 && !rules.auto_log && <button type="button" className="note warn" style={{ textAlign: 'left', border: 0 }} onClick={() => nav('/calls/phone')} data-testid="not-saved">{notSaved} call{notSaved === 1 ? '' : 's'} with customers not saved yet — tap to log</button>}
     </div>
   );

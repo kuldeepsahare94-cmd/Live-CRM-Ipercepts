@@ -12,7 +12,8 @@ import { TopBar, Loading, Empty, Field, RecordPicker, Sheet, StatusBars, VoiceAr
 import GeoPick from '../components/GeoPick';
 import { get, set } from '../lib/store';
 import { linkCall } from '../lib/calls';
-import { geoKind } from '../lib/geo';
+import { geoKind, addressKind } from '../lib/geo';
+import AddressPick from '../components/AddressPick';
 
 const LIST_MODULES = new Set(['leads', 'contacts', 'accounts', 'opportunities', 'quotations', 'subscriptions', 'meetings', 'calls', 'tasks', 'products']);
 const HIDDEN = new Set(['id', 'created_at', 'updated_at', 'created_by', 'related_module', 'related_record_id']);
@@ -33,6 +34,8 @@ const forInput = (f, v) => {
 function Input({ f, value, onChange, names, onPick, values, onSet, isNew }) {
   const common = { className: 'input', 'data-testid': `f-${f.api_name}` };
   // Country → State → City: linked lists (India by default)
+  const addr = values ? addressKind(f) : null;
+  if (addr) return <AddressPick value={value} onChange={onChange} values={values} onSet={onSet} prefix={addr.prefix} testid={`f-${f.api_name}`} />;
   const geo = values ? geoKind(f) : null;
   if (geo) return <GeoPick kind={geo.kind} prefix={geo.prefix} value={value} onChange={onChange} values={values} onSet={onSet} isNew={isNew} testid={`f-${f.api_name}`} />;
   switch (f.type) {
