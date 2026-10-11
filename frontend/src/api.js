@@ -671,6 +671,10 @@ export const api = {
   // back to names so a record never shows "Customer: 47".
   lookupSearch: (module, q, limit) => req('GET', `/search/lookup/${module}` + qs({ q, limit })),
   lookupResolve: (module, ids) => req('GET', `/search/lookup/${module}` + qs({ ids: ids.join(',') })),
+  // addresses (v1.3.2): suggestions while typing, and the address of where I am
+  addressSearch: (q, near = {}) => req('GET', '/address/search' + qs({ q, lat: near.lat, lng: near.lng })),
+  addressReverse: (lat, lng) => req('GET', '/address/reverse' + qs({ lat, lng })),
+  visitAddresses: (id) => req('GET', `/sfa/visits/${id}/addresses`),
 
   // Sales documents — proforma invoices and invoices share one router, so
   // `base` is '/proforma-invoices' or '/invoices' (and '/quotations', which

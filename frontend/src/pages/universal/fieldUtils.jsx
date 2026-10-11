@@ -1,6 +1,7 @@
 // Shared helpers for the universal list/detail pages. Not a page itself.
 
 import { GeoInput, geoKind } from '../../components/geo/GeoField';
+import AddressInput, { addressKind } from '../../components/geo/AddressInput';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, X, Check, ChevronDown } from 'lucide-react';
@@ -266,6 +267,11 @@ export function FieldInput({ field, value, onChange, values, onSet, isNew = fals
 
   // Country → State → City: linked dropdowns (India by default) on every form.
   // A dropdown field with its own list keeps its list.
+  // An address: typed with suggestions, or "Use my location" — fills city, state, PIN (v1.3.2)
+  const addr = addressKind(field);
+  if (addr && ['text', 'textarea', 'address', 'rich_text'].includes(field.field_type || 'text')) {
+    return <AddressInput value={value} onChange={onChange} values={values || {}} onSet={onSet} prefix={addr.prefix} multiline={field.field_type !== 'text'} testid={`addr-${field.api_name}`} />;
+  }
   const geo = geoKind(field);
   if (geo && !(field.field_type === 'dropdown' && opts.length)) {
     return <GeoInput kind={geo.kind} prefix={geo.prefix} value={value} onChange={onChange} values={values || {}} onSet={onSet} defaultCountry={!!values && isNew} testid={`geo-${field.api_name}`} />;

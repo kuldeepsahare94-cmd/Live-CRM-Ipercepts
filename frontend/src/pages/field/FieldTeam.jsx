@@ -24,6 +24,7 @@ import { api } from '../../api';
 import { PageHeader, EmptyState } from '../../components/ui';
 import FieldMap from '../../components/field/FieldMap';
 import VisitRecording from '../../components/field/VisitRecording';
+import VisitPlaces from '../../components/field/VisitPlaces';
 import FieldPlans from './FieldPlans';
 import FieldLeave from './FieldLeave';
 import {
@@ -350,6 +351,7 @@ function VisitItem({ n, visit: v, onPhoto }) {
           {v.far && <span className="inline-flex items-center gap-1" style={{ color: 'var(--color-warning-strong)' }}><AlertTriangle className="w-3.5 h-3.5" />{v.in_distance_m} m from the customer's saved place</span>}
           {v.auto_out && <span style={{ color: 'var(--color-warning-strong)' }}>· checked out by itself</span>}
         </div>
+        <VisitPlaces visit={v} />
         {(v.outcome || v.notes || v.next_action) && (
           <div className="text-sm mt-1">
             {v.outcome && <span className="font-medium text-ink">{v.outcome}. </span>}

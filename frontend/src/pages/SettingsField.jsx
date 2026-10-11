@@ -67,7 +67,7 @@ export default function SettingsField() {
   const take = (p) => {
     setPayload(p);
     const s = p.settings;
-    setF({ ...s, ...Object.fromEntries(NUMBERS.map((k) => [k, String(s[k] ?? '')])), km_expense_category_id: s.km_expense_category_id ? String(s.km_expense_category_id) : '', transcribe_key: '', leave_types_text: (s.leave_types || []).join('\n') });
+    setF({ ...s, ...Object.fromEntries(NUMBERS.map((k) => [k, String(s[k] ?? '')])), km_expense_category_id: s.km_expense_category_id ? String(s.km_expense_category_id) : '', transcribe_key: '', maps_google_key: '', leave_types_text: (s.leave_types || []).join('\n') });
   };
   useEffect(() => { api.fieldSettings().then(take).catch((e) => setError(e.message || 'The settings could not be loaded.')); }, []);
   const set = (k, v) => { setF((x) => ({ ...x, [k]: v })); setSaved(false); };
@@ -354,6 +354,13 @@ export default function SettingsField() {
             </Row>
             <Row title="Credit line" hint="The map service's credit, shown in the corner of the map (most services ask for it).">
               <input className="input" style={{ width: 360 }} value={f.map_attribution} placeholder="© OpenStreetMap contributors" onChange={(e) => set('map_attribution', e.target.value)} />
+            </Row>
+            <p className="text-sm font-semibold text-ink pt-5">Addresses</p>
+            <Row title="Google Maps key (optional)" hint="Used for the address suggestions while typing and for “Use my location” on the forms of leads, contacts and accounts, and for the addresses of visits. Empty = OpenStreetMap (free). Google is better for Indian addresses; switch on the “Geocoding API” for the key in Google Cloud (Google charges after its free monthly amount). Type - to remove the key.">
+              <div>
+                <input className="input" style={{ width: 360 }} type="password" autoComplete="new-password" value={f.maps_google_key || ''} placeholder={payload.settings.maps_google_key_set ? 'A key is saved (type a new one to change it)' : 'AIza…'} onChange={(e) => set('maps_google_key', e.target.value)} data-testid="f-google-key" />
+                <p className="t-meta mt-1" data-testid="f-address-provider">Now: {payload.settings.maps_google_key_set ? 'Google' : 'OpenStreetMap (free)'}</p>
+              </div>
             </Row>
           </>
         )}

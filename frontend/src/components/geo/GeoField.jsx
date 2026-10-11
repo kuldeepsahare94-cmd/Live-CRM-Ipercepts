@@ -282,6 +282,7 @@ export function GeoInput({ kind, prefix = '', value, onChange, values = {}, onSe
 /** the geo fields of a form, as empty values (so City can fill State on a new record) */
 export function geoSeed(fields) {
   const out = {};
-  for (const f of fields || []) if (geoKind(f)) out[f.api_name] = '';
+  // (the PIN code / area fields too: "Use my location" fills only the fields the form has — v1.3.2)
+  for (const f of fields || []) if (geoKind(f) || /^(?:(.+)_)?(postal_code|pincode|pin_code|pin|zip|zip_code|zipcode|postcode|area|locality)$/.test(f.api_name || '')) out[f.api_name] = '';
   return out;
 }

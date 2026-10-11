@@ -1,4 +1,5 @@
 import { GeoInput } from '../components/geo/GeoField';
+import AddressInput from '../components/geo/AddressInput';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -445,6 +446,10 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
                   ORGANISATION. Without this the conversion had nothing to
                   name it after and used the person's name instead. */}
               {field('Company / Account Name', 'account_name', { placeholder: 'e.g. Smart Business Solution' })}
+            </div>
+            <div className="mt-3">
+              <label className="t-meta font-medium block mb-1">Address</label>
+              <AddressInput value={form.address || ''} onChange={(v) => setKey('address', v)} values={form} onSet={setKey} testid="lead-address" />
             </div>
             <div className="grid sm:grid-cols-3 gap-3 mt-3">
               {geoField('Country', 'country')}
