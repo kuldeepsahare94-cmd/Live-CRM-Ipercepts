@@ -90,7 +90,7 @@ function settingsPayload() {
   const settings = store.getSettings();
   return {
     // (the speech service key never leaves the server: only whether one is set)
-    settings: { ...settings, transcribe_key: undefined, transcribe_key_set: !!settings.transcribe_key },
+    settings: { ...settings, transcribe_key: undefined, transcribe_key_set: !!settings.transcribe_key, maps_google_key: undefined, maps_google_key_set: !!settings.maps_google_key },
     ai_summary_ready: (() => { try { return !!require('../services/aiClient').anthropic; } catch { return false; } })(),
     km_categories: categories, vehicles, expenses_on: expenses,
     // (v1.3) the consent code of a meeting recording goes on WhatsApp: is it set up, and its templates
@@ -140,8 +140,11 @@ router.post('/punch-out', files, run((req) => field.punchOut(req.user, body(req)
 router.post('/points', run((req) => field.addPoints(req.user, req.body || {})));
 
 // --- visits ------------------------------------------------------------------
-router.post('/visits/check-in', files, run((req) => field.checkIn(req.user, body(req)), 201));
-router.post('/visits/:id/check-out', run((req) => field.checkOut(req.user, req.params.id, req.body || {})));
+// (the addresses of the check-in / check-out places are found just after — v1.3.2)
+const findAddresses = (out) => { if (out && out.id) setImmediate(() => { field.fillVisitAddresses(out.id).catch(() => {}); }); return out; };
+router.post('/visits/check-in', files, run((req) => findAddresses(field.checkIn(req.user, body(req))), 201));
+router.post('/visits/:id/check-out', run((req) => findAddresses(field.checkOut(req.user, req.params.id, req.body || {}))));
+router.get('/visits/:id/addresses', run((req) => { field.needOn(req.user); return field.visitAddresses(req.user, req.params.id); }));
 router.post('/visits/:id/files', files, run((req) => { const b = body(req); return field.addVisitFiles(req.user, req.params.id, b.files || b); }));
 router.get('/visits', run((req) => field.listVisits(req.user, req.query)));
 router.get('/visits/:id', run((req) => { field.needOn(req.user); return field.getVisit(req.user, req.params.id); }));
@@ -211,7 +214,10 @@ router.get('/calls/today', run((req) => {
   needCalls(req.user);
   const d = field.today();
   const mine = calls.callsOfDay([Number(req.user.id)], field.dayRange(d)).get(Number(req.user.id)) || { calls: 0, connected: 0, seconds: 0 };
-  return { day: d, ...mine, target: store.getSettings().call_daily_target };
+  // (the calls themselves, for "Today's calls" on the app's Home — v1.3.2)
+  const name = (m, id) => { try { return field.recordName(m, id) || ''; } catch { return ''; } };
+  const rows = req.query.rows === '1' ? calls.callListOfDay(Number(req.user.id), field.dayRange(d), name) : undefined;
+  return { day: d, ...mine, target: store.getSettings().call_daily_target, rows };
 }));
 // the recording of a call (the phone's own recording file)
 const serverBase = (req) => `${req.protocol}://${req.get('host')}`;

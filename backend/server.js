@@ -153,6 +153,9 @@ app.get('/api/call-recordings/:file', require('./routes/sfa').serveRecording);
   }), require('./routes/cards'));
 }
 
+// Addresses as you type and from "Use my location" (v1.3.2)
+app.use('/api/address', requireAuth, require('./routes/address'));
+
 // A product photo (two small, already-sized JPEGs) is bigger than the
 // standard 100 KB body limit, so only that one route reads up to 1 MB.
 {

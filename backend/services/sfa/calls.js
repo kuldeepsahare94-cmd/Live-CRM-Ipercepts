@@ -104,6 +104,21 @@ function callsOfDay(userIds, dayRange) {
   return new Map(rows.map((r) => [Number(r.u), { calls: Number(r.n) || 0, connected: Number(r.c) || 0, seconds: Number(r.s) || 0 }]));
 }
 
+/** one person's calls of a day, newest first (the app's Home: "Today's calls") — v1.3.2 */
+function callListOfDay(userId, dayRange, nameOf = () => '') {
+  const [from, to] = dayRange;
+  const at = "(CASE WHEN call_source IN ('app', 'phone') AND start_time IS NOT NULL THEN REPLACE(SUBSTR(start_time, 1, 19), 'T', ' ') ELSE created_at END)";
+  const rows = db.prepare(`SELECT id, ${at} AS at, direction, connected, duration_seconds, call_outcome, call_subject, related_module, related_record_id, phone_number, call_recording_url, recording_id
+    FROM calls WHERE assigned_user_id = ? AND ${at} >= ? AND ${at} < ? AND NOT (direction = 'Inbound' AND COALESCE(connected, 0) = 0)
+    ORDER BY ${at} DESC LIMIT 100`).all(userId, sqlTime(from), sqlTime(to));
+  return rows.map((r) => ({
+    id: Number(r.id), at: r.at, direction: r.direction || '', connected: Number(r.connected) === 1, duration_seconds: Number(r.duration_seconds) || 0,
+    outcome: r.call_outcome || '', subject: r.call_subject || '', related_module: r.related_module || null, related_record_id: r.related_record_id ? Number(r.related_record_id) : null,
+    name: r.related_module && r.related_record_id ? (nameOf(r.related_module, Number(r.related_record_id)) || '') : '',
+    phone_number: r.phone_number || '', recording_url: r.recording_id ? (r.call_recording_url || null) : null,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Recordings
 // ---------------------------------------------------------------------------
@@ -296,4 +311,4 @@ async function transcribeOnce(recordingId) {
   try { return await transcribe(id); } finally { writing.delete(id); }
 }
 
-module.exports = { digits, match, callsOfDay, saveRecording, serveRecording, recordingOf, cleanup, transcribe: transcribeOnce, busyWriting, sniff, urlFor, AUDIO, MAX_RECORDING, writing };
+module.exports = { digits, match, callsOfDay, callListOfDay, saveRecording, serveRecording, recordingOf, cleanup, transcribe: transcribeOnce, busyWriting, sniff, urlFor, AUDIO, MAX_RECORDING, writing };

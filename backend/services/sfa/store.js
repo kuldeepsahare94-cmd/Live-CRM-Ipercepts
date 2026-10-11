@@ -221,6 +221,9 @@ function ensureSchema() {
     if (!vis.has('recording_id')) db.exec('ALTER TABLE sfa_visits ADD COLUMN recording_id INTEGER');
     if (!vis.has('auto_out')) db.exec('ALTER TABLE sfa_visits ADD COLUMN auto_out INTEGER DEFAULT 0');
     if (!vis.has('away_at')) db.exec('ALTER TABLE sfa_visits ADD COLUMN away_at TEXT');
+    // the addresses of the check-in and check-out places (v1.3.2), found after the visit
+    if (!vis.has('in_address')) db.exec('ALTER TABLE sfa_visits ADD COLUMN in_address TEXT');
+    if (!vis.has('out_address')) db.exec('ALTER TABLE sfa_visits ADD COLUMN out_address TEXT');
   } catch (e) { console.warn('[sfa] plans / leave / meeting recordings:', e.message); }
   // one open working day and one open visit per person, even with two servers
   try {
@@ -279,6 +282,8 @@ const DEFAULTS = {
   // the map pictures (tiles) of the web and the app; blank = OpenStreetMap
   map_tiles_url: '',
   map_attribution: '',
+  // addresses as you type and from "Use my location" (v1.3.2): OpenStreetMap when empty, Google with a key
+  maps_google_key: '',         // kept encrypted; never sent back
   // who sees everyone (besides Super Admin): these roles
   viewer_role_ids: [],
   // calls from the app
@@ -361,6 +366,7 @@ function getSettings() {
   s.km_expense_min = clamp(s.km_expense_min, 0, 1000, 1);
   s.geocode = !!s.geocode;
   s.map_tiles_url = String(s.map_tiles_url || '');
+  s.maps_google_key = String(s.maps_google_key || '');
   s.map_attribution = String(s.map_attribution || '');
   s.call_auto_log = s.call_auto_log !== false;
   s.call_scan_phone = s.call_scan_phone !== false;
@@ -516,6 +522,12 @@ function saveSettings(input = {}) {
       throw bad('The map address must start with https:// and have {z}, {x} and {y} in it.');
     }
     next.map_tiles_url = u;
+  }
+  // the Google key: a new one replaces the old; an empty one leaves it; "-" removes it
+  if (input.maps_google_key !== undefined && String(input.maps_google_key).trim() !== '') {
+    const k = String(input.maps_google_key).trim();
+    if (k !== '-' && !/^[A-Za-z0-9_-]{20,100}$/.test(k)) throw bad('That does not look like a Google Maps key (it starts with "AIza").');
+    next.maps_google_key = k === '-' ? '' : require('../secrets').encrypt(k);
   }
   if (input.map_attribution !== undefined) next.map_attribution = String(input.map_attribution || '').replace(/[<>]/g, '').trim().slice(0, 200);
   if (input.viewer_role_ids !== undefined) {

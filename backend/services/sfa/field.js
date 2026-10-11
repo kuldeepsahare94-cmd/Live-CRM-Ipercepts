@@ -604,6 +604,7 @@ function presentVisit(v, files = null) {
     far: Number(v.far) === 1, in_selfie_id: v.in_selfie_id ? Number(v.in_selfie_id) : null,
     notes: v.notes || '', outcome: v.outcome || '', next_action: v.next_action || '',
     auto_out: Number(v.auto_out) === 1, recording_id: v.recording_id ? Number(v.recording_id) : null,
+    in_address: v.in_address || '', out_address: v.out_address || '',
     files: files || undefined,
   };
 }
@@ -741,10 +742,39 @@ function getVisit(user, id) {
     let ok = false;
     if (v.related_module && v.related_record_id) { try { needRecord(user, v.related_module, v.related_record_id); ok = true; } catch { ok = false; } }
     if (!ok) throw bad('This visit belongs to someone else.', 403);
-    return { ...presentVisit(v, []), in_lat: null, in_lng: null, out_lat: null, out_lng: null, in_accuracy: null, in_distance_m: null, out_distance_m: null, notes: '', next_action: '', recording_id: null, others: true };
+    return { ...presentVisit(v, []), in_lat: null, in_lng: null, out_lat: null, out_lng: null, in_accuracy: null, in_distance_m: null, out_distance_m: null, notes: '', next_action: '', recording_id: null, in_address: '', out_address: '', others: true };
   }
   const files = db.prepare('SELECT id, kind, file_name, mime, size, thumb, created_at FROM sfa_files WHERE visit_id = ? ORDER BY id').all(v.id).map(fileInfo);
   return presentVisit(v, files);
+}
+
+/**
+ * The addresses of a visit's check-in and check-out places (v1.3.2): found once (after the
+ * visit, or when the visit is opened) and kept on the visit.
+ */
+async function fillVisitAddresses(id) {
+  const v = idOf(id) ? db.prepare('SELECT id, in_lat, in_lng, out_lat, out_lng, in_address, out_address FROM sfa_visits WHERE id = ?').get(idOf(id)) : null;
+  if (!v) return null;
+  const address = require('../address');
+  const text = (r) => (r ? (r.label || [r.line, r.city, r.state, r.pincode].filter(Boolean).join(', ')).slice(0, 300) : '');
+  const out = { in_address: v.in_address || '', out_address: v.out_address || '' };
+  for (const k of ['in', 'out']) {
+    const lat = v[`${k}_lat`]; const lng = v[`${k}_lng`];
+    if (out[`${k}_address`] || lat === null || lat === undefined || lng === null || lng === undefined) continue;
+    // (the check-out at the same place as the check-in: the same address, no second question)
+    if (k === 'out' && out.in_address && geo.distance({ lat: v.in_lat, lng: v.in_lng }, { lat, lng }) < 30) { out.out_address = out.in_address; }
+    else {
+      try { out[`${k}_address`] = text((await address.reverse(lat, lng)).result); } catch { continue; }
+    }
+    if (out[`${k}_address`]) db.prepare(`UPDATE sfa_visits SET ${k}_address = ? WHERE id = ?`).run(out[`${k}_address`], v.id);
+  }
+  return out;
+}
+/** GET /sfa/visits/:id/addresses — for those who may see the visit's places */
+async function visitAddresses(user, id) {
+  const v = getVisit(user, id);
+  if (v.others) return { in_address: '', out_address: '', others: true };
+  return (await fillVisitAddresses(v.id)) || { in_address: '', out_address: '' };
 }
 
 /** @param q { user_id, day, related_module, related_record_id, meeting_id } */
@@ -770,7 +800,7 @@ function listVisits(user, q = {}) {
     rows: rows.map((v) => {
       const out = presentVisit(v);
       if (ids === null || ids.includes(Number(v.user_id))) return out;
-      return { ...out, in_lat: null, in_lng: null, out_lat: null, out_lng: null, in_accuracy: null, in_distance_m: null, out_distance_m: null, notes: '', next_action: '', recording_id: null, others: true };
+      return { ...out, in_lat: null, in_lng: null, out_lat: null, out_lng: null, in_accuracy: null, in_distance_m: null, out_distance_m: null, notes: '', next_action: '', recording_id: null, in_address: '', out_address: '', others: true };
     }),
   };
 }
@@ -979,5 +1009,6 @@ module.exports = {
   checkIn, checkOut, addVisitFiles, getVisit, listVisits, fileOf,
   live, trail, register, registerCsv, cleanFile,
   // (for plans, leave and meeting recordings — v1.3)
+  fillVisitAddresses, visitAddresses,
   isDate, addDays, needRecord, recordName, userRow, presentPlace, openSession, momentOf, presentVisit, VISIT_SELECT, NAME,
 };
