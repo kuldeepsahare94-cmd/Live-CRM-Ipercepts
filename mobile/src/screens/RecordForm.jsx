@@ -16,6 +16,7 @@ import { geoKind, addressKind } from '../lib/geo';
 import AddressPick from '../components/AddressPick';
 import MeetingInvite, { useOnlinePlatforms, inviteOf } from '../components/MeetingInvite';
 import { PATCH } from '../lib/api';
+import { EmailsInput, useExtraEmails, cleanExtras, extraProblem } from '../components/MoreEmails';
 
 const LIST_MODULES = new Set(['leads', 'contacts', 'accounts', 'opportunities', 'quotations', 'subscriptions', 'meetings', 'calls', 'tasks', 'products']);
 const LINKS = {
@@ -27,6 +28,23 @@ const LINKS = {
 const HIDDEN = new Set(['id', 'created_at', 'updated_at', 'created_by', 'related_module', 'related_record_id',
   // (v1.4) a meeting's invite and online link are chosen in their own box, not typed
   'attendees_json', 'online_platform', 'online_provider', 'online_meeting_id', 'online_dial_in', 'online_status', 'online_error']);
+
+// (v1.7) the same checks as the server: a typo is shown under the field, before the Save
+const PHONE_OK = /^[0-9+\-() ]+$/;
+export function checkField(f, raw) {
+  const v = typeof raw === 'string' ? raw.trim() : raw;
+  if (v === '' || v === null || v === undefined) return '';
+  if (f.type === 'phone') {
+    const digits = String(v).replace(/\D/g, '');
+    if (!PHONE_OK.test(String(v)) || digits.length < 7 || digits.length > 15) return 'Enter a valid number (7 to 15 digits, e.g. 98765 43210).';
+  }
+  if (f.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v))) return 'Enter a valid email, like name@company.com.';
+  if (f.type === 'url' && !/^https?:\/\/[^\s/$.?#][^\s]*$/i.test(String(v)) && !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?(?:[/?#]\S*)?$/i.test(String(v))) return 'Enter a web address like https://example.com';
+  if (['number', 'decimal', 'currency', 'percent'].includes(f.type) && Number.isNaN(Number(v))) return 'Enter a number.';
+  return '';
+}
+// a NEW lead opens as a short form: the few fields a salesperson types on the spot; the rest is under "More details"
+const LEAD_QUICK = new Set(['student_name', 'mobile', 'account_name', 'email', 'source', 'country', 'state', 'city', 'status', 'assigned_counselor']);
 
 function nextHour() {
   const t = new Date(Date.now() + 3600000);
@@ -104,6 +122,11 @@ export default function RecordForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [dup, setDup] = useState(null);
+  const [errs, setErrs] = useState({});
+  const [allFields, setAllFields] = useState(false);
+  const loadedExtras = useExtraEmails(module, id);       // (v1.8) other email addresses (null while loading)
+  const [extras, setExtras] = useState(null);
+  useEffect(() => { if (loadedExtras && extras === null) setExtras(loadedExtras); }, [loadedExtras]); // eslint-disable-line react-hooks/exhaustive-deps
   const related = params.get('related_module') && params.get('related_record_id') ? { module: params.get('related_module'), id: Number(params.get('related_record_id')) } : null;
 
   const fields = useMemo(() => {
@@ -159,18 +182,34 @@ export default function RecordForm() {
     if (el) setTimeout(() => el.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
   }, [!!values, section]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const slim = module === 'leads' && !id;
+  const isQuick = (f) => !slim || allFields || f.required || LEAD_QUICK.has(f.api_name);
+  const hidden = slim && !allFields ? fields.filter((f) => !isQuick(f)).length : 0;
+  const shownFields = fields.filter(isQuick);
+  // the first email field gets the "+" for more addresses
+  const mainEmail = (fields.find((f) => f.api_name === 'email' && f.type === 'email') || fields.find((f) => f.type === 'email') || {}).api_name;
   if (!mod) return <div className="screen no-nav"><TopBar title="Not in the app" /><Empty title="Your role cannot open this." /></div>;
   const save = async (duplicate = 'ask') => {
     setError('');
+    const bad = {};
+    fields.forEach((f) => { const m = checkField(f, values[f.api_name]); if (m) bad[f.api_name] = m; });
+    setErrs(bad);
+    if (Object.keys(bad).length) {
+      const first = fields.find((f) => bad[f.api_name]);
+      if (first && slim && !LEAD_QUICK.has(first.api_name)) setAllFields(true);
+      setError(`Please correct: ${fields.filter((f) => bad[f.api_name]).map((f) => f.label).join(', ')}`); return;
+    }
     const missing = fields.filter((f) => f.required && (values[f.api_name] === '' || values[f.api_name] === null || (Array.isArray(values[f.api_name]) && !values[f.api_name].length)));
     if (missing.length) { setError(`Fill in: ${missing.map((f) => f.label).join(', ')}`); return; }
+    const exBad = mainEmail ? extraProblem(extras, values[mainEmail]) : '';
+    if (exBad) { setError(exBad); return; }
     setBusy(true);
     try {
       const all = { ...values };
       const extra = related ? [{ api_name: 'related_module', type: 'text', system: true }, { api_name: 'related_record_id', type: 'number', system: true }] : [];
       if (related) { all.related_module = related.module; all.related_record_id = related.id; }
       presets.forEach((p) => { all[p.field.api_name] = p.value; });
-      const out = await saveRecord(module, id, all, [...fields, ...extra, ...presets.map((p) => p.field)], { duplicate });
+      const out = await saveRecord(module, id, all, [...fields, ...extra, ...presets.map((p) => p.field)], { duplicate, extraEmails: mainEmail && extras !== null ? cleanExtras(extras) : null });
       if (out.duplicate) { setDup(out); return; }
       if (out.warning) say(out.warning, 'error'); else say(id ? 'Saved.' : `${mod.singular} added.`, 'ok');
       const newId = (out.row && out.row.id) || id;
@@ -193,21 +232,25 @@ export default function RecordForm() {
       <TopBar title={id ? `Change ${mod.singular.toLowerCase()}` : `New ${mod.singular.toLowerCase()}`} />
       <StatusBars />
       {!values ? (error ? <div className="body"><div className="note bad">{error}</div></div> : <Loading />) : (
-        <form className="body" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        <form className="body" noValidate onSubmit={(e) => { e.preventDefault(); save(); }}>
           <div className="card col" style={{ gap: 14 }}>
             {related && <div className="note info small">For: {params.get('related_name') || `${related.module} #${related.id}`}</div>}
             {presets.map((p) => <div key={p.field.api_name} className="note info small" data-testid="form-preset">{p.field.label}: {p.label || `#${p.value}`}</div>)}
             {!id && params.get('after_call') && <div className="note info small" data-testid="form-after-call">The call is saved on this {mod.singular.toLowerCase()} with its recording.</div>}
-            {fields.map((f, i) => [
+            {shownFields.map((f, i) => [
               // (v1.4) the form's sections as small titles; "✎" on a section of the record page opens here
-              (i === 0 ? fields.length > 6 && f.section : f.section && f.section !== fields[i - 1].section) && <div key={`sec-${f.section}`} className="form-sec" data-section={f.section}>{f.section}</div>,
+              (i === 0 ? shownFields.length > 6 && f.section : f.section && f.section !== shownFields[i - 1].section) && <div key={`sec-${f.section}`} className="form-sec" data-section={f.section}>{f.section}</div>,
               f.type === 'checkbox'
               ? <Input key={f.api_name} f={f} value={values[f.api_name]} onChange={(v) => setValues((p) => ({ ...p, [f.api_name]: v }))} values={values} onSet={(k, v) => setValues((p) => ({ ...p, [k]: v }))} />
               : (
-                <Field key={f.api_name} label={`${f.label}${f.required ? ' *' : ''}`} hint={f.help}>
-                  <Input f={f} value={values[f.api_name]} names={names} onChange={(v) => setValues((p) => ({ ...p, [f.api_name]: v }))} onPick={() => setPicking(f)} values={values} isNew={!id} onSet={(k, v) => setValues((p) => ({ ...p, [k]: v }))} />
+                <Field key={f.api_name} label={`${f.label}${f.required ? ' *' : ''}`} hint={f.help || (f.type === 'phone' ? '10-digit mobile number, e.g. 98765 43210' : '')} error={errs[f.api_name]}>
+                  {f.api_name === mainEmail && extras !== null
+                    ? <EmailsInput value={values[f.api_name]} testid={`f-${f.api_name}`} extras={extras} onExtras={setExtras}
+                        onChange={(v) => { setValues((p) => ({ ...p, [f.api_name]: v })); if (errs[f.api_name]) setErrs((e) => ({ ...e, [f.api_name]: checkField(f, v) })); }} />
+                    : <Input f={f} value={values[f.api_name]} names={names} onChange={(v) => { setValues((p) => ({ ...p, [f.api_name]: v })); if (errs[f.api_name]) setErrs((e) => ({ ...e, [f.api_name]: checkField(f, v) })); }} onPick={() => setPicking(f)} values={values} isNew={!id} onSet={(k, v) => setValues((p) => ({ ...p, [k]: v }))} />}
                 </Field>
               )])}
+            {hidden > 0 && <button type="button" className="btn outline small" onClick={() => setAllFields(true)} data-testid="form-more">More details ({hidden})</button>}
             {!fields.length && <div className="muted">This form has no fields the app can fill in. Use the web.</div>}
           </div>
           {inviting && <MeetingInvite value={invite} onChange={setInvite} platforms={platforms} />}

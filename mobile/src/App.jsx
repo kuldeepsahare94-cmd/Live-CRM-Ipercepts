@@ -39,6 +39,10 @@ import ChatList, { ChatThread } from './screens/Chat';
 import Settings from './screens/Settings';
 import FollowUpsScreen from './screens/FollowUpsScreen';
 import DialerSetup, { DialerRun } from './screens/Dialer';
+import PlacementHome from './screens/placement/PlacementHome';
+import PlacementPeople from './screens/placement/PlacementPeople';
+import PlacementCandidate from './screens/placement/PlacementCandidate';
+import PlacementAdd from './screens/placement/PlacementAdd';
 import { onAlertTapped } from './lib/push';
 
 function Signed({ children }) {
@@ -124,6 +128,10 @@ export default function App() {
           <Route path="/follow-ups" element={<Signed><FollowUpsScreen /></Signed>} />
           <Route path="/dialer" element={<Signed><DialerSetup /></Signed>} />
           <Route path="/dialer/run" element={<Signed><DialerRun /></Signed>} />
+          <Route path="/placement" element={<Signed><PlacementHome /></Signed>} />
+          <Route path="/placement/people" element={<Signed><PlacementPeople /></Signed>} />
+          <Route path="/placement/new" element={<Signed><PlacementAdd /></Signed>} />
+          <Route path="/placement/c/:id" element={<Signed><PlacementCandidate /></Signed>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <Toast />

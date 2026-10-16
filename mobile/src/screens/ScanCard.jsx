@@ -44,6 +44,7 @@ export default function ScanCard() {
   const [fields, setFields] = useState(EMPTY);
   const [sure, setSure] = useState({});
   const [source, setSource] = useState('');
+  const [seen, setSeen] = useState('');
   const [matches, setMatches] = useState({});
   const [target, setTarget] = useState('');
   const [choices, setChoices] = useState({});
@@ -82,10 +83,18 @@ export default function ScanCard() {
     let text = '';
     for (let i = 0; i < photos.length; i += 1) {
       setProgress(photos.length > 1 ? `Reading side ${i + 1} on this phone…` : 'Reading the card on this phone…');
-      text += `${await readText({ mime: photos[i].mime, data: photos[i].data }, (status, p) => setProgress(`${/load/i.test(status) ? 'Getting the reader' : 'Reading'}… ${Math.round(p * 100)}%`))}\n`;
+      text += `${await readText({ mime: photos[i].mime, data: photos[i].data }, (status, p) => setProgress(`${/load/i.test(status) ? 'Getting the reader' : 'Reading'}… ${Math.round(p * 100)}%`), { sparse: true })}\n`;
     }
     if (!text.trim()) throw new Error('No text was found on the photo. Take it again, closer and in good light.');
-    return req('POST', '/cards/read', { text });
+    setSeen(text.trim());
+    return req('POST', '/cards/read', { text }, { timeout: 30000 });
+  };
+  const mergeAnswers = (a, b) => {
+    const out = { ...b, ...a, fields: { ...(b.fields || {}) }, sure: { ...(b.sure || {}) } };
+    for (const [k, v] of Object.entries(a.fields || {})) { out.fields[k] = v; out.sure[k] = (a.sure || {})[k]; }
+    out.found = Object.keys(out.fields).length;
+    out.matches = a.matches && Object.keys(a.matches).length ? a.matches : b.matches;
+    return out;
   };
   const read = async () => {
     setError(''); setStep('reading'); setProgress('Reading the card…');
@@ -93,7 +102,8 @@ export default function ScanCard() {
       let out;
       if (meta.mode === 'ai') {
         try { out = await req('POST', '/cards/read', { images: photos.map((p) => ({ mime: p.mime, data: p.data })) }, { timeout: 45000 }); }
-        catch (e) { if (e.status === 502 || e.status === 409) out = await readOnPhone(); else throw e; }
+        catch (e) { if (e.offline) throw e; out = await readOnPhone(); }      // (the assistant could not: this phone reads it)
+        if (out && out.source === 'ai' && out.found < 4) { try { out = mergeAnswers(out, await readOnPhone()); } catch { /* what the assistant found stays */ } }
       } else out = await readOnPhone();
       if (!out.found) setError('Nothing could be read from this card. Type the details in (or take the photo again).');
       takeAnswer(out);
@@ -148,7 +158,7 @@ export default function ScanCard() {
     } finally { setBusy(false); }
   };
 
-  const again = () => { setPhotos([]); setFields(EMPTY); setSure({}); setMatches({}); setChoices({}); setExtra({}); setResult(null); setAlready([]); setError(''); setSource(''); setStep('photo'); };
+  const again = () => { setPhotos([]); setFields(EMPTY); setSure({}); setMatches({}); setChoices({}); setExtra({}); setResult(null); setAlready([]); setError(''); setSource(''); setSeen(''); setStep('photo'); };
 
   if (error && !meta) return <div className="screen no-nav"><TopBar title="Scan a visiting card" /><div className="body"><div className="note bad">{error}</div></div></div>;
   if (!meta) return <div className="screen no-nav"><TopBar title="Scan a visiting card" /><Loading /></div>;
@@ -196,6 +206,7 @@ export default function ScanCard() {
           <>
             {error && <div className="note warn" data-testid="scan-error">{error}</div>}
             {source && <div className="note info small" data-testid="scan-source"><Sparkles size={14} /> {source === 'ai' ? 'Read by the CRM assistant.' : 'Read from the text of the photo.'} Check everything, then save.</div>}
+            {seen && <details className="small" data-testid="scan-seen"><summary>Text found on the photo</summary><pre style={{ whiteSpace: 'pre-wrap', userSelect: 'text', maxHeight: 140, overflow: 'auto', margin: '6px 0 0', padding: 8, borderRadius: 8, background: 'var(--soft, #f3f4f6)' }}>{seen}</pre></details>}
             <div className="card col" style={{ gap: 12 }} data-testid="scan-fields">
               <div className="card-title">On the card</div>
               <div className="grid2">

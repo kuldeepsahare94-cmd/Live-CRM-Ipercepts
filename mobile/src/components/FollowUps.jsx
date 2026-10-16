@@ -111,6 +111,8 @@ export default function FollowUps({ view = 'me', title = 'My follow-ups', foldKe
               {data.more && <div className="tiny faint center" style={{ padding: 8 }}>Showing the first {data.rows.length}.</div>}
             </div>
           )}
+          {/* (v1.7) active leads nobody planned a follow-up for */}
+          {!team && c.none > 0 && <Link to="/follow-ups?range=none" className="note small" style={{ display: 'block' }} data-testid={`${testid}-noplan`}>⚠ {c.none} active lead{c.none === 1 ? '' : 's'} with no follow-up planned — tap to plan <ArrowRight size={13} style={{ verticalAlign: -2 }} /></Link>}
           {/* (v1.5) the full list: reschedule, WhatsApp, search, call them one by one */}
           {!team && <Link to={`/follow-ups?range=${range}`} className="btn ghost small" style={{ alignSelf: 'flex-start' }} data-testid={`${testid}-all`}>Open all follow-ups <ArrowRight size={15} /></Link>}
         </>

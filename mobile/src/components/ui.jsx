@@ -41,7 +41,8 @@ export function BottomNav() {
   const { boot } = useApp();
   const mods = (boot && boot.modules) || [];
   const sfa = boot && boot.sfa && boot.sfa.enabled;
-  const customers = mods.find((m) => m.api_name === 'accounts') || mods.find((m) => m.api_name === 'leads') || mods[0];
+  // (v1.7) Leads is the 2nd tab (the salesperson's daily list); Accounts and the rest are in More
+  const customers = mods.find((m) => m.api_name === 'leads') || mods.find((m) => m.api_name === 'accounts') || mods[0];
   const items = [
     { to: '/', label: 'Home', icon: Home, end: true },
     customers && { to: `/m/${customers.api_name}`, label: customers.plural || 'Customers', icon: Users },
@@ -110,8 +111,8 @@ export function Avatar({ name, small = false, big = false }) {
   return <span className={`avatar${small ? ' sm' : ''}${big ? ' lg' : ''}`} style={{ background: c }}>{ini}</span>;
 }
 
-export function Field({ label, hint, children }) {
-  return <label className="field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>;
+export function Field({ label, hint, error, children }) {
+  return <label className="field"><span>{label}</span>{children}{error ? <small className="field-err" role="alert" data-testid="field-error">{error}</small> : hint && <small>{hint}</small>}</label>;
 }
 
 /** Choose a record of a module (a customer for a visit or an order). */

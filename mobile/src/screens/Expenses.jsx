@@ -6,7 +6,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, Camera, ReceiptText, Loader2, X } from 'lucide-react';
 import { useApp } from '../lib/app';
-import { GET, qs } from '../lib/api';
+import { GET, req, qs } from '../lib/api';
+import { readText } from '../lib/ocr';
 import { add as outboxAdd, newRef, flush } from '../lib/outbox';
 import { takePhoto } from '../lib/media';
 import { money, niceDate, today } from '../lib/format';
@@ -21,8 +22,43 @@ function AddExpense({ meta, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const cat = cats.find((c) => String(c.id) === f.category_id) || {};
   const s = (k, v) => setF({ ...f, [k]: v });
+  const [reading, setReading] = useState('');
+  const [fromBill, setFromBill] = useState(null);     // { filled: [labels], low: [labels] }
+  const [extra, setExtra] = useState({});             // merchant, bill number, GSTIN, tax read from the bill (sent with the expense)
+  // The bill is read as soon as the photo is taken: the assistant first, and if it cannot, this phone reads it.
+  // What was already typed is left alone. Without internet nothing is read — the person types it.
+  const readIt = async (p) => {
+    const mode = meta.bill_reading || 'off';
+    if (mode === 'off' || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+    setReading('Reading the bill…'); setFromBill(null);
+    let r = null;
+    if (mode === 'ai') {
+      try { r = await req('POST', '/expenses/bill-reading', { image: { mime: p.mime, data: p.data } }, { timeout: 60000 }); if (!r || !r.found) r = null; } catch { r = null; }
+    }
+    if (!r) {
+      try {
+        const text = await readText({ mime: p.mime, data: p.data }, (st, v) => setReading(`${/load/i.test(st) ? 'Getting the reader' : 'Reading the bill'}… ${Math.round(v * 100)}%`));
+        if (text.trim()) r = await req('POST', '/expenses/bill-reading', { text }, { timeout: 30000 });
+      } catch { r = null; }
+    }
+    setReading('');
+    if (!r || !r.found) { setFromBill({ none: true }); return; }
+    const x = r.fields || {};
+    const filled = [];
+    setF((cur) => {
+      const n = { ...cur };
+      const c = cats.find((k) => String(k.id) === cur.category_id) || {};
+      if (x.expense_date && cur.expense_date === today()) { n.expense_date = x.expense_date; filled.push('Date'); }
+      if (x.amount && (c.kind === 'amount' || !c.kind) && !String(cur.amount).trim()) { n.amount = String(x.amount); filled.push('Amount'); }
+      if (x.merchant && !cur.description.trim()) { n.description = x.merchant; filled.push('What for'); }
+      if (x.category_id && cur.category_id === (cats[0] ? String(cats[0].id) : '') && cats.some((k) => Number(k.id) === Number(x.category_id) && k.kind === 'amount')) { n.category_id = String(x.category_id); filled.push('Kind'); }
+      return n;
+    });
+    setExtra({ merchant: x.merchant, bill_number: x.bill_number, gstin: x.gstin, tax_amount: x.tax_amount });
+    setFromBill({ filled: Object.keys(x).filter((k) => k !== 'currency').map((k) => ({ amount: 'Amount', expense_date: 'Date', merchant: 'Paid to', bill_number: 'Bill number', gstin: 'GSTIN', tax_amount: 'Tax', category_id: 'Kind' }[k] || k)) });
+  };
   const photo = async () => {
-    try { const p = await takePhoto(); if (p) setBills([...bills, p]); } catch (e) { setError(e.message); }
+    try { const p = await takePhoto(); if (p) { setBills([...bills, p]); readIt(p); } } catch (e) { setError(e.message); }
   };
   const save = () => {
     setError('');
@@ -36,6 +72,7 @@ function AddExpense({ meta, onClose, onSaved }) {
     const body = {
       client_ref: ref, category_id: Number(f.category_id), expense_date: f.expense_date, description: f.description.trim() || undefined, paid_by: f.paid_by,
       ...(cat.kind === 'mileage' ? { km: Number(f.km), vehicle: f.vehicle } : cat.kind === 'per_day' ? { days: Number(f.days), ...(cat.daily_rate ? {} : { amount: Number(f.amount) }) } : { amount: Number(f.amount) }),
+      ...(extra.merchant ? { merchant: extra.merchant } : {}), ...(extra.bill_number ? { bill_number: extra.bill_number } : {}), ...(extra.gstin ? { gstin: extra.gstin } : {}), ...(extra.tax_amount && Number(extra.tax_amount) < Number(f.amount) ? { tax_amount: Number(extra.tax_amount) } : {}),
       receipts: bills.map((b, i) => ({ file_name: `bill-${i + 1}.jpg`, mime: b.mime, data: b.data })),
     };
     outboxAdd({ kind: 'expense', label: `Expense: ${cat.name || ''} ${f.amount ? money(f.amount) : ''}`.trim(), method: 'POST', path: '/expenses', body, ref });
@@ -76,6 +113,9 @@ function AddExpense({ meta, onClose, onSaved }) {
           <button type="button" className="btn outline" onClick={photo} data-testid="exp-bill"><Camera size={18} /> Bill photo</button>
           {bills.map((b, i) => <span key={i} style={{ position: 'relative' }}><img src={b.preview} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 8 }} /><button type="button" onClick={() => setBills(bills.filter((_, n) => n !== i))} aria-label="Remove" style={{ position: 'absolute', top: -6, right: -6, background: '#fff', borderRadius: 10 }}><X size={16} /></button></span>)}
         </div>
+        {reading && <div className="note info" data-testid="exp-reading"><Loader2 size={16} className="spin" /> {reading}</div>}
+        {fromBill && fromBill.filled && <div className="note ok" data-testid="exp-read-ok">Filled in from the bill: {fromBill.filled.join(', ')}. Please check.</div>}
+        {fromBill && fromBill.none && <div className="note info" data-testid="exp-read-none">The bill could not be read. Please type the details in.</div>}
         {error && <div className="note bad" data-testid="exp-error">{error}</div>}
         <button type="button" className="btn primary block big" onClick={save} disabled={busy} data-testid="exp-save">{busy ? <Loader2 className="spin" /> : null} Save</button>
       </div>

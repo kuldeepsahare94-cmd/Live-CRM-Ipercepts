@@ -483,10 +483,10 @@ body {
 .warn-text { color: var(--warn); }
 .quick-btn { align-self: flex-start; color: var(--brand); }
 /* follow-ups */
-.fu-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.fu-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, var(--c) 8%, #fff); border: 1.5px solid color-mix(in srgb, var(--c) 18%, transparent); text-align: left; }
+.fu-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.fu-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 9px 8px; min-width: 0; border-radius: 14px; background: color-mix(in srgb, var(--c) 8%, #fff); border: 1.5px solid color-mix(in srgb, var(--c) 18%, transparent); text-align: left; }
 .fu-tile b { font-size: 22px; line-height: 1.1; color: var(--c); }
-.fu-tile span { font-size: 12.5px; font-weight: 600; color: var(--ink); display: inline-flex; align-items: center; gap: 3px; }
+.fu-tile span { font-size: 11.5px; line-height: 1.2; font-weight: 600; color: var(--ink); display: inline-flex; align-items: center; gap: 3px; }
 .fu-tile.on { background: var(--c); border-color: var(--c); box-shadow: 0 8px 18px -10px var(--c); }
 .fu-tile.on b, .fu-tile.on span { color: #fff; }
 .fu-item { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-left: 4px solid var(--brand); }
@@ -514,3 +514,11 @@ body {
 /* nearby */
 .sel-row { background: var(--brand-soft); }
 .near-acts { grid-template-columns: repeat(3, 1fr); }
+
+/* v1.7 — grouped lists (meetings, tasks), coloured row lines */
+.ok-text { color: var(--ok); font-weight: 600; }
+.list-group { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); padding: 10px 4px 4px; }
+.list .row .line { white-space: normal; }
+
+.field-err { color: var(--bad) !important; font-weight: 600; }
+.input.has-err { border-color: var(--bad); }

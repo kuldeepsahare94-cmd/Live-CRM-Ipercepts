@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
-import { BellRing, PhoneForwarded, Menu, X, MessagesSquare, ClipboardList, Route, CalendarOff, ReceiptText, CheckCheck, Map as MapIcon, MapPin, PhoneCall, Settings, MoreHorizontal, ScanLine, LayoutDashboard } from 'lucide-react';
+import { BellRing, PhoneForwarded, Menu, X, MessagesSquare, ClipboardList, Route, CalendarOff, ReceiptText, CheckCheck, Map as MapIcon, MapPin, PhoneCall, Settings, MoreHorizontal, ScanLine, LayoutDashboard, UserSearch } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { get } from '../lib/store';
 import { canReadPhone } from '../lib/calls';
@@ -47,6 +47,8 @@ export function Drawer({ onClose }) {
     sfa && { to: '/nearby', icon: MapPin, color: '#16A34A', label: 'Nearby', testid: 'menu-nearby' },
     sfa && (boot.sfa.plan_on || boot.sfa.leave_on) && boot.me.is_manager && { to: '/approvals', icon: CheckCheck, color: '#D97706', label: 'Approvals', testid: 'menu-approvals' },
     sfa && boot.sfa.leave_on && { to: '/leave', icon: CalendarOff, color: '#DB2777', label: 'My leave', testid: 'menu-leave' },
+    // (v1.6) the recruitment desk, once it is switched on for this CRM
+    boot.placement && { to: '/placement', icon: UserSearch, color: '#6C4FF7', label: 'Placement', testid: 'menu-placement' },
     boot.expenses && { to: '/expenses', icon: ReceiptText, color: '#0D9488', label: 'Expenses', testid: 'menu-expenses' },
     canReadPhone() && boot.calls && boot.calls.enabled && { to: '/calls/phone', icon: PhoneCall, color: '#EA580C', label: 'Phone calls', testid: 'menu-phone-calls' },
     ['leads', 'contacts', 'accounts'].some((m) => has(m, 'create')) && { to: '/scan-card', icon: ScanLine, color: '#7C3AED', label: 'Scan a card', testid: 'menu-scan' },

@@ -1,7 +1,7 @@
 /* Me, the CRM, what waits to be sent, tracking help, sign out. */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, RefreshCw, Trash2, Building2, BatteryWarning, MapPin, CloudUpload, FileAudio, ChevronRight, Settings as SettingsIcon } from 'lucide-react';
+import { LogOut, RefreshCw, Trash2, Building2, BellRing, BatteryWarning, MapPin, CloudUpload, FileAudio, ChevronRight, Settings as SettingsIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { canReadPhone } from '../lib/calls';
 import { useApp } from '../lib/app';
@@ -10,6 +10,7 @@ import { serverUrl } from '../lib/api';
 import { remove as outboxRemove, retry as outboxRetry, pointCount, mine } from '../lib/outbox';
 import { openLocationSettings, isNative } from '../lib/location';
 import { TopBar, BottomNav, Avatar, StatusBars } from '../components/ui';
+import { iconOf, colorOf } from '../components/icons';
 
 const VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '';
 
@@ -43,6 +44,19 @@ export default function More() {
         <div className="card col">
           <div className="flex"><Building2 size={18} className="muted" /><div className="grow"><div className="strong">{boot.name || get('company')}</div><div className="tiny muted" style={{ wordBreak: 'break-all' }}>{serverUrl()}</div></div></div>
         </div>
+
+        {/* (v1.7) everything of the CRM in one place (Accounts and the rest left the bottom bar for Leads) */}
+        {(boot.modules || []).length > 0 && (
+          <div className="card col" data-testid="more-modules">
+            <div className="card-title">Open</div>
+            <div className="tiles">
+              <Link to="/follow-ups" className="tile" data-testid="more-followups"><span className="ic" style={{ background: '#4F46E51A', color: '#4F46E5' }}><BellRing size={20} /></span>Follow-ups</Link>
+              {boot.modules.map((m) => { const Ic = iconOf(m.api_name); return (
+                <Link key={m.api_name} to={`/m/${m.api_name}`} className="tile" data-testid={`more-mod-${m.api_name}`}><span className="ic" style={{ background: `${colorOf(m.api_name)}1A`, color: colorOf(m.api_name) }}><Ic size={20} /></span>{m.plural || m.api_name}</Link>
+              ); })}
+            </div>
+          </div>
+        )}
 
         <div className="card col" data-testid="outbox-card">
           <div className="card-title"><CloudUpload size={15} /> Waiting to be sent</div>

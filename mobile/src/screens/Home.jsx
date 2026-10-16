@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download, ScanLine, ClipboardList, CalendarOff, CheckCheck, ChevronRight, ChevronDown, Play, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { LogIn, LogOut, MapPin, Navigation, Camera, CalendarDays, ShoppingCart, PhoneCall, ReceiptText, UserPlus, Loader2, AlertTriangle, Route, PhoneMissed, Phone, Download, ScanLine, ClipboardList, CalendarOff, CheckCheck, ChevronRight, ChevronDown, Play, PhoneIncoming, PhoneOutgoing, UserSearch } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 import { useApp, listen } from '../lib/app';
 import { GET } from '../lib/api';
@@ -19,6 +19,7 @@ import { km, niceTime, since, talk } from '../lib/format';
 import { BottomNav, StatusBars } from '../components/ui';
 import MenuButton from '../components/Drawer';
 import FollowUps, { NextUp } from '../components/FollowUps';
+import { pendingPlCall } from '../lib/placement';
 import { MessagesSquare, PhoneForwarded } from 'lucide-react';
 
 function DutyCard() {
@@ -325,6 +326,9 @@ export default function Home() {
     has('calls', 'create') && { label: 'Log a call', icon: PhoneCall, color: '#EA580C', go: () => nav(canReadPhone() ? '/calls/phone' : `/m/${has('leads') ? 'leads' : 'accounts'}`), id: 'call' },
     // (v1.5) call a list one by one
     has('calls', 'create') && { label: 'Auto dial', icon: PhoneForwarded, color: '#16A34A', go: () => nav('/dialer'), id: 'dialer' },
+    // (v1.6) the recruitment desk
+    boot.placement && { label: 'Placement', icon: UserSearch, color: '#6C4FF7', go: () => nav('/placement'), id: 'placement' },
+    boot.placement && boot.placement.create && { label: 'New candidate', icon: UserPlus, color: '#16A34A', go: () => nav('/placement/new'), id: 'candidate' },
     boot.expenses && { label: 'Expense', icon: ReceiptText, color: '#0D9488', go: () => nav('/expenses?add=1'), id: 'expense' },
     sfaOn && { label: 'Nearby', icon: Navigation, color: '#16A34A', go: () => nav('/nearby'), id: 'nearby' },
     sfaOn && boot.sfa.plan_on && { label: 'My plan', icon: ClipboardList, color: '#4F46E5', go: () => nav('/plans'), id: 'plan' },
@@ -334,7 +338,9 @@ export default function Home() {
   // Android closed the app during a call: the call is filled in now
   useEffect(() => {
     const p = pendingCall();
-    if (p && !p.shown) { markPendingShown(); nav(`/call/${p.module}/${p.id}?after=1`); }
+    if (p && !p.shown) { markPendingShown(); nav(`/call/${p.module}/${p.id}?after=1`); return; }
+    // (v1.6) Android closed the app during a call to a candidate: how did it go?
+    if (pendingPlCall() && boot.placement) nav('/placement');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="screen">

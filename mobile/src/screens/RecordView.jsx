@@ -28,6 +28,7 @@ import { pickFiles, takePhoto } from '../lib/media';
 import { VISIT_MODULES, PLACE_MODULES } from '../components/icons';
 import { ShareToChat } from './Chat';
 import QuickEdit from '../components/QuickEdit';
+import { ExtraList, useExtraEmails } from '../components/MoreEmails';
 
 const ORDER_FROM = { accounts: 'account_id', contacts: 'account_id', opportunities: 'account_id' };
 const HIDDEN = new Set(['id', 'related_module', 'related_record_id', 'attendees_json', 'online_meeting_id', 'online_status', 'online_error', 'online_provider', 'online_dial_in']);
@@ -116,7 +117,7 @@ function MeetingOnline({ row, onRefresh }) {
 const SECTION_ICON = (name) => (/contact|phone|mobile/i.test(name) ? Phone : /company|account|organi[sz]ation|business/i.test(name) ? Building2 : /address|location|place/i.test(name) ? MapPinned : /owner|assign/i.test(name) ? User : /basic|personal|lead|info/i.test(name) ? User : Info);
 
 /** the record's fields, in the sections of its form, each section with ✎ */
-function Sections({ module, id, mod, row, values, canEdit }) {
+function Sections({ module, id, mod, row, values, canEdit, extraMails = [] }) {
   const { module: modOf, say } = useApp();
   // (v1.5) the empty fields wait under "View all fields", so the page shows what is known
   const [all, setAll] = useState(false);
@@ -153,7 +154,7 @@ function Sections({ module, id, mod, row, values, canEdit }) {
                 if (!text) dd = <span className="faint">-</span>;
                 else if (/status|stage/.test(f.api_name) && ['dropdown', 'radio', 'text'].includes(f.type)) dd = <StatusTag value={text} />;
                 else if (isPhone) dd = <><a href={`tel:${phoneFor(text)}`} className="grow">{text}</a><button type="button" className="icon-btn mini" aria-label="Copy" onClick={() => copyText(text, say)}><Copy size={16} /></button></>;
-                else if (isMail) dd = <><a href={`mailto:${text}`} className="grow ellipsis">{text}</a><button type="button" className="icon-btn mini" aria-label="Copy" onClick={() => copyText(text, say)}><Copy size={16} /></button></>;
+                else if (isMail) dd = <div className="col" style={{ gap: 4, width: '100%' }}><div className="flex"><a href={`mailto:${text}`} className="grow ellipsis">{text}</a><button type="button" className="icon-btn mini" aria-label="Copy" onClick={() => copyText(text, say)}><Copy size={16} /></button></div>{f.api_name === 'email' && <ExtraList list={extraMails} />}</div>;
                 else if (lookup) dd = <><Link to={`/m/${f.lookup_module}/${raw}`} className="grow" style={{ color: 'inherit' }}>{text}</Link><Link to={`/m/${f.lookup_module}/${raw}`} className="icon-btn mini" aria-label="Open"><ExternalLink size={16} /></Link></>;
                 else if (f.type === 'url') dd = <button type="button" className="link-btn grow ellipsis" onClick={() => openOutside(/^https?:/.test(text) ? text : `https://${text}`)}>{text}</button>;
                 else dd = <span className="grow">{text}</span>;
@@ -275,7 +276,8 @@ export default function RecordView() {
   const [more, setMore] = useState(false);
   const [sheet, setSheet] = useState('');
   const [actTab, setActTab] = useState('calls');
-  const tab = params.get('tab') || 'details';
+  // (v1.7) a lead that has history opens on its Timeline (what happened last), else on its Details
+  const tab = params.get('tab') || (module === 'leads' && rel && Array.isArray(rel.timeline) && rel.timeline.length ? 'timeline' : 'details');
   const setTab = (t) => setParams((p) => { const n = new URLSearchParams(p); n.set('tab', t); return n; }, { replace: true });
   const sfa = boot.sfa.enabled;
   const visitable = sfa && VISIT_MODULES.includes(module);
@@ -291,6 +293,7 @@ export default function RecordView() {
     loadRel();
   }, [module, id, mod, visitable, loadRel]);
   useEffect(() => { load(); }, [load]);
+  const extraMails = useExtraEmails(module, id) || [];      // (v1.8) the other email addresses
 
   const row = data ? data.row : null;
   const title = row ? titleOf(module, row) : '';
@@ -433,7 +436,7 @@ export default function RecordView() {
               {(phone || email) && (
                 <div className="rec-contacts">
                   {phone && <button type="button" className="rec-contact" onClick={call} data-testid="head-phone"><Phone size={15} /> {phone}</button>}
-                  {email && <button type="button" className="rec-contact ellipsis" onClick={() => openOutside(`mailto:${email}`)} data-testid="head-email"><Mail size={15} /> {email}</button>}
+                  {email && <button type="button" className="rec-contact" onClick={() => openOutside(`mailto:${email}`)} data-testid="head-email"><Mail size={15} /> <span className="ellipsis">{email}</span>{extraMails.length > 0 && <span className="tiny strong" style={{ flex: 'none', color: 'var(--brand)' }} data-testid="more-emails-chip">+{extraMails.length}</span>}</button>}
                 </div>
               )}
             </div>
@@ -509,7 +512,7 @@ export default function RecordView() {
             {module === 'tasks' && row.related_module && row.related_record_id && modOf(row.related_module) && (
               <Link to={`/m/${row.related_module}/${row.related_record_id}`} className="card flex" style={{ color: 'inherit' }} data-testid="task-for"><Link2 size={18} color="var(--brand)" /><span className="grow small">For: {row.related_name || `${modOf(row.related_module).singular} #${row.related_record_id}`}</span><ExternalLink size={16} className="faint" /></Link>
             )}
-            <Sections module={module} id={id} mod={mod} row={row} values={values} canEdit={mod.can.edit} />
+            <Sections module={module} id={id} mod={mod} row={row} values={values} canEdit={mod.can.edit} extraMails={extraMails} />
           </>
         )}
 

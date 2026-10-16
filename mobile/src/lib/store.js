@@ -43,7 +43,7 @@ export function set(key, value) {
 
 export function flushStore() { return chain; }
 
-const PERSON = ['token', 'token_at', 'me', 'boot', 'outbox', 'refs', 'day', 'tracking', 'drafts', 'pending_expenses', 'exp_meta', 'pts_seq', 'pending_call', 'log_call', 'call_matches', 'scan_from', 'viewing_opts', 'list_filters', 'push_token', 'chat_seen', 'dial_session', 'dial_setup'];
+const PERSON = ['token', 'token_at', 'me', 'boot', 'outbox', 'refs', 'day', 'tracking', 'drafts', 'pending_expenses', 'exp_meta', 'pts_seq', 'pending_call', 'log_call', 'call_matches', 'scan_from', 'viewing_opts', 'list_filters', 'push_token', 'chat_seen', 'dial_session', 'dial_setup', 'pl_meta', 'pl_pending_call', 'pl_who'];
 /** Forget everything of the person who signs out (the server address stays). */
 export function forgetPerson() {
   PERSON.forEach((k) => set(k, null));

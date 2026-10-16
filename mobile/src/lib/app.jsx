@@ -12,6 +12,7 @@ import { startTracking, stopTracking, onTracking, trackingStatus } from './locat
 import { refreshReminders } from './reminders';
 import { retryOldRecordings } from './calls';
 import { startPush, stopPush, onAlert } from './push';
+import { clearReminders as clearPlacementReminders } from './placement';
 
 const Ctx = createContext(null);
 // a Capacitor listener: removed even when the screen goes away before it was ready
@@ -133,6 +134,7 @@ export function AppProvider({ children }) {
   const resetPerson = useCallback(async (message = '') => {
     await stopTracking().catch(() => {});
     await stopPush().catch(() => {});
+    await clearPlacementReminders().catch(() => {});
     setUnread(0);
     forgetPerson();
     setDayState(null); setBoot(null); setOutbox([]);

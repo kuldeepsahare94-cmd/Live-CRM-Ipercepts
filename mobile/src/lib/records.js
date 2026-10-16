@@ -31,7 +31,7 @@ export const EDITABLE = new Set(['text', 'textarea', 'rich_text', 'number', 'dec
  * Save a record (new when id is empty). values: { api_name: value } of the form.
  * A possible duplicate comes back as { duplicate } (lead / contact / account) — save again with `duplicate: 'create'` to add it anyway.
  */
-export async function saveRecord(module, id, values, fields, { duplicate = 'ask' } = {}) {
+export async function saveRecord(module, id, values, fields, { duplicate = 'ask', extraEmails = null } = {}) {
   const sys = {}; const custom = {};
   for (const f of fields) {
     if (!(f.api_name in values)) continue;
@@ -44,6 +44,8 @@ export async function saveRecord(module, id, values, fields, { duplicate = 'ask'
     if (f.system) sys[f.api_name] = v === '' ? null : v; else custom[f.api_name] = v;
   }
   if (['leads', 'contacts', 'accounts'].includes(module) && !id) sys._duplicate = duplicate;
+  // (v1.8) the other email addresses go with the record; the server keeps them once the record is saved
+  if (Array.isArray(extraEmails)) sys._extra_emails = extraEmails;
   let row;
   try {
     row = id ? await PUT(`/${module}/${id}`, sys) : await POST(`/${module}`, sys);

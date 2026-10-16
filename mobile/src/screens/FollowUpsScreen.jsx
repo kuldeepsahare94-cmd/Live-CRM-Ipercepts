@@ -1,5 +1,6 @@
 /*
- * Follow-ups (v1.5): the day's to-do list, a screen of its own (menu → Follow-ups,
+ * Follow-ups (v1.5; v1.7: only follow-ups a person planned, plus a "Not planned" list of
+ * active leads that have none): the day's to-do list, a screen of its own (menu → Follow-ups,
  * or a tile on Home).
  *   My view / Team view (a manager: the whole team, a team, a role, a person)
  *   Overdue · Today · This week · Pick dates, with their counts; a search
@@ -20,7 +21,7 @@ import ViewingPicker, { useViewingOptions } from '../components/Viewing';
 import QuickEdit from '../components/QuickEdit';
 
 const toIso = (v) => { const s = String(v || ''); if (!s) return ''; return /[zZ]|[+-]\d\d:?\d\d$/.test(s) || s.length <= 10 ? s : `${s.replace(' ', 'T')}Z`; };
-const TILES = [['overdue', 'Overdue', '#DC2626'], ['today', 'Today', '#4F46E5'], ['week', 'This week', '#0891B2']];
+const TILES = [['overdue', 'Overdue', '#DC2626'], ['today', 'Today', '#4F46E5'], ['week', 'This week', '#0891B2'], ['none', 'Not planned', '#B45309']];
 function lateText(r) {
   if (!r.overdue) return '';
   const days = Math.floor((Date.parse(`${today()}T00:00:00`) - Date.parse(`${r.due_date}T00:00:00`)) / 86400000);
@@ -33,7 +34,7 @@ export default function FollowUpsScreen() {
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const opts = useViewingOptions(!!(boot.me && boot.me.view_others));
-  const range = ['overdue', 'today', 'week', 'dates'].includes(params.get('range')) ? params.get('range') : 'today';
+  const range = ['overdue', 'today', 'week', 'dates', 'none'].includes(params.get('range')) ? params.get('range') : 'today';
   const view = params.get('view') || 'me';
   const [from, setFrom] = useState(today());
   const [to, setTo] = useState(addDays(today(), 6));
@@ -64,6 +65,8 @@ export default function FollowUpsScreen() {
   };
   const open = (r) => { if (modOf(r.module)) nav(`/m/${r.module}/${r.record_id}`); else say('This record opens on the web.', 'info'); };
   const rows = data ? data.rows : [];
+  const noPlan = range === 'none';
+  // a lead with no follow-up: open it and plan one (the quick editor, follow-up tab)
   const callable = rows.filter((r) => r.phone).length;
 
   return (
@@ -100,12 +103,13 @@ export default function FollowUpsScreen() {
         {team && data && data.by_person.length > 0 && (
           <div className="tiny muted" data-testid="fu-people">{data.by_person.map((p) => `${p.name} ${p.count}${p.overdue ? ` (${p.overdue} late)` : ''}`).join(' · ')}</div>
         )}
-        {callable > 0 && modOf('calls') && modOf('calls').can.create && (
+        {noPlan && <div className="note small" data-testid="fu-noplan-hint">Active leads with no follow-up planned. Tap Plan to set one.</div>}
+        {!noPlan && callable > 0 && modOf('calls') && modOf('calls').can.create && (
           <Link to={`/dialer?source=fu-${range}${team ? `&view=${encodeURIComponent(view)}` : ''}`} className="btn outline block" data-testid="fu-dial-all"><PhoneForwarded size={18} /> Call them one by one ({callable})</Link>
         )}
         {error && <div className="note warn small">{error}</div>}
         {!data && !error ? <Loading /> : data && !rows.length ? (
-          <Empty icon={Check} title={term ? 'Nothing found' : range === 'overdue' ? 'Nothing overdue 👍' : range === 'today' ? 'No follow-ups today' : 'No follow-ups here'} />
+          <Empty icon={Check} title={term ? 'Nothing found' : noPlan ? 'Every active lead has a follow-up 👍' : range === 'overdue' ? 'Nothing overdue 👍' : range === 'today' ? 'No follow-ups today' : 'No follow-ups here'} />
         ) : data && (
           <div className="col" style={{ gap: 10 }} data-testid="fu-list">
             {rows.map((r) => {
@@ -118,7 +122,7 @@ export default function FollowUpsScreen() {
                       <span className="strong ellipsis block">{r.title}</span>
                       {r.company && <span className="tiny muted ellipsis block">{r.company}</span>}
                       <span className={`tiny block${r.overdue ? ' bad-text' : ' muted'}`} data-testid="fu-when">
-                        {r.overdue ? `${lateText(r)} · ` : ''}{niceDate(r.due_date)}{r.has_time ? ` · ${niceTime(toIso(r.snoozed_until || r.due_at))}` : ''}{r.subject && r.subject !== 'Follow-up' ? ` · ${r.subject}` : ''}
+                        {r.no_plan ? `${r.lead_status || 'Lead'} · added ${niceDate(r.created_at)}${r.last_call ? ` · last call ${niceDate(r.last_call)}` : ' · never called'}` : <>{r.overdue ? `${lateText(r)} · ` : ''}{niceDate(r.due_date)}</>}{!r.no_plan && r.has_time ? ` · ${niceTime(toIso(r.snoozed_until || r.due_at))}` : ''}{!r.no_plan && r.subject && r.subject !== 'Follow-up' ? ` · ${r.subject}` : ''}
                       </span>
                       {team && r.assignee_name && <span className="tiny muted flex" style={{ gap: 4 }}><Avatar name={r.assignee_name} small /> {r.assignee_name}</span>}
                     </span>
@@ -128,8 +132,8 @@ export default function FollowUpsScreen() {
                   <div className="fu-acts">
                     {r.phone && <button type="button" className="fu-act ok" onClick={() => call(r)} data-testid="fu-call"><Phone size={16} /> Call</button>}
                     {r.phone && <button type="button" className="fu-act wa" onClick={() => openWhatsApp(r.phone, '')} data-testid="fu-wa"><MessageCircle size={16} /> WhatsApp</button>}
-                    <button type="button" className="fu-act" onClick={() => setEdit(r)} data-testid="fu-reschedule"><CalendarClock size={16} /> Reschedule</button>
-                    <button type="button" className="fu-act done" disabled={busy === r.id} onClick={() => done(r)} data-testid="fu-done">{busy === r.id ? <Loader2 size={16} className="spin" /> : <Check size={16} />} Done</button>
+                    <button type="button" className="fu-act" onClick={() => setEdit(r)} data-testid="fu-reschedule"><CalendarClock size={16} /> {r.no_plan ? 'Plan' : 'Reschedule'}</button>
+                    {!r.no_plan && <button type="button" className="fu-act done" disabled={busy === r.id} onClick={() => done(r)} data-testid="fu-done">{busy === r.id ? <Loader2 size={16} className="spin" /> : <Check size={16} />} Done</button>}
                   </div>
                 </div>
               );
@@ -138,7 +142,7 @@ export default function FollowUpsScreen() {
           </div>
         )}
       </div>
-      {edit && <QuickEdit module={edit.module} id={edit.record_id} title={edit.title} only="follow" followUp={{ id: edit.id, due_at: edit.snoozed_until || edit.due_at, has_time: edit.has_time }} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
+      {edit && <QuickEdit module={edit.module} id={edit.record_id} title={edit.title} only="follow" followUp={edit.no_plan ? null : { id: edit.id, due_at: edit.snoozed_until || edit.due_at, has_time: edit.has_time }} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
       <BottomNav />
     </div>
   );

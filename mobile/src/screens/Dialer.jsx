@@ -49,7 +49,8 @@ export default function DialerSetup() {
   const spec = useFilterSpec('leads');
   const old = getSession();
   const going = old && (old.state === 'active' || old.state === 'paused');
-  const how = via || (ivrOk ? 'ivr' : 'phone');
+  // MCube only when this user can call through it now; otherwise always this phone's dialer
+  const how = ivrOk && via !== 'phone' ? 'ivr' : 'phone';
   const team = view !== 'me';
   const fParam = asParam(filters);
 
