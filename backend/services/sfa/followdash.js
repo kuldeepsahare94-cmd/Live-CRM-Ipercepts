@@ -3,7 +3,7 @@
 // this week, or between two dates. Used by the app's Home and Team screens and
 // by the web dashboard.
 //
-//   GET /api/sfa/m/follow-ups?range=overdue|today|week|dates&from=&to=&view=me|all|user:5|team:2|role:3
+//   GET /api/sfa/m/follow-ups?range=overdue|today|week|dates&from=&to=&view=me|all|user:5|team:2|role:3&q=(search, v1.5)
 //
 // A follow-up is "for" the person it was given to, else whoever owns the record
 // (the same rule the reminders use). Only follow-ups on modules the viewer's
@@ -75,7 +75,10 @@ function list(user, q = {}) {
     dates: (x) => x.f.due_date >= from && x.f.due_date <= to,
   };
   const counts = { overdue: mine.filter(pick.overdue).length, today: mine.filter(pick.today).length, week: mine.filter(pick.week).length };
-  const chosen = mine.filter(pick[range]);
+  // (v1.5) a search: the customer's name, the follow-up's subject or note
+  const term = String(q.q || '').trim().toLowerCase();
+  const found = (x) => !term || [x.info.label, x.f.subject, x.f.notes].some((v) => String(v || '').toLowerCase().includes(term));
+  const chosen = mine.filter(pick[range]).filter(found);
   if (range === 'dates') counts.dates = chosen.length;
   const shown = chosen.slice(0, MAX_ROWS);
 
@@ -84,12 +87,23 @@ function list(user, q = {}) {
   for (const mod of [...new Set(shown.map((x) => x.f.related_module))]) {
     phones.set(mod, phonesOf(mod, shown.filter((x) => x.f.related_module === mod).map((x) => Number(x.f.related_record_id))));
   }
+  const leadIds = shown.filter((x) => x.f.related_module === 'leads').map((x) => Number(x.f.related_record_id));
+  const extra = new Map();
+  if (leadIds.length) {
+    try {
+      db.prepare(`SELECT id, lead_rating, account_name FROM leads WHERE id IN (${leadIds.map(() => '?').join(',')})`).all(...leadIds)
+        .forEach((r) => extra.set(Number(r.id), { rating: r.lead_rating || '', company: r.account_name || '' }));
+    } catch { /* an older database */ }
+  }
   const out = shown.map(({ f, info, who, status }) => ({
     id: Number(f.id), module: f.related_module, record_id: Number(f.related_record_id), title: info.label,
     subject: f.subject || '', notes: f.notes || '', due_at: f.due_at, due_date: f.due_date, has_time: !!f.has_time,
     snoozed_until: f.snoozed_until || null, status, overdue: isOverdue({ f, status }),
     assignee_id: who ? Number(who) : null, assignee_name: names.get(Number(who)) || '',
     phone: (phones.get(f.related_module) || new Map()).get(Number(f.related_record_id)) || '',
+    // (v1.5) how hot a lead is (Hot / Warm / Cold), and its company, on the follow-up's card
+    rating: f.related_module === 'leads' ? ((extra.get(Number(f.related_record_id)) || {}).rating || '') : '',
+    company: f.related_module === 'leads' ? ((extra.get(Number(f.related_record_id)) || {}).company || '') : '',
   }));
   // the team view: how many each person has
   const byPerson = [];
