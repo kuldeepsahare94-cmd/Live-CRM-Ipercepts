@@ -4,8 +4,8 @@
  * Tap one: its record opens. The tick: done. The phone: call.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { BellRing, Check, Phone, ChevronRight, ChevronDown, CalendarRange, Loader2 } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { BellRing, Check, Phone, ChevronRight, ChevronDown, CalendarRange, Loader2, ArrowRight, Clock } from 'lucide-react';
 import { GET, POST, qs } from '../lib/api';
 import { useApp } from '../lib/app';
 import { get, set } from '../lib/store';
@@ -111,8 +111,43 @@ export default function FollowUps({ view = 'me', title = 'My follow-ups', foldKe
               {data.more && <div className="tiny faint center" style={{ padding: 8 }}>Showing the first {data.rows.length}.</div>}
             </div>
           )}
+          {/* (v1.5) the full list: reschedule, WhatsApp, search, call them one by one */}
+          {!team && <Link to={`/follow-ups?range=${range}`} className="btn ghost small" style={{ alignSelf: 'flex-start' }} data-testid={`${testid}-all`}>Open all follow-ups <ArrowRight size={15} /></Link>}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * "Next up" on Home (v1.5): the next follow-up of today (or the first late one),
+ * with Call — so there is no searching for what to do next.
+ */
+export function NextUp() {
+  const { module: modOf } = useApp();
+  const nav = useNavigate();
+  const [next, setNext] = useState(null);
+  useEffect(() => {
+    Promise.all([GET('/sfa/m/follow-ups?range=today&view=me'), GET('/sfa/m/follow-ups?range=overdue&view=me')]).then(([t, o]) => {
+      const now = Date.now() - 3600000;
+      const at = (r) => Date.parse(toIso(r.snoozed_until || r.due_at)) || 0;
+      const todays = t.rows.filter((r) => !r.overdue).sort((a, b) => at(a) - at(b));
+      setNext(todays.find((r) => !r.has_time || at(r) >= now) || o.rows[0] || todays[0] || false);
+    }).catch(() => setNext(false));
+  }, []);
+  if (!next) return null;
+  const call = () => {
+    if (['leads', 'contacts', 'accounts', 'opportunities'].includes(next.module) && modOf('calls') && modOf('calls').can.create && modOf(next.module)) nav(`/call/${next.module}/${next.record_id}?dial=1`);
+    else openOutside(`tel:${phoneFor(next.phone)}`);
+  };
+  return (
+    <div className={`card flex next-up${next.overdue ? ' late' : ''}`} data-testid="next-up">
+      <button type="button" className="grow" style={{ textAlign: 'left', minWidth: 0 }} onClick={() => (modOf(next.module) ? nav(`/m/${next.module}/${next.record_id}`) : null)}>
+        <div className="tiny muted flex" style={{ gap: 4 }}><Clock size={12} /> {next.overdue ? 'Late — do this first' : 'Next up'}</div>
+        <div className="strong ellipsis">{next.title}</div>
+        <div className={`tiny${next.overdue ? ' bad-text' : ' muted'}`}>{whenOf(next)}{next.subject && next.subject !== 'Follow-up' ? ` · ${next.subject}` : ''}</div>
+      </button>
+      {next.phone && <button type="button" className="btn good small" onClick={call} data-testid="next-up-call"><Phone size={16} /> Call</button>}
     </div>
   );
 }

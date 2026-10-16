@@ -37,6 +37,8 @@ import More from './screens/More';
 import MyDay from './screens/MyDay';
 import ChatList, { ChatThread } from './screens/Chat';
 import Settings from './screens/Settings';
+import FollowUpsScreen from './screens/FollowUpsScreen';
+import DialerSetup, { DialerRun } from './screens/Dialer';
 import { onAlertTapped } from './lib/push';
 
 function Signed({ children }) {
@@ -119,6 +121,9 @@ export default function App() {
           <Route path="/chat" element={<Signed><ChatList /></Signed>} />
           <Route path="/chat/:id" element={<Signed><ChatThread /></Signed>} />
           <Route path="/settings" element={<Signed><Settings /></Signed>} />
+          <Route path="/follow-ups" element={<Signed><FollowUpsScreen /></Signed>} />
+          <Route path="/dialer" element={<Signed><DialerSetup /></Signed>} />
+          <Route path="/dialer/run" element={<Signed><DialerRun /></Signed>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <Toast />

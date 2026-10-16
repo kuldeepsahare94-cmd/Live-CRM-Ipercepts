@@ -18,8 +18,8 @@ import { takePhoto } from '../lib/media';
 import { km, niceTime, since, talk } from '../lib/format';
 import { BottomNav, StatusBars } from '../components/ui';
 import MenuButton from '../components/Drawer';
-import FollowUps from '../components/FollowUps';
-import { MessagesSquare } from 'lucide-react';
+import FollowUps, { NextUp } from '../components/FollowUps';
+import { MessagesSquare, PhoneForwarded } from 'lucide-react';
 
 function DutyCard() {
   const { boot, day, setDay, tracking, say } = useApp();
@@ -323,6 +323,8 @@ export default function Home() {
     ['leads', 'contacts', 'accounts'].some((m) => has(m, 'create')) && { label: 'Scan card', icon: ScanLine, color: '#7C3AED', go: () => nav('/scan-card'), id: 'scan' },
     has('quotations', 'create') && has('products') && { label: 'New order', icon: ShoppingCart, color: '#0891B2', go: () => nav('/order/new'), id: 'order' },
     has('calls', 'create') && { label: 'Log a call', icon: PhoneCall, color: '#EA580C', go: () => nav(canReadPhone() ? '/calls/phone' : `/m/${has('leads') ? 'leads' : 'accounts'}`), id: 'call' },
+    // (v1.5) call a list one by one
+    has('calls', 'create') && { label: 'Auto dial', icon: PhoneForwarded, color: '#16A34A', go: () => nav('/dialer'), id: 'dialer' },
     boot.expenses && { label: 'Expense', icon: ReceiptText, color: '#0D9488', go: () => nav('/expenses?add=1'), id: 'expense' },
     sfaOn && { label: 'Nearby', icon: Navigation, color: '#16A34A', go: () => nav('/nearby'), id: 'nearby' },
     sfaOn && boot.sfa.plan_on && { label: 'My plan', icon: ClipboardList, color: '#4F46E5', go: () => nav('/plans'), id: 'plan' },
@@ -367,6 +369,7 @@ export default function Home() {
             ))}
           </div>
         )}
+        <NextUp />
         <FollowUps view="me" title="My follow-ups" testid="followups" />
         <CallsCard />
         <Meetings />

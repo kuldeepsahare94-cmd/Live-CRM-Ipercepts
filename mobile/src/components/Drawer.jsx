@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, MessagesSquare, ClipboardList, Route, CalendarOff, ReceiptText, CheckCheck, Map as MapIcon, MapPin, PhoneCall, Settings, MoreHorizontal, ScanLine, LayoutDashboard } from 'lucide-react';
+import { BellRing, PhoneForwarded, Menu, X, MessagesSquare, ClipboardList, Route, CalendarOff, ReceiptText, CheckCheck, Map as MapIcon, MapPin, PhoneCall, Settings, MoreHorizontal, ScanLine, LayoutDashboard } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { get } from '../lib/store';
 import { canReadPhone } from '../lib/calls';
@@ -37,6 +37,9 @@ export function Drawer({ onClose }) {
   const sfa = boot.sfa && boot.sfa.enabled;
   const has = (api, a = 'view') => boot.modules.some((m) => m.api_name === api && m.can[a]);
   const work = [
+    // (v1.5) the day's to-do list, and calling a list one by one
+    { to: '/follow-ups', icon: BellRing, color: '#EA580C', label: 'Follow-ups', testid: 'menu-followups' },
+    has('calls', 'create') && { to: '/dialer', icon: PhoneForwarded, color: '#16A34A', label: 'Auto dialer', testid: 'menu-dialer' },
     boot.chat && boot.chat.view && { to: '/chat', icon: MessagesSquare, color: '#7C3AED', label: 'Chat', badge: unread, testid: 'menu-chat' },
     (boot.me.view_others || boot.me.is_manager) && { to: '/team', icon: sfa ? MapIcon : LayoutDashboard, color: '#0EA5E9', label: 'My team', testid: 'menu-team' },
     sfa && boot.sfa.plan_on && { to: '/plans', icon: ClipboardList, color: '#4F46E5', label: 'My plan', testid: 'menu-plans' },

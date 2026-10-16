@@ -12,7 +12,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Phone, MessageCircle, Navigation, MapPin, Pencil, ShoppingCart, CheckSquare, CalendarPlus, PhoneCall, Crosshair, Check, Loader2, FileAudio,
   Mail, MoreHorizontal, MoreVertical, Copy, ExternalLink, Clock, ListTree, Network, Activity, StickyNote, Paperclip, Plus, BellRing, Share2,
-  User, Building2, MapPinned, Info, Video, Link2, MessagesSquare,
+  User, Building2, MapPinned, Info, Video, Link2, MessagesSquare, Zap, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { GET, PUT, POST, qs, absolute } from '../lib/api';
@@ -27,6 +27,7 @@ import { openWhatsApp } from '../lib/whatsapp';
 import { pickFiles, takePhoto } from '../lib/media';
 import { VISIT_MODULES, PLACE_MODULES } from '../components/icons';
 import { ShareToChat } from './Chat';
+import QuickEdit from '../components/QuickEdit';
 
 const ORDER_FROM = { accounts: 'account_id', contacts: 'account_id', opportunities: 'account_id' };
 const HIDDEN = new Set(['id', 'related_module', 'related_record_id', 'attendees_json', 'online_meeting_id', 'online_status', 'online_error', 'online_provider', 'online_dial_in']);
@@ -117,7 +118,12 @@ const SECTION_ICON = (name) => (/contact|phone|mobile/i.test(name) ? Phone : /co
 /** the record's fields, in the sections of its form, each section with ✎ */
 function Sections({ module, id, mod, row, values, canEdit }) {
   const { module: modOf, say } = useApp();
-  const fields = mod.fields.filter((f) => f.detail !== false && !HIDDEN.has(f.api_name));
+  // (v1.5) the empty fields wait under "View all fields", so the page shows what is known
+  const [all, setAll] = useState(false);
+  const every = mod.fields.filter((f) => f.detail !== false && !HIDDEN.has(f.api_name));
+  const filled = (f) => { const t = show(f, values[f.api_name], row); return t !== '' && t !== null && t !== undefined; };
+  const empty = every.filter((f) => !filled(f)).length;
+  const fields = all || empty < 3 ? every : every.filter(filled);
   const groups = [];
   for (const f of fields) {
     const name = f.section || 'Details';
@@ -157,6 +163,11 @@ function Sections({ module, id, mod, row, values, canEdit }) {
           </div>
         );
       })}
+      {empty >= 3 && (
+        <button type="button" className="btn ghost small" style={{ alignSelf: 'center' }} onClick={() => setAll(!all)} data-testid="all-fields">
+          {all ? <><ChevronUp size={16} /> Hide the empty fields</> : <><ChevronDown size={16} /> View all fields ({empty} empty)</>}
+        </button>
+      )}
     </div>
   );
 }
@@ -244,7 +255,7 @@ const REL = {
   subscriptions: ['payments'],
 };
 const REL_LABEL = { visits: ['Visits', MapPin, '#2563EB'], opportunities: ['Deals', Network, '#C026D3'], quotations: ['Orders / quotations', ShoppingCart, '#0D9488'], contacts: ['Contacts', User, '#0D9488'], invoices: ['Invoices', ListTree, '#4F46E5'], proformas: ['Proformas', ListTree, '#6366F1'], payments: ['Payments', Check, '#059669'], tickets: ['Tickets', Info, '#E11D48'], subscriptions: ['Subscriptions', Clock, '#059669'] };
-const ACT = [['calls', 'Calls', PhoneCall, '#16A34A'], ['meetings', 'Meetings', CalendarPlus, '#7C3AED'], ['tasks', 'Tasks', CheckSquare, '#0891B2'], ['follow_ups', 'Follow-ups', BellRing, '#EA580C']];
+const ACT = [['calls', 'Calls', PhoneCall, '#16A34A'], ['meetings', 'Meetings', CalendarPlus, '#7C3AED'], ['tasks', 'Tasks', CheckSquare, '#0891B2'], ['visits', 'Visits', MapPin, '#2563EB'], ['follow_ups', 'Follow-ups', BellRing, '#EA580C']];
 
 export default function RecordView() {
   const { module, id } = useParams();
@@ -370,6 +381,8 @@ export default function RecordView() {
   const f = (rel && rel.figures) || {};
   const counts = (rel && rel.counts) || {};
   const sec = (k) => (rel && rel.sections && rel.sections[k]) || [];
+  // the record's open follow-up (Quick edit moves it, instead of making a second one)
+  const nextFu = (() => { const r = sec('follow_ups').find((x) => /schedul|overdue|due|pending/i.test(x.status || '') || !x.status); return r ? { id: r.id, due_at: r.at || r.due_at, has_time: r.has_time !== 0 && r.has_time !== false } : null; })();
   const goRel = () => setTab(REL[module] ? 'related' : 'timeline');
   const stats = [
     f.calls !== undefined && { k: 'calls', label: 'Calls', value: f.calls, icon: PhoneCall, c: '#16A34A', go: () => { setActTab('calls'); setTab('activities'); } },
@@ -399,7 +412,9 @@ export default function RecordView() {
     meetings: can('meetings') ? { to: meetingNew } : null,
     tasks: can('tasks') ? { to: `/m/tasks/new?${relQs}` } : null,
     follow_ups: { onClick: () => setSheet('fu') },
+    visits: visitable ? { onClick: checkIn, label: 'Check in' } : null,
   };
+  const actTabs = ACT.filter(([k]) => k !== 'visits' || (rel && rel.sections && rel.sections.visits) || counts.visits > 0);
 
   return (
     <div className="screen">
@@ -428,6 +443,9 @@ export default function RecordView() {
           {row.amount !== undefined && row.amount !== null && module === 'opportunities' && <div className="strong grad-text" style={{ fontSize: 22 }}>{money(row.amount)}</div>}
           {module === 'meetings' && row.start_datetime && <div className="small muted flex"><Clock size={14} /> {niceDate(row.start_datetime)} · {niceTime(row.start_datetime)}{row.end_datetime ? `–${niceTime(row.end_datetime)}` : ''}</div>}
           {place && <div className="tiny faint flex"><MapPin size={12} /> Place saved{place.source === 'visit' ? ' from a visit' : ''}</div>}
+          {!ACTIVITY_OWN.has(module) && (
+            <button type="button" className="btn outline small quick-btn" onClick={() => setSheet('quick')} data-testid="head-quick"><Zap size={15} /> Quick edit · status, follow-up, note</button>
+          )}
         </div>
 
         {first.length > 0 && (
@@ -518,9 +536,9 @@ export default function RecordView() {
         {tab === 'activities' && (!rel ? <Loading /> : (
           <div className="col" style={{ gap: 10 }} data-testid="r360-activities">
             <div className="chips">
-              {ACT.map(([k, label]) => <button key={k} type="button" className={`chip${actTab === k ? ' on' : ''}`} onClick={() => setActTab(k)} data-testid={`act-tab-${k}`}>{label}{counts[k] ? ` · ${counts[k]}` : ''}</button>)}
+              {actTabs.map(([k, label]) => <button key={k} type="button" className={`chip${actTab === k ? ' on' : ''}`} onClick={() => setActTab(k)} data-testid={`act-tab-${k}`}>{label}{counts[k] ? ` · ${counts[k]}` : ''}</button>)}
             </div>
-            {ACT.filter(([k]) => k === actTab).map(([k, label, Icon, c]) => (
+            {actTabs.filter(([k]) => k === actTab).map(([k, label, Icon, c]) => (
               <div key={k} className="card"><Group tab={k} label={label} icon={Icon} color={c} rows={sec(k)} count={counts[k] || 0} add={actAdd[k]} linkable={linkable} testid={`r360-list-${k}`} /></div>
             ))}
           </div>
@@ -568,6 +586,7 @@ export default function RecordView() {
         </Sheet>
       )}
       {sheet === 'fu' && <FollowUpSheet module={module} id={id} title={title} onClose={() => setSheet('')} onDone={() => { setSheet(''); loadRel(); }} />}
+      {sheet === 'quick' && <QuickEdit module={module} id={id} title={title} row={row} followUp={nextFu} onClose={() => setSheet('')} onSaved={() => { setSheet(''); load(); }} />}
       {sheet === 'chat' && <ShareToChat module={module} id={id} label={title} onClose={() => setSheet('')} />}
       {sheet === 'note' && <NoteSheet module={module} id={id} onClose={() => setSheet('')} onDone={() => { setSheet(''); setTab('notes'); loadRel(); }} />}
       {pickRec && callFor && <RecordingPicker call={callFor} onClose={() => setPickRec(false)} onPick={(fl) => { queueRecordingFile({ callId: row.id, file: fl, duration: callFor.duration }); setPickRec(false); setRecSent(true); }} />}

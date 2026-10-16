@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Home, Users, MapPin, Map as MapIcon, MoreHorizontal, Loader2, Search, WifiOff, CloudUpload, ReceiptText, Mic, Check } from 'lucide-react';
+import { ArrowLeft, Home, Users, MapPin, Map as MapIcon, MoreHorizontal, Loader2, Search, WifiOff, CloudUpload, ReceiptText, Mic, Check, ClipboardList, BellRing } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { GET, qs } from '../lib/api';
 import { mine } from '../lib/outbox';
@@ -46,7 +46,10 @@ export function BottomNav() {
     { to: '/', label: 'Home', icon: Home, end: true },
     customers && { to: `/m/${customers.api_name}`, label: customers.plural || 'Customers', icon: Users },
     sfa && { to: '/nearby', label: 'Nearby', icon: MapPin },
-    sfa && boot.me.is_manager ? { to: '/team', label: 'Team', icon: MapIcon } : (boot && boot.expenses ? { to: '/expenses', label: 'Expenses', icon: ReceiptText } : null),
+    // (v1.5) the 4th: a manager's team; for the field, My plan (else follow-ups, else expenses)
+    sfa && boot.me.is_manager ? { to: '/team', label: 'Team', icon: MapIcon }
+      : sfa && boot.sfa.plan_on ? { to: '/plans', label: 'My plan', icon: ClipboardList }
+        : { to: '/follow-ups', label: 'Follow-ups', icon: BellRing },
     { to: '/more', label: 'More', icon: MoreHorizontal },
   ].filter(Boolean);
   return (

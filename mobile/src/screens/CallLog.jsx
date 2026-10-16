@@ -7,13 +7,19 @@
  * person can still add the outcome, a remark (spoken or typed), the lead's
  * status and a follow-up — it is added to the same call.
  * Everything goes through the outbox, so it works without internet too.
+ *
+ * (v1.5) From the Auto Dialer (?session=…): the outcome is told to the session
+ * when it is saved, and the next call waits for it. With ?via=ivr the call goes
+ * through MCube: it rings the person's phone, then the customer; MCube says when
+ * it ended and how long it was, and the outcome fills in THAT call.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Phone, Loader2, MessageCircle, CheckCircle2, PhoneOff, Clock, FileAudio } from 'lucide-react';
 import { App as CapApp } from '@capacitor/app';
 import { useApp, listen } from '../lib/app';
-import { GET } from '../lib/api';
+import { GET, POST } from '../lib/api';
+import { reportResult } from '../lib/dialer';
 import { titleOf, phoneOf } from '../lib/records';
 import { addDays, today, niceTime, talk } from '../lib/format';
 import { get } from '../lib/store';
@@ -64,6 +70,10 @@ export default function CallLog() {
   const [late, setLate] = useState(false);
   const [pickRec, setPickRec] = useState(false);
   const [recDone, setRecDone] = useState(false);
+  const inSession = !!params.get('session');
+  const viaIvr = params.get('via') === 'ivr';
+  const [ivr, setIvr] = useState(null);                 // (MCube) the call's session { id }
+  const [ivrCall, setIvrCall] = useState(null);         // (MCube) the call as MCube reported it
 
   useEffect(() => {
     GET(`/${module}/${id}`).then((r) => { setRow(r); if (module === 'leads') setStatus(r.status || ''); }).catch((e) => setError(e.message));
@@ -80,8 +90,43 @@ export default function CallLog() {
     return status && !l.includes(status) ? [status, ...l] : l;
   })();
 
+  // (v1.5) through MCube: the CRM asks MCube to call; this screen waits for the end of the call
+  const dialIvr = async () => {
+    setError(''); setBusy(true);
+    try {
+      const out = await POST('/telephony/call', { module, record_id: Number(id), number: phone });
+      setIvr(out.session); setPhase('calling');
+    } catch (e) { setError(e.offline ? 'No internet: MCube calls need the internet.' : e.message); } finally { setBusy(false); }
+  };
+  const ivrEnded = useCallback(async (s) => {
+    let c = null;
+    try { c = (await GET(`/telephony/pending?module=${module}&record_id=${id}`)).call; } catch { c = null; }
+    setIvrCall(c || (s ? { connected: !!s.connected, duration_seconds: s.duration_seconds || 0 } : null));
+    const conn = c ? c.connected : s ? !!s.connected : null;
+    setConnected(conn);
+    if (conn === false) setDisposition('No answer');
+    setPhase('after');
+  }, [module, id]);
+  useEffect(() => {
+    if (!viaIvr || phase !== 'calling' || !ivr) return undefined;
+    let gone = false;
+    const look = async () => {
+      try {
+        const { sessions } = await GET('/telephony/live');
+        if (gone) return;
+        const s = (sessions || []).find((x) => Number(x.id) === Number(ivr.id));
+        if (s && s.status === 'failed') { setError(s.error || 'MCube could not start the call.'); setPhase('ready'); setIvr(null); return; }
+        if (!s || !s.live) ivrEnded(s);
+      } catch { /* the next look */ }
+    };
+    const t = setInterval(look, 2500);
+    look();
+    return () => { gone = true; clearInterval(t); };
+  }, [viaIvr, phase, ivr, ivrEnded]);
+
   const dial = async () => {
     if (!phone) return;
+    if (viaIvr) { dialIvr(); return; }
     // the phone's call history (asked once): the real start, length and answer
     if (canReadPhone()) {
       const s = await phoneStatus();
@@ -138,14 +183,45 @@ export default function CallLog() {
     if (p && p.module === module && p.id === Number(id) && (params.get('after') === '1' || Date.now() - p.at > 3000)) afterRef.current();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (row && params.get('dial') === '1' && phase === 'ready' && !pendingCall()) dial();
+    // (MCube, opened again to save the outcome of a call that has ended)
+    if (row && viaIvr && params.get('after') === '1') { ivrEnded(null); return; }
+    if (row && params.get('dial') === '1' && phase === 'ready' && (viaIvr || !pendingCall())) dial();
   }, [row]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const saveIvr = async () => {
+    const isConnected = connected !== null ? connected : !!(ivrCall && ivrCall.connected);
+    let followUpAt;
+    if (follow) {
+      const when = follow === 'pick' ? new Date(followAt) : quickTimes().find((q) => q.key === follow).when;
+      if (Number.isNaN(when.getTime()) || when.getTime() < Date.now()) { setError('Pick a follow-up time in the future.'); return; }
+      followUpAt = when.toISOString();
+    }
+    setBusy(true); setError('');
+    const body = callBody({
+      module, id, call: null, number: phone,
+      outcome: { ref: `ivr-${ivr ? ivr.id : Date.now()}`, connected: isConnected, disposition: disposition || (isConnected ? 'Connected' : 'No answer'), notes: notes.trim() || undefined,
+        lead_status: module === 'leads' && status && status !== row.status ? status : undefined, follow_up_at: followUpAt, source: 'mcube' },
+    });
+    body.telephony_session_id = ivr ? ivr.id : undefined;
+    if (ivrCall && ivrCall.call_id) body.call_id = ivrCall.call_id;
+    try {
+      await POST('/calls/dispose', body);
+      if (inSession) reportResult(module, id, { connected: isConnected, disposition: body.disposition });
+      say('Call saved.', 'ok');
+      nav(-1);
+    } catch (e) {
+      if (e.status === 409) { if (inSession) reportResult(module, id, { connected: isConnected, disposition: body.disposition }); say(e.message, 'info'); nav(-1); return; }
+      setError(e.offline ? 'No internet: try again when online.' : e.message);
+    } finally { setBusy(false); }
+  };
+
   const save = () => {
+    if (viaIvr && phase === 'after') { saveIvr(); return; }
     // (the outcome is not required — v1.3.2: a call saved by itself needs nothing more; the remark,
     // the lead's status or a follow-up can be saved alone)
     const statusChanged = module === 'leads' && status && row && status !== row.status;
     if (autoSaved && !disposition && connected === (call ? call.connected : null) && !notes.trim() && !statusChanged && !follow) {
+      if (inSession) reportResult(module, id, { connected: !!(call && call.connected), disposition: '' });
       clearPendingCall(); say('Call saved.', 'ok'); nav(-1); return;
     }
     const isConnected = connected !== null ? connected : call ? call.connected : false;
@@ -166,6 +242,7 @@ export default function CallLog() {
       },
     });
     queueCall(body, `Call with ${name}`);
+    if (inSession) reportResult(module, id, { connected: isConnected, disposition: body.disposition });
     if (ref.current.startsWith('ac-') && tapAt.current && digits10(phone)) linkLater({ ref: ref.current, digits: digits10(phone), at: tapAt.current, module, id: Number(id) });
     clearPendingCall();
     if (call && !autoSaved) attachRecording(call).catch(() => {});
@@ -178,15 +255,28 @@ export default function CallLog() {
   const quick = quickTimes();
   return (
     <div className="screen no-nav">
-      <TopBar title="Call" sub={name} />
+      <TopBar title={inSession ? 'Auto dialer · call' : 'Call'} sub={name} />
       <StatusBars />
       {!row ? (error ? <div className="body"><div className="note bad">{error}</div></div> : <Loading />) : (
         <div className="body">
-          {phase !== 'after' && phone && <button type="button" className="btn good big block" onClick={dial} data-testid="dial"><Phone /> Call {phone}</button>}
+          {phase !== 'after' && !(viaIvr && phase === 'calling') && phone && <button type="button" className="btn good big block" onClick={dial} data-testid="dial"><Phone /> Call {phone}</button>}
           {needLog && phase !== 'after' && <div className="note warn" data-testid="need-log">Allow “Call logs” for iCRM, so the app knows when the call started, how long it was and if it was answered.</div>}
-          {phase === 'calling' && <div className="note info" data-testid="calling">After the call, come back to iCRM: the call is filled in here.</div>}
+          {phase === 'calling' && !viaIvr && <div className="note info" data-testid="calling">After the call, come back to iCRM: the call is filled in here.</div>}
+          {phase === 'calling' && viaIvr && (
+            <div className="card col" style={{ gap: 8 }} data-testid="ivr-calling">
+              <div className="flex strong"><Loader2 size={18} className="spin" /> MCube is calling: your phone first, then {name}.</div>
+              <div className="tiny muted">This screen goes on by itself when the call ends.</div>
+              <button type="button" className="btn ghost small" style={{ alignSelf: 'flex-start' }} onClick={() => ivrEnded(null)} data-testid="ivr-ended">The call has ended</button>
+            </div>
+          )}
+          {phase === 'after' && viaIvr && (
+            <div className="card col" style={{ gap: 4 }} data-testid="ivr-facts">
+              {ivrCall ? <div className="strong flex" style={{ gap: 6 }}>{ivrCall.connected ? <CheckCircle2 size={18} color="var(--ok)" /> : <PhoneOff size={18} color="var(--bad)" />} {ivrCall.connected ? 'Answered' : 'Not answered'}{ivrCall.duration_seconds ? ` · ${talk(ivrCall.duration_seconds)}` : ''} <span className="tiny muted">(MCube)</span></div>
+                : <div className="tiny muted">MCube has not sent the call's details yet. Save the outcome: they are added when they come.</div>}
+            </div>
+          )}
 
-          {phase === 'after' && (
+          {phase === 'after' && !viaIvr && (
             <div className="card col" style={{ gap: 6 }} data-testid="call-facts">
               {call ? (
                 <>
@@ -244,7 +334,7 @@ export default function CallLog() {
           )}
           {error && <div className="note bad" data-testid="call-error">{error}</div>}
           <button type="button" className="btn primary block big" onClick={save} disabled={busy} data-testid="call-save">{busy ? <Loader2 className="spin" /> : null} {autoSaved ? 'Save the outcome' : 'Save the call'}</button>
-          {autoSaved && <button type="button" className="btn ghost block" onClick={() => nav(-1)} data-testid="call-done">Done (the call is already saved)</button>}
+          {autoSaved && <button type="button" className="btn ghost block" onClick={() => { if (inSession) reportResult(module, id, { connected: !!(call && call.connected), disposition: '' }); nav(-1); }} data-testid="call-done">Done (the call is already saved)</button>}
         </div>
       )}
     </div>
