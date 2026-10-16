@@ -14,9 +14,19 @@ import { get, set } from '../lib/store';
 import { linkCall } from '../lib/calls';
 import { geoKind, addressKind } from '../lib/geo';
 import AddressPick from '../components/AddressPick';
+import MeetingInvite, { useOnlinePlatforms, inviteOf } from '../components/MeetingInvite';
+import { PATCH } from '../lib/api';
 
 const LIST_MODULES = new Set(['leads', 'contacts', 'accounts', 'opportunities', 'quotations', 'subscriptions', 'meetings', 'calls', 'tasks', 'products']);
-const HIDDEN = new Set(['id', 'created_at', 'updated_at', 'created_by', 'related_module', 'related_record_id']);
+const LINKS = {
+  contacts: [['account_id', 'Customer']],
+  opportunities: [['account_id', 'Customer'], ['primary_contact_id', 'Contact']],
+  subscriptions: [['account_id', 'Customer']],
+  quotations: [['account_id', 'Customer'], ['contact_id', 'Contact'], ['opportunity_id', 'Deal']],
+};
+const HIDDEN = new Set(['id', 'created_at', 'updated_at', 'created_by', 'related_module', 'related_record_id',
+  // (v1.4) a meeting's invite and online link are chosen in their own box, not typed
+  'attendees_json', 'online_platform', 'online_provider', 'online_meeting_id', 'online_dial_in', 'online_status', 'online_error']);
 
 function nextHour() {
   const t = new Date(Date.now() + 3600000);
@@ -80,9 +90,14 @@ function Input({ f, value, onChange, names, onPick, values, onSet, isNew }) {
 export default function RecordForm() {
   const { module, id } = useParams();
   const [params] = useSearchParams();
-  const { module: modOf, say } = useApp();
+  const { module: modOf, say, boot } = useApp();
   const nav = useNavigate();
   const mod = modOf(module);
+  // (v1.4) a meeting: online (Google Meet / Teams) and who is invited
+  const inviting = module === 'meetings' && !!(boot.calendar && boot.calendar.edit && boot.calendar.view);
+  const platforms = useOnlinePlatforms(inviting);
+  const [invite, setInvite] = useState({ online: '', attendees: [] });
+  const invite0 = useRef('');
   const [values, setValues] = useState(null);
   const [names, setNames] = useState({});
   const [picking, setPicking] = useState(null);
@@ -97,6 +112,17 @@ export default function RecordForm() {
     // a lookup to a module the app has no list of cannot be chosen here (the web can)
     return shown.filter((f) => f.type !== 'lookup' || LIST_MODULES.has(f.lookup_module));
   }, [mod, id]);
+  // (v1.4) a link given by the page it was opened from (a contact or deal added from a customer's
+  // page) that is not on this form: kept and saved all the same
+  const presets = useMemo(() => {
+    if (!mod || id) return [];
+    const shown = new Set(fields.map((f) => f.api_name));
+    const known = [...mod.fields.filter((f) => f.type === 'lookup')];
+    // the links of the CRM's own tables, also when the company's form does not list them
+    for (const [api, label] of LINKS[module] || []) if (!known.some((f) => f.api_name === api)) known.push({ api_name: api, label, type: 'lookup', system: true });
+    return known.filter((f) => !shown.has(f.api_name) && params.get(f.api_name) && /^\d+$/.test(params.get(f.api_name)))
+      .map((f) => ({ field: f, value: params.get(f.api_name), label: params.get(`${f.api_name}_label`) || '' }));
+  }, [mod, id, fields]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the form is filled once (a fresh field list from the server later must not wipe what is typed)
   const filled = useRef('');
@@ -106,6 +132,7 @@ export default function RecordForm() {
     if (id) {
       getRecord(module, id, mod.fields).then(({ row, custom }) => {
         const all = { ...row, ...custom };
+        if (module === 'meetings') { const inv = inviteOf(row); setInvite(inv); invite0.current = JSON.stringify(inv); }
         const v = {}; const n = {};
         fields.forEach((f) => {
           v[f.api_name] = forInput(f, all[f.api_name]);
@@ -124,6 +151,14 @@ export default function RecordForm() {
     }
   }, [mod, id, fields]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // (v1.4) opened from a section's ✎: that section comes into view
+  const section = params.get('section');
+  useEffect(() => {
+    if (!values || !section) return;
+    const el = [...document.querySelectorAll('.form-sec')].find((x) => x.dataset.section === section);
+    if (el) setTimeout(() => el.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+  }, [!!values, section]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!mod) return <div className="screen no-nav"><TopBar title="Not in the app" /><Empty title="Your role cannot open this." /></div>;
   const save = async (duplicate = 'ask') => {
     setError('');
@@ -134,10 +169,18 @@ export default function RecordForm() {
       const all = { ...values };
       const extra = related ? [{ api_name: 'related_module', type: 'text', system: true }, { api_name: 'related_record_id', type: 'number', system: true }] : [];
       if (related) { all.related_module = related.module; all.related_record_id = related.id; }
-      const out = await saveRecord(module, id, all, [...fields, ...extra], { duplicate });
+      presets.forEach((p) => { all[p.field.api_name] = p.value; });
+      const out = await saveRecord(module, id, all, [...fields, ...extra, ...presets.map((p) => p.field)], { duplicate });
       if (out.duplicate) { setDup(out); return; }
       if (out.warning) say(out.warning, 'error'); else say(id ? 'Saved.' : `${mod.singular} added.`, 'ok');
       const newId = (out.row && out.row.id) || id;
+      // (v1.4) the meeting's invite and online link: through the calendar, which sends the invites and asks for the link
+      if (inviting && newId && JSON.stringify(invite) !== (invite0.current || JSON.stringify({ online: '', attendees: [] }))) {
+        try {
+          await PATCH(`/calendar/events/${newId}`, { attendees: invite.attendees, online_platform: invite.online || null, time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+          if (invite.online) say('Saved. The meeting link is being made.', 'ok');
+        } catch (e) { say(`The meeting is saved, but ${e.message.charAt(0).toLowerCase()}${e.message.slice(1)}`, 'error'); }
+      }
       // a new lead / customer made for a call the CRM did not know (v1.3.1): the call is saved on it
       const ac = !id && params.get('after_call') ? get('after_call') : null;
       if (ac && ac.ref === params.get('after_call') && newId) { linkCall(ac, { module, id: newId, name: titleOf(module, { ...all, ...(out.row || {}) }) }); set('after_call', null); }
@@ -153,16 +196,21 @@ export default function RecordForm() {
         <form className="body" onSubmit={(e) => { e.preventDefault(); save(); }}>
           <div className="card col" style={{ gap: 14 }}>
             {related && <div className="note info small">For: {params.get('related_name') || `${related.module} #${related.id}`}</div>}
+            {presets.map((p) => <div key={p.field.api_name} className="note info small" data-testid="form-preset">{p.field.label}: {p.label || `#${p.value}`}</div>)}
             {!id && params.get('after_call') && <div className="note info small" data-testid="form-after-call">The call is saved on this {mod.singular.toLowerCase()} with its recording.</div>}
-            {fields.map((f) => (f.type === 'checkbox'
+            {fields.map((f, i) => [
+              // (v1.4) the form's sections as small titles; "✎" on a section of the record page opens here
+              (i === 0 ? fields.length > 6 && f.section : f.section && f.section !== fields[i - 1].section) && <div key={`sec-${f.section}`} className="form-sec" data-section={f.section}>{f.section}</div>,
+              f.type === 'checkbox'
               ? <Input key={f.api_name} f={f} value={values[f.api_name]} onChange={(v) => setValues((p) => ({ ...p, [f.api_name]: v }))} values={values} onSet={(k, v) => setValues((p) => ({ ...p, [k]: v }))} />
               : (
                 <Field key={f.api_name} label={`${f.label}${f.required ? ' *' : ''}`} hint={f.help}>
                   <Input f={f} value={values[f.api_name]} names={names} onChange={(v) => setValues((p) => ({ ...p, [f.api_name]: v }))} onPick={() => setPicking(f)} values={values} isNew={!id} onSet={(k, v) => setValues((p) => ({ ...p, [k]: v }))} />
                 </Field>
-              )))}
+              )])}
             {!fields.length && <div className="muted">This form has no fields the app can fill in. Use the web.</div>}
           </div>
+          {inviting && <MeetingInvite value={invite} onChange={setInvite} platforms={platforms} />}
           {error && <div className="note bad" data-testid="form-error">{error}</div>}
           <button type="submit" className="btn primary block big" disabled={busy} data-testid="form-save">{busy ? <Loader2 className="spin" /> : null} Save</button>
         </form>

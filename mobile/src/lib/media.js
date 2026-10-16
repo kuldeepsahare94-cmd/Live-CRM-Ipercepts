@@ -87,16 +87,17 @@ export async function takePhoto({ selfie = false, max: maxIn = 0, gallery = fals
 }
 
 const FILE_TYPES = 'image/*,application/pdf,.doc,.docx,.xls,.xlsx';
+export const MORE_TYPES = 'image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,audio/*';
 /** Photos or files from the phone (up to `max`). */
-export async function pickFiles(max = 5) {
-  const files = (await chooseFiles({ accept: FILE_TYPES, multiple: true })).slice(0, max);
+export async function pickFiles(max = 5, { maxMb = 5, accept = FILE_TYPES } = {}) {
+  const files = (await chooseFiles({ accept, multiple: max > 1 })).slice(0, max);
   const out = [];
   for (const f of files) {
     if (/^image\//.test(f.type)) {
       const p = await shrink(await fileToDataUrl(f), 1280);
       out.push({ ...p, file_name: f.name.replace(/\.[^.]+$/, '') + '.jpg' });
     } else {
-      if (f.size > 5 * 1024 * 1024) throw new Error(`${f.name} is larger than 5 MB.`);
+      if (f.size > maxMb * 1024 * 1024) throw new Error(`${f.name} is larger than ${maxMb} MB.`);
       const url = await fileToDataUrl(f);
       out.push({ file_name: f.name, mime: f.type || 'application/octet-stream', data: url.slice(url.indexOf(',') + 1), size: f.size });
     }

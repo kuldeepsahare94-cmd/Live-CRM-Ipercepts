@@ -35,6 +35,9 @@ import Approvals from './screens/Approvals';
 import Expenses from './screens/Expenses';
 import More from './screens/More';
 import MyDay from './screens/MyDay';
+import ChatList, { ChatThread } from './screens/Chat';
+import Settings from './screens/Settings';
+import { onAlertTapped } from './lib/push';
 
 function Signed({ children }) {
   const { boot, refreshBoot, refreshDay, sync, signedOut } = useApp();
@@ -74,11 +77,19 @@ function BackButton() {
   return null;
 }
 
+// (v1.4) a phone alert tapped: its screen opens (a chat, a lead, approvals…)
+function AlertTaps() {
+  const nav = useNavigate();
+  useEffect(() => onAlertTapped((route) => nav(route)), [nav]);
+  return null;
+}
+
 export default function App() {
   return (
     <AppProvider>
       <HashRouter>
         <BackButton />
+        <AlertTaps />
         <Routes>
           <Route path="/connect" element={<Connect />} />
           <Route path="/login" element={<Login />} />
@@ -105,6 +116,9 @@ export default function App() {
           <Route path="/approvals" element={<Signed><Approvals /></Signed>} />
           <Route path="/expenses" element={<Signed><Expenses /></Signed>} />
           <Route path="/more" element={<Signed><More /></Signed>} />
+          <Route path="/chat" element={<Signed><ChatList /></Signed>} />
+          <Route path="/chat/:id" element={<Signed><ChatThread /></Signed>} />
+          <Route path="/settings" element={<Signed><Settings /></Signed>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <Toast />

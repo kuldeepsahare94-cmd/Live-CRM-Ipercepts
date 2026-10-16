@@ -8,7 +8,9 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 export default defineConfig({
   plugins: [react()],
   base: './',
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  // (v1.4) phone alerts are built in only when the build has the Firebase file (GitHub secret
+  // ICRM_GOOGLE_SERVICES_JSON): without it, Android would close the app when alerts start
+  define: { __APP_VERSION__: JSON.stringify(pkg.version), __PUSH__: JSON.stringify(process.env.ICRM_PUSH === '1') },
   build: { outDir: 'dist', target: 'es2020', chunkSizeWarningLimit: 900 },
   server: { port: 5175, host: true },
   preview: { port: 5175, host: true },

@@ -17,7 +17,9 @@ import { punchIn, punchOut } from '../lib/fieldwork';
 import { takePhoto } from '../lib/media';
 import { km, niceTime, since, talk } from '../lib/format';
 import { BottomNav, StatusBars } from '../components/ui';
-import { iconOf, colorOf } from '../components/icons';
+import MenuButton from '../components/Drawer';
+import FollowUps from '../components/FollowUps';
+import { MessagesSquare } from 'lucide-react';
 
 function DutyCard() {
   const { boot, day, setDay, tracking, say } = useApp();
@@ -308,9 +310,10 @@ function UpdateBanner() {
 }
 
 export default function Home() {
-  const { boot, day } = useApp();
+  const { boot, day, unread } = useApp();
   const nav = useNavigate();
   const mods = boot.modules;
+  // (v1.4) the modules are in the menu (☰), not on Home
   const has = (api, action = 'view') => mods.some((m) => m.api_name === api && m.can[action]);
   const sfaOn = boot.sfa.enabled;
   const onDuty = !!(day && day.session);
@@ -334,8 +337,18 @@ export default function Home() {
   return (
     <div className="screen">
       <div className="hero">
-        <div className="company">{boot.name || get('company')}</div>
-        <h1>Good {hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, {String(boot.me.name || '').split(' ')[0]}</h1>
+        <div className="hero-top">
+          <MenuButton light />
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="company">{boot.name || get('company')}</div>
+            <h1>Good {hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, {String(boot.me.name || '').split(' ')[0]}</h1>
+          </div>
+          {boot.chat && boot.chat.view && (
+            <Link to="/chat" className="icon-btn menu-btn light" aria-label="Chat" data-testid="home-chat">
+              <MessagesSquare size={22} />{unread > 0 && <span className="badge-n" data-testid="home-chat-unread">{unread > 99 ? '99+' : unread}</span>}
+            </Link>
+          )}
+        </div>
       </div>
       <StatusBars />
       <div className="body lift">
@@ -354,22 +367,9 @@ export default function Home() {
             ))}
           </div>
         )}
+        <FollowUps view="me" title="My follow-ups" testid="followups" />
         <CallsCard />
         <Meetings />
-        <div>
-          <div className="card-title" style={{ padding: '0 4px' }}>Your CRM</div>
-          <div className="tiles" data-testid="modules">
-            {mods.map((m) => {
-              const Icon = iconOf(m.api_name);
-              const c = colorOf(m.api_name);
-              return (
-                <Link key={m.api_name} to={`/m/${m.api_name}`} className="tile" data-testid={`mod-${m.api_name}`}>
-                  <span className="ic" style={{ background: `${c}1A`, color: c }}><Icon size={20} /></span>{m.plural}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
         {sfaOn && !onDuty && (boot.sfa.selfie_in) && <p className="tiny faint center"><Camera size={12} /> A selfie is asked at punch in.</p>}
       </div>
       <BottomNav />

@@ -20,6 +20,7 @@ import { add, flush, list as outboxList, mine, newRef, setPreparer, setAfterFail
 import { POST } from './api';
 import { openOutside } from './location';
 import { phoneFor } from './format';
+import { openWhatsApp } from './whatsapp';
 
 const native = Capacitor.isNativePlatform();
 const CallLogNative = native ? registerPlugin('CallLog') : null;
@@ -446,8 +447,8 @@ export function callBacks(calls) {
 export function whatsappAfter(number, name) {
   const b = get('boot');
   const text = ((b && b.calls && b.calls.whatsapp_text) || '').replace(/\{name\}/gi, name || '').replace(/\{me\}/gi, (b && b.me && b.me.name) || '').trim();
-  const to = phoneFor(number, { whatsapp: true });
-  openOutside(`https://wa.me/${to}${text ? `?text=${encodeURIComponent(text)}` : ''}`);
+  // (v1.4) WhatsApp or WhatsApp Business, as chosen in Settings
+  openWhatsApp(number, text);
 }
 
 setPreparer('call-recording', recordingBody);

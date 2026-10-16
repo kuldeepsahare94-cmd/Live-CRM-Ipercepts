@@ -1,7 +1,7 @@
 /* Me, the CRM, what waits to be sent, tracking help, sign out. */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, RefreshCw, Trash2, Building2, BatteryWarning, MapPin, CloudUpload, FileAudio, ChevronRight } from 'lucide-react';
+import { LogOut, RefreshCw, Trash2, Building2, BatteryWarning, MapPin, CloudUpload, FileAudio, ChevronRight, Settings as SettingsIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { canReadPhone } from '../lib/calls';
 import { useApp } from '../lib/app';
@@ -91,6 +91,12 @@ export default function More() {
             <ChevronRight size={18} className="faint" />
           </Link>
         )}
+
+        <Link to="/settings" className="card flex" style={{ color: 'inherit', alignItems: 'center' }} data-testid="open-settings">
+          <SettingsIcon size={20} color="var(--brand)" />
+          <div className="grow"><div className="strong">Settings</div><div className="tiny muted">WhatsApp or WhatsApp Business · phone alerts</div></div>
+          <ChevronRight size={18} className="faint" />
+        </Link>
 
         <button type="button" className="btn outline block" onClick={signOut} data-testid="sign-out" style={{ color: 'var(--bad)' }}><LogOut size={18} /> Sign out</button>
         <p className="tiny faint center">iCRM app {VERSION}</p>

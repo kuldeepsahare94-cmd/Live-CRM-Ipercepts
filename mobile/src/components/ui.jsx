@@ -1,16 +1,20 @@
 /* The small pieces every screen uses. */
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Home, Users, MapPin, Map as MapIcon, MoreHorizontal, Loader2, Search, WifiOff, CloudUpload, ReceiptText, Mic, Check } from 'lucide-react';
 import { useApp } from '../lib/app';
 import { GET, qs } from '../lib/api';
 import { mine } from '../lib/outbox';
 import { LANGS, voiceLang, setVoiceLang, listen as hear, joinText } from '../lib/voice';
+import MenuButton from './Drawer';
 
 export function TopBar({ title, sub, back = true, right = null, onBack }) {
   const nav = useNavigate();
   return (
     <header className="topbar">
+      {/* (v1.4) a main screen has the menu (☰) where a screen inside has "back" */}
+      {!back && <MenuButton />}
       {back && <button type="button" className="icon-btn" aria-label="Back" onClick={() => (onBack ? onBack() : nav(-1))}><ArrowLeft size={22} /></button>}
       <h1>{title}{sub && <div className="sub">{sub}</div>}</h1>
       {right}
@@ -74,14 +78,17 @@ export function Sheet({ title, onClose, children }) {
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
-  return (
+  // (v1.4) on top of the whole page: a sheet opened from inside a card (whose animation makes
+  // it a layer of its own) must still cover the top bar
+  return createPortal(
     <div className="sheet-back" onClick={onClose} role="dialog" aria-label={title}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="grab" />
         {title && <h2>{title}</h2>}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -93,11 +100,11 @@ export function StatusTag({ value }) {
 }
 
 const COLORS = ['#3B5BFF', '#0D9488', '#D97706', '#C026D3', '#2563EB', '#16A34A', '#E11D48', '#7C3AED'];
-export function Avatar({ name }) {
+export function Avatar({ name, small = false, big = false }) {
   const n = String(name || '?');
   const ini = n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
   const c = COLORS[[...n].reduce((a, ch) => a + ch.charCodeAt(0), 0) % COLORS.length];
-  return <span className="avatar" style={{ background: c }}>{ini}</span>;
+  return <span className={`avatar${small ? ' sm' : ''}${big ? ' lg' : ''}`} style={{ background: c }}>{ini}</span>;
 }
 
 export function Field({ label, hint, children }) {

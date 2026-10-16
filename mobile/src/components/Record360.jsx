@@ -27,7 +27,7 @@ export function ago(v) {
   return d >= 0 ? `${txt} ago` : `in ${txt}`;
 }
 
-const KIND = {
+export const KIND = {
   call: { icon: PhoneCall, color: '#16A34A', label: 'Call' },
   visit: { icon: MapPin, color: '#2563EB', label: 'Visit' },
   meeting: { icon: CalendarDays, color: '#7C3AED', label: 'Meeting' },
@@ -84,7 +84,7 @@ export function Timeline({ items, linkable }) {
   );
 }
 
-function List({ tab, rows, linkable }) {
+export function List({ tab, rows, linkable }) {
   const R = (r) => {
     switch (tab) {
       case 'calls': return { to: 'calls', title: r.call_subject || 'Call', line: [r.direction, r.connected ? talk(r.duration_seconds) : 'not answered', r.call_outcome].filter(Boolean).join(' · '), when: r.at, extra: <Rec src={r.call_recording_url} />, note: r.notes };

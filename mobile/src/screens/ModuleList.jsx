@@ -1,4 +1,4 @@
-/* A list of a module: search, mine only, more pages, a + to add. */
+/* A list of a module: search, filters (v1.4), whose (mine / a person / a team / a role), more pages, a + to add. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Search, Phone, Inbox, ScanLine } from 'lucide-react';
@@ -8,17 +8,28 @@ import { money, niceDate, phoneFor } from '../lib/format';
 import { openOutside } from '../lib/location';
 import { TopBar, BottomNav, StatusBars, Loading, Empty, StatusTag } from '../components/ui';
 import { iconOf, colorOf } from '../components/icons';
+import { get, set } from '../lib/store';
+import { useFilterSpec, FilterButton, FilterChips, FilterSheet, EMPTY, countOf, asParam } from '../components/ListFilters';
+import ViewingPicker, { useViewingOptions } from '../components/Viewing';
 
 const remember = new Map();   // the search of each list while the app is open
+// (v1.4) the filters and "whose" of each list are kept on the phone
+const kept = (module) => ((get('list_filters') || {})[module]) || {};
+const keep = (module, v) => set('list_filters', { ...(get('list_filters') || {}), [module]: v });
 
 export default function ModuleList() {
   const { module } = useParams();
   const { module: modOf } = useApp();
   const nav = useNavigate();
   const mod = modOf(module);
-  const keep = remember.get(module) || { q: '', mine: false };
-  const [q, setQ] = useState(keep.q);
-  const [mine, setMine] = useState(keep.mine);
+  const mem = remember.get(module) || { q: '' };
+  const [q, setQ] = useState(mem.q);
+  const [view, setView] = useState(() => kept(module).view || 'all');
+  const [filters, setFilters] = useState(() => kept(module).f || EMPTY);
+  const [sheet, setSheet] = useState(false);
+  const spec = useFilterSpec(module);
+  const opts = useViewingOptions();
+  const fParam = asParam(filters);
   const [rows, setRows] = useState(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -30,7 +41,7 @@ export default function ModuleList() {
     const ticket = ++seq.current;
     if (p === 1) setRows(null);
     setMore(p > 1);
-    GET(`/sfa/m/list/${module}${qs({ q, mine: mine ? 1 : '', page: p, page_size: 30 })}`)
+    GET(`/sfa/m/list/${module}${qs({ q, view: view === 'all' ? '' : view, f: fParam, page: p, page_size: 30 })}`)
       .then((x) => {
         if (ticket !== seq.current) return;
         setRows((old) => (p === 1 || !old ? x.rows : [...old, ...x.rows]));
@@ -38,12 +49,16 @@ export default function ModuleList() {
       })
       .catch((e) => { if (ticket === seq.current) { setError(e.message); if (p === 1) setRows([]); } })
       .finally(() => { if (ticket === seq.current) setMore(false); });
-  }, [module, q, mine]);
+  }, [module, q, view, fParam]);
   useEffect(() => {
-    remember.set(module, { q, mine });
+    remember.set(module, { q });
     const t = setTimeout(() => load(1), q ? 300 : 0);
     return () => clearTimeout(t);
-  }, [load, module, q, mine]);
+  }, [load, module, q]);
+  // another list opened in the same screen: its own filters
+  useEffect(() => { const k = kept(module); setView(k.view || 'all'); setFilters(k.f || EMPTY); setQ((remember.get(module) || {}).q || ''); }, [module]);
+  const changeView = (v) => { setView(v); keep(module, { ...kept(module), view: v }); };
+  const changeFilters = (f) => { setFilters(f); keep(module, { ...kept(module), f }); };
 
   if (!mod) return <div className="screen"><TopBar title="Not in the app" /><Empty title="Your role cannot open this." /><BottomNav /></div>;
   const Icon = iconOf(module);
@@ -54,15 +69,22 @@ export default function ModuleList() {
       <StatusBars />
       <div className="body">
         <div className="search"><Search size={18} /><input className="input" type="search" placeholder={`Search ${mod.plural.toLowerCase()}`} value={q} onChange={(e) => setQ(e.target.value)} data-testid="list-search" /></div>
-        {module !== 'products' && (
-          <div className="chips">
-            <button type="button" className={`chip${!mine ? ' on' : ''}`} onClick={() => setMine(false)}>All I can see</button>
-            <button type="button" className={`chip${mine ? ' on' : ''}`} onClick={() => setMine(true)} data-testid="list-mine">Mine</button>
-          </div>
-        )}
+        <div className="chips list-tools">
+          {module !== 'products' && (opts && opts.can
+            ? <ViewingPicker value={view} onChange={changeView} opts={opts} testid="list-view" />
+            : (
+              <>
+                <button type="button" className={`chip${view !== 'me' ? ' on' : ''}`} onClick={() => changeView('all')}>All I can see</button>
+                <button type="button" className={`chip${view === 'me' ? ' on' : ''}`} onClick={() => changeView('me')} data-testid="list-mine">Mine</button>
+              </>
+            ))}
+          {spec && (spec.statuses.length > 0 || spec.fields.length > 0 || spec.date_label || spec.has_created) && <FilterButton count={countOf(filters)} onClick={() => setSheet(true)} />}
+        </div>
+        <FilterChips value={filters} spec={spec} onChange={changeFilters} />
+        {sheet && <FilterSheet spec={spec} value={filters} onClose={() => setSheet(false)} onApply={(f) => { changeFilters(f); setSheet(false); }} />}
         {error && <div className="note bad">{error}</div>}
         {!rows ? <Loading /> : !rows.length ? (
-          <Empty icon={Inbox} title={q ? 'Nothing found' : `No ${mod.plural.toLowerCase()} yet`} />
+          <Empty icon={Inbox} title={q || countOf(filters) || view !== 'all' ? 'Nothing found' : `No ${mod.plural.toLowerCase()} yet`}>{countOf(filters) > 0 && <button type="button" className="btn ghost small" onClick={() => changeFilters(EMPTY)}>Clear the filters</button>}</Empty>
         ) : (
           <div className="list" data-testid="list">
             {rows.map((r) => (

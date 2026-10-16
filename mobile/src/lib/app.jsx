@@ -11,6 +11,7 @@ import { flush, flushPoints, onOutbox, list as outboxList, mine } from './outbox
 import { startTracking, stopTracking, onTracking, trackingStatus } from './location';
 import { refreshReminders } from './reminders';
 import { retryOldRecordings } from './calls';
+import { startPush, stopPush, onAlert } from './push';
 
 const Ctx = createContext(null);
 // a Capacitor listener: removed even when the screen goes away before it was ready
@@ -29,6 +30,7 @@ export function AppProvider({ children }) {
   const [tracking, setTracking] = useState(() => trackingStatus());
   const [toast, setToast] = useState(null);
   const [signedOut, setSignedOut] = useState('');
+  const [unread, setUnread] = useState(0);          // (v1.4) chat messages not read yet
   const toastTimer = useRef(null);
 
   const say = useCallback((text, tone = 'info') => {
@@ -84,6 +86,23 @@ export function AppProvider({ children }) {
   // (1.3.1) call recordings that 1.3.0 could not send are tried once more
   useEffect(() => { if (boot && get('token') && retryOldRecordings()) sync(); }, [boot, sync]);
 
+  // (v1.4) the chat's unread count: now and then, when the app comes back, and when an alert comes
+  const refreshUnread = useCallback(() => {
+    const b = get('boot');
+    if (!b || !b.chat || !b.chat.view || !get('token')) return;
+    GET('/sfa/m/chat/unread').then((x) => setUnread(Number(x.total) || 0)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!boot || !boot.chat || !boot.chat.view || signedOut) return undefined;
+    refreshUnread();
+    const t = setInterval(refreshUnread, 30000);
+    const off = listen(CapApp.addListener('resume', refreshUnread));
+    const off2 = onAlert(() => refreshUnread());
+    return () => { clearInterval(t); off(); off2(); };
+  }, [boot, signedOut, refreshUnread]);
+  // (v1.4) phone alerts, once the CRM says they are set up
+  useEffect(() => { if (boot && get('token') && !signedOut) startPush(boot).catch(() => {}); }, [boot, signedOut]);
+
   // the internet comes and goes
   useEffect(() => {
     Network.getStatus().then((s) => setOnline(s.connected)).catch(() => {});
@@ -113,14 +132,16 @@ export function AppProvider({ children }) {
   /** Sign out (or another person signs in): nothing of the last person stays on the screen or in the phone. */
   const resetPerson = useCallback(async (message = '') => {
     await stopTracking().catch(() => {});
+    await stopPush().catch(() => {});
+    setUnread(0);
     forgetPerson();
     setDayState(null); setBoot(null); setOutbox([]);
     setSignedOut(message);
   }, []);
 
   const value = useMemo(() => ({
-    boot, setBoot, refreshBoot, day, setDay, refreshDay, online, outbox, tracking, sync, say, toast, signedOut, setSignedOut, resetPerson,
+    boot, setBoot, refreshBoot, day, setDay, refreshDay, online, outbox, tracking, sync, say, toast, signedOut, setSignedOut, resetPerson, unread, setUnread, refreshUnread,
     module: (api) => (boot && boot.modules ? boot.modules.find((m) => m.api_name === api) : null),
-  }), [boot, refreshBoot, day, setDay, refreshDay, online, outbox, tracking, sync, say, toast, signedOut, resetPerson]);
+  }), [boot, refreshBoot, day, setDay, refreshDay, online, outbox, tracking, sync, say, toast, signedOut, resetPerson, unread, refreshUnread]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

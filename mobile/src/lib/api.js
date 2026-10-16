@@ -108,6 +108,8 @@ export async function req(method, path, body, { timeout } = {}) {
 export const GET = (path) => req('GET', path);
 export const POST = (path, body) => req('POST', path, body || {});
 export const PUT = (path, body) => req('PUT', path, body || {});
+export const PATCH = (path, body) => req('PATCH', path, body || {});
+export const DELETE = (path) => req('DELETE', path);
 
 export async function renewIfOld() {
   const at = Number(get('token_at', 0));

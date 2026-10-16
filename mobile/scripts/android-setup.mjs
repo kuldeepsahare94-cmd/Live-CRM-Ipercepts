@@ -4,7 +4,9 @@
 //   - the version (versionName from package.json, versionCode from BUILD_NUMBER)
 //   - the "on duty" notification: its channel name, icon and colour
 //   - signing with your key, when the build is given one (ICRM_KEYSTORE…)
-//   - iCRM's own Java code (android-src/): the phone's call history and call recordings
+//   - iCRM's own Java code (android-src/): the phone's call history and call recordings,
+//     and (v1.4) opening WhatsApp or WhatsApp Business
+//   - (v1.4) phone alerts: the company's Firebase file (google-services.json), when the build has it
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,11 +77,44 @@ const perms = [
   'android.permission.MODIFY_AUDIO_SETTINGS',
   // (v1.3) reminders at an exact time (punch in / out)
   'android.permission.SCHEDULE_EXACT_ALARM',
+  // (v1.4) phone alerts on Android 13 and newer
+  'android.permission.POST_NOTIFICATIONS',
 ];
 for (const p of perms) {
   if (!manifest.includes(`"${p}"`)) manifest = manifest.replace('</manifest>', `    <uses-permission android:name="${p}" />\n</manifest>`);
 }
+// (v1.4) Android 11+ tells an app about another app only when it asks: WhatsApp and WhatsApp Business
+if (!manifest.includes('com.whatsapp.w4b')) {
+  manifest = manifest.replace('<application', `<queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+    </queries>
+
+    <application`);
+}
+// (v1.4) a phone alert: its small icon (a bell) and colour
+if (!manifest.includes('default_notification_icon')) {
+  manifest = manifest.replace('</application>', `    <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_alert" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="icrm_alerts" />
+    </application>`);
+}
 fs.writeFileSync(manifestFile, manifest);
+
+// (v1.4) phone alerts: the company's Firebase file (GitHub secret ICRM_GOOGLE_SERVICES_JSON → ICRM_GOOGLE_SERVICES)
+const gsFile = process.env.ICRM_GOOGLE_SERVICES;
+if (gsFile && fs.existsSync(gsFile)) {
+  const gs = JSON.parse(fs.readFileSync(gsFile, 'utf8'));
+  const ids = ((gs.client || []).map((c) => c.client_info && c.client_info.android_client_info && c.client_info.android_client_info.package_name)).filter(Boolean);
+  const appId = 'com.ipercepts.icrm';
+  if (!ids.includes(appId)) {
+    console.error(`The Firebase file is for ${ids.join(', ') || 'another app'}, not ${appId}. In Firebase, add an Android app with the package name ${appId} and download its google-services.json again.`);
+    process.exit(1);
+  }
+  fs.copyFileSync(gsFile, path.join(app, 'google-services.json'));
+  console.log('phone alerts: the Firebase file is in the app');
+} else {
+  console.log('phone alerts: no Firebase file (secret ICRM_GOOGLE_SERVICES_JSON) - the app is made without them');
+}
 
 // 7. copy iCRM's Java code (CallLogPlugin + MainActivity that switches it on)
 const javaSrc = path.join(root, 'android-src');
@@ -93,7 +128,7 @@ if (fs.existsSync(javaSrc)) {
   const javaDir = path.join(app, 'src', 'main', 'java');
   fs.mkdirSync(javaDir, { recursive: true });
   copyJava(javaSrc, javaDir);
-  console.log('java: CallLogPlugin added');
+  console.log('java: CallLogPlugin and PhoneAppsPlugin added');
 }
 
 console.log(`android ready: iCRM ${pkg.version} (${code})`);
