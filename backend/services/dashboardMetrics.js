@@ -180,7 +180,7 @@ function scopeClause(kind, alias, scope) {
 // ---------------------------------------------------------------------------
 // Shared definitions
 // ---------------------------------------------------------------------------
-const OPEN_LEAD = "COALESCE(l.status,'') NOT IN ('Converted','Not Interested','Dropped')";
+const OPEN_LEAD = "COALESCE(l.status,'') NOT IN ('Converted','Not Interested','Dropped','Lost')";
 const TASK_OPEN = "COALESCE(t.status,'') != 'Completed'";
 const TICKET_OPEN = "COALESCE(tk.status,'') NOT IN ('Resolved','Closed')";
 const QUOTE_LIVE = "q.status IN ('Sent','Viewed')";
@@ -227,17 +227,24 @@ const METRICS = {
   },
   followups_today: {
     module: 'leads', path: '/leads', title: 'Follow-ups due today',
-    filters: (p, c) => [['Follow-up date', `Today, ${fmtDate(c.today)}`], ['Lead status', 'Open (not Converted, Dropped or Not Interested)']],
+    filters: (p, c) => [['Follow-up date', `Today, ${fmtDate(c.today)}`], ['Lead status', 'Open (not Converted, Dropped, Lost or Not Interested)']],
     query: (p, c) => withScope(q(`SELECT l.id FROM leads l WHERE ${OPEN_LEAD} AND date(l.follow_up_date) = date(?)`, [c.today]), 'lead', 'l', c.scope),
   },
   followups_overdue: {
     module: 'leads', path: '/leads', title: 'Overdue follow-ups',
-    filters: (p, c) => [['Follow-up date', `Before ${fmtDate(c.today)} (overdue)`], ['Lead status', 'Open (not Converted, Dropped or Not Interested)']],
+    filters: (p, c) => [['Follow-up date', `Before ${fmtDate(c.today)} (overdue)`], ['Lead status', 'Open (not Converted, Dropped, Lost or Not Interested)']],
     query: (p, c) => withScope(q(`SELECT l.id FROM leads l WHERE ${OPEN_LEAD} AND l.follow_up_date IS NOT NULL AND date(l.follow_up_date) < date(?)`, [c.today]), 'lead', 'l', c.scope),
+  },
+  // (v1.7) leads still being worked on that nobody has planned a follow-up for
+  leads_no_followup: {
+    module: 'leads', path: '/leads', title: 'Leads with no follow-up planned',
+    filters: () => [['Follow-up', 'None planned'], ['Lead status', 'Open (not Converted, Dropped, Lost or Not Interested)']],
+    query: (p, c) => withScope(q(`SELECT l.id FROM leads l WHERE ${OPEN_LEAD} AND COALESCE(TRIM(CAST(l.follow_up_date AS TEXT)), '') = ''
+      AND NOT EXISTS (SELECT 1 FROM follow_ups fx WHERE fx.related_module = 'leads' AND fx.related_record_id = l.id AND fx.status = 'Scheduled')`), 'lead', 'l', c.scope),
   },
   followups_attention: {
     module: 'leads', path: '/leads', title: 'Follow-ups requiring attention',
-    filters: (p, c) => [['Follow-up date', `On or before today, ${fmtDate(c.today)}`], ['Lead status', 'Open (not Converted, Dropped or Not Interested)']],
+    filters: (p, c) => [['Follow-up date', `On or before today, ${fmtDate(c.today)}`], ['Lead status', 'Open (not Converted, Dropped, Lost or Not Interested)']],
     query: (p, c) => withScope(q(`SELECT l.id FROM leads l WHERE ${OPEN_LEAD} AND l.follow_up_date IS NOT NULL AND date(l.follow_up_date) <= date(?)`, [c.today]), 'lead', 'l', c.scope),
   },
   // Overdue follow-ups that are NOT already represented by an overdue task on

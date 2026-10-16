@@ -61,6 +61,8 @@ module.exports = function documentRouter({ docType, permission }) {
     try {
       access.ownerDefault(req.user, permission, req.body);
       { const no = access.linkDenied(req.user, req.body); if (no) return res.status(403).json(no); }
+      // (v1.7) an invoice is for somebody
+      if (docType === 'invoice' && !req.body.account_id && !req.body.contact_id) return res.status(400).json({ error: 'An invoice needs a customer. Choose an account or a contact.' });
       const id = docs.create(docType, req.body, req.user.id);
       const created = docs.get(docType, id);
       fireWorkflows(permission, 'record_created', created, null, req.user.id);

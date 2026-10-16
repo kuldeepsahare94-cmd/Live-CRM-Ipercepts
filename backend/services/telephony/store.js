@@ -174,7 +174,7 @@ const DEFAULTS = {
   create_lead_for_unknown: true,   // a caller who is not in the CRM becomes a lead
   unknown_lead_status: 'New',
   unknown_lead_source: 'IVR Call',
-  missed_followup: true,           // a missed call makes a call-back follow-up…
+  missed_followup: false,          // (v1.7) off: a follow-up is what a person planned. On: a missed call makes a call-back follow-up…
   missed_followup_minutes: 15,     // …due this many minutes later
   notify_missed: true,             // …and a notification
   mapping: {},                     // field names MCube uses, when they differ from the usual ones
@@ -206,7 +206,7 @@ function getSettings() {
   s.after_call = s.after_call === 'log' ? 'log' : 'popup';
   s.popup_missed = s.popup_missed !== false;
   s.create_lead_for_unknown = s.create_lead_for_unknown !== false;
-  s.missed_followup = s.missed_followup !== false;
+  s.missed_followup = s.missed_followup === true;
   s.notify_missed = s.notify_missed !== false;
   s.missed_followup_minutes = num(s.missed_followup_minutes, 15, 1, 1440);
   s.mapping = s.mapping && typeof s.mapping === 'object' && !Array.isArray(s.mapping) ? s.mapping : {};

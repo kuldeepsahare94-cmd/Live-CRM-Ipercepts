@@ -104,8 +104,10 @@ function plausible(y, m, d, today) {
   if (core.dayDiff(s, today) > 0 || core.dayDiff(today, s) > 1100) return null;
   return s;
 }
-function datesIn(line, today) {
+function datesIn(line0, today) {
   const out = [];
+  // (a photo reads Oct as 0ct, Sep as 5ep, Jan as 1an…)
+  const line = line0.replace(/(?<=\d[\s.,/-]?)0ct/gi, 'Oct').replace(/(?<=\d[\s.,/-]?)5ep/gi, 'Sep').replace(/(?<=\d[\s.,/-]?)[1l]an(?=[\s.,/-]*\d)/g, 'Jan').replace(/(?<=\d[\s.,/-]?)D[eo]c/g, 'Dec');
   let m;
   const a = /(?<!\d)(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?!\d)/g;
   // (in India the day comes first; a month above 12 means it was written the other way round)
@@ -154,8 +156,15 @@ function repairGstin(t) {
     const ch = t[i];
     if (want[i] === 'D') out += /\d/.test(ch) ? ch : (TO_DIGIT[ch] || ch);
     else if (want[i] === 'L') out += /[A-Z]/.test(ch) ? ch : (TO_LETTER[ch] || ch);
-    else if (want[i] === 'Z') out += ch === '2' ? 'Z' : ch;
+    else if (want[i] === 'Z') out += (ch === '2' || ch === '7') ? 'Z' : ch;
     else out += ch;
+  }
+  // the last letter is a check letter worked out from the first 14: when only it is doubtful, it is worked out again
+  if (GSTIN.test(out) && !gstinChecks(out)) {
+    let sum = 0;
+    for (let i = 0; i < 14; i += 1) { const q = ALNUM.indexOf(out[i]) * (i % 2 === 0 ? 1 : 2); sum += Math.floor(q / 36) + (q % 36); }
+    const c = ALNUM[(36 - (sum % 36)) % 36];
+    if ('10OQD5S8B2Z76GIL'.includes(out[14])) out = out.slice(0, 14) + c;
   }
   return GSTIN.test(out) ? out : null;
 }
@@ -163,11 +172,16 @@ function findGstin(lines) {
   let weak = null;
   for (const line of lines) {
     const up = line.toUpperCase();
-    for (const t of up.match(/[0-9A-Z]{15}/g) || []) {
+    // (after a label the number may be broken by spaces: "27 AACCT 6552 B 1 ZI")
+    const spaced = /GST\w*\s*(?:NO\.?|NUMBER|IN)?\s*[:#-]?\s*((?:[0-9A-Z][\s-]?){15,19})/.exec(up);
+    const cands = [...(up.match(/[0-9A-Z]{15}/g) || [])];
+    if (spaced) { const j = spaced[1].replace(/[\s-]/g, '').slice(0, 15); if (j.length === 15 && !cands.includes(j)) cands.push(j); }
+    for (const t of cands) {
       if (GSTIN.test(t) && gstinChecks(t)) return { value: t, sure: 'high' };
       const fixed = repairGstin(t);
       if (fixed && gstinChecks(fixed)) return { value: fixed, sure: 'medium' };
       if (!weak && GSTIN.test(t)) weak = t;
+      if (!weak && fixed) weak = fixed;
     }
   }
   // (it has the shape of a GSTIN but the check letter does not fit: offered, marked as unsure)
@@ -178,7 +192,7 @@ function findGstin(lines) {
 // Bill number, who was paid, tax
 // ---------------------------------------------------------------------------
 function findBillNumber(lines) {
-  const strong = /\b(?:tax\s*)?(?:invoice|inv|bill|receipt|rcpt|memo|voucher)\s*(?:number|num|no|#|id)?\.?\s*[:#-]?\s*([A-Z0-9][A-Z0-9/-]{1,24})/i;
+  const strong = /\b(?:tax\s*)?(?:invoice|inv|bill|receipt|rcpt|memo|voucher|folio|challan|slip)\s*(?:number|num|no|#|id)?\.?\s*[:#-]?\s*([A-Z0-9][A-Z0-9/-]{1,24})/i;
   const weak = /\b(?:order|txn|transaction|ref|reference|booking|pnr|ticket)\s*(?:number|num|no|#|id)?\.?\s*[:#-]?\s*([A-Z0-9][A-Z0-9/-]{1,24})/i;
   const pick = (re) => {
     for (const line of lines) {
@@ -196,17 +210,22 @@ function findBillNumber(lines) {
   const b = pick(weak);
   return b ? { value: b, sure: 'medium' } : null;
 }
-const NOT_A_NAME = /\b(tax\s*invoice|invoice|cash\s*memo|bill\s*of\s*supply|receipt|original|duplicate|customer\s*copy|gstin|gst\s*no|welcome|thank|date|phone|tel|mob(ile)?|fssai|cin|www\.|http|@)\b/i;
+const NOT_A_NAME = /\b(gstin|gst\s*no|welcome|thank|phone|tel|mob(ile)?|fssai|cin|www\.|http|@|date|dated|invoice\s*no|bill\s*no|bill\s*to|customer|table|order)\b/i;
+const ADDRESS_LINE = /\b(plot|road|rd\b|street|nagar|floor|sector|phase|building|tower|complex|lane|marg|chowk|colony|midc|gidc|estate|shop\s*no|near|opp\b|nh-?\d|highway|dist\b|district|pin(code)?)\b|\b\d{6}\b|^[^A-Za-z]*\d/i;
+const BILL_WORDS = /\b(tax\s*invoice|retail\s*invoice|invoice|cash\s*memo|cash\s*bill|bill\s*of\s*supply|e-?receipt|receipt|original(\s*for\s*recipient)?|duplicate|customer\s*copy|estimate|proforma)\b/ig;
 function findMerchant(lines) {
-  for (const line of lines.slice(0, 8)) {
+  for (const line0 of lines.slice(0, 10)) {
+    // ("ABC SUPPLIES PVT LTD  TAX INVOICE" → the words that only say what the paper is are taken off)
+    const line = line0.replace(BILL_WORDS, ' ').replace(/\s{2,}/g, ' ').trim();
     const letters = (line.match(/[A-Za-z]/g) || []).length;
-    if (letters < 3 || letters / line.length < 0.55 || NOT_A_NAME.test(line)) continue;
+    if (letters < 3 || letters / line.length < 0.55 || NOT_A_NAME.test(line) || ADDRESS_LINE.test(line)) continue;
     return { value: line.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.)]+$/g, '').slice(0, 80), sure: 'medium' };
   }
   return null;
 }
 function findTax(lines, amount) {
   let parts = 0;
+  let rate = 0;
   let whole = null;
   for (const line of lines) {
     if (/gstin|gst\s*no/i.test(line)) continue;
@@ -214,9 +233,10 @@ function findTax(lines, amount) {
     if (!nums.length) continue;
     const n = nums[nums.length - 1].n;
     if (/\b(cgst|sgst|igst|utgst)\b/i.test(line)) parts += n;
+    else if (/\b(gst|igst|vat|service\s*tax)\s*(@|-|:)?\s*\d+(\.\d+)?\s*%/i.test(line)) rate += n;
     else if (/\b(total\s*(tax|gst)|tax\s*(amount|total)|gst\s*(amount|total)|vat)\b/i.test(line)) whole = n;
   }
-  const tax = parts > 0 ? parts : whole;
+  const tax = parts > 0 ? parts : (whole || (rate > 0 ? rate : null));
   if (!(tax > 0) || !(amount > 0) || tax >= amount * 0.5) return null;
   return { value: money(tax), sure: 'medium' };
 }
@@ -300,7 +320,7 @@ async function readWithAI(bill) {
     : { type: 'image', source: { type: 'base64', media_type: bill.mime, data: bill.data } };
   let answer;
   try {
-    answer = await ai.anthropic.messages.create({ model: ai.MODEL, max_tokens: 400, messages: [{ role: 'user', content: [block, { type: 'text', text: ASK }] }] }, { timeout: 30000, maxRetries: 0 });
+    answer = await ai.anthropic.messages.create({ model: ai.MODEL, max_tokens: 400, messages: [{ role: 'user', content: [block, { type: 'text', text: ASK }] }] }, { timeout: 45000, maxRetries: 1 });
   } catch (e) {
     console.warn('[expenses] the assistant could not read a bill:', e && e.message ? e.message : e);
     throw bad('The bill could not be read just now. Type the details in.', 502);

@@ -474,7 +474,7 @@ const DEFAULTS = {
   payment_modes: ['Bank transfer', 'UPI', 'Cash', 'Cheque', 'With salary'],
   max_receipt_mb: 4,
   // --- reading a bill photo ---
-  bill_reading: 'device',        // 'off' | 'device' (read on the phone / computer, free) | 'ai' (the CRM assistant reads it)
+  bill_reading: 'auto',          // 'auto' (the CRM assistant when it is set up, else the phone / computer) | 'off' | 'device' (read on the phone / computer, free) | 'ai' (the CRM assistant reads it)
   // --- expenses in another currency ---
   multi_currency: false,
   fx_rate_edit: true,            // the person may type the rate their bank really used
@@ -554,7 +554,7 @@ function getSettings() {
   s.max_receipt_mb = Math.min(5, Math.max(1, Number(s.max_receipt_mb) || 4));
   s.claim_prefix = String(s.claim_prefix || 'EXP-').slice(0, 10);
   s.advance_prefix = String(s.advance_prefix || 'ADV-').slice(0, 10);
-  s.bill_reading = ['off', 'device', 'ai'].includes(s.bill_reading) ? s.bill_reading : 'device';
+  s.bill_reading = ['off', 'device', 'ai', 'auto'].includes(s.bill_reading) ? s.bill_reading : 'auto';
   s.multi_currency = !!s.multi_currency;
   s.fx_rate_edit = s.fx_rate_edit !== false;
   s.fx_tolerance = Math.min(100, Math.max(0, Number(s.fx_tolerance) || 0));
@@ -584,6 +584,8 @@ function getSettings() {
   let ai = false;
   try { ai = !!require('../aiClient').anthropic; } catch { ai = false; }
   s.ai_available = ai;
+  s.bill_reading_choice = s.bill_reading;                                // what the admin picked
+  if (s.bill_reading === 'auto') s.bill_reading = ai ? 'ai' : 'device';  // 'auto': the assistant when it is there, else the phone / computer
   if (s.bill_reading === 'ai' && !ai) s.bill_reading = 'device';      // the assistant key was taken away since
   // the CRM's own currency (Settings → Taxes & Currencies)
   let cur = null;
@@ -617,6 +619,7 @@ function saveSettings(input = {}) {
   const cur = getSettings();
   const next = { ...cur };
   delete next.currency; delete next.symbol;
+  next.bill_reading = cur.bill_reading_choice || cur.bill_reading; delete next.bill_reading_choice;   // keep what the admin picked, not what it resolved to
   for (const k of ['payout_key_id', 'has_payout_secret', 'has_webhook_secret', 'payout_ready', 'ai_available']) delete next[k];
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw bad('Nothing to save.');
   const bool = (k) => { if (input[k] !== undefined) next[k] = flag(input[k], `"${k}"`); };
@@ -679,7 +682,7 @@ function saveSettings(input = {}) {
 
   // --- reading a bill ---
   if (input.bill_reading !== undefined) {
-    if (!['off', 'device', 'ai'].includes(input.bill_reading)) throw bad('Choose how a bill photo is read.');
+    if (!['off', 'device', 'ai', 'auto'].includes(input.bill_reading)) throw bad('Choose how a bill photo is read.');
     if (input.bill_reading === 'ai' && !cur.ai_available) throw bad('The CRM assistant is not set up on this server (it needs its key), so it cannot read bills. Choose "on the phone or computer".');
     next.bill_reading = input.bill_reading;
   }

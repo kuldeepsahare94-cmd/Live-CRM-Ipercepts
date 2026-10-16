@@ -124,6 +124,7 @@ router.get('/crm', requireAuth, crmFromCache, (req, res) => {
   // ---- Needs Attention ------------------------------------------------------
   const attention = {
     tasks_overdue: metric('tasks_overdue'),
+    leads_no_followup: metric('leads_no_followup'),
     tickets_high_priority: metric('tickets_high_priority'),
     quotes_expiring: metric('quotes_expiring'),
     renewals_due: metric('renewals_due'),

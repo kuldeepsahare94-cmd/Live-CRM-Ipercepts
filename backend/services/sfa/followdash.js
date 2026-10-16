@@ -15,7 +15,8 @@ const fu = require('../followUps');
 const viewing = require('./viewing');
 const store = require('./store');
 
-const RANGES = ['overdue', 'today', 'week', 'dates'];
+const RANGES = ['overdue', 'today', 'week', 'dates', 'none'];
+const CLOSED_LEAD = ['Converted', 'Not Interested', 'Dropped', 'Lost'];
 const MAX_ROWS = 300;
 const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
 const addDays = (day, n) => { const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -36,6 +37,36 @@ function phonesOf(module, ids) {
   try {
     return new Map(db.prepare(`SELECT id, ${col} AS phone FROM ${module} WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids).map((r) => [Number(r.id), r.phone || '']));
   } catch { return new Map(); }
+}
+
+/**
+ * (v1.7) The leads still being worked on that have NO follow-up planned: no follow-up date and no open
+ * follow-up. Only leads (the others have no "worked on" state), only the ones this person may see, and
+ * of the people the view asks for. Hot first, then the newest.
+ */
+function noPlanLeads(user, ids, term, limit) {
+  if (!can(user, 'leads')) return { count: 0, rows: [] };
+  const where = [`COALESCE(l.status, '') NOT IN (${CLOSED_LEAD.map(() => '?').join(',')})`,
+    "COALESCE(TRIM(CAST(l.follow_up_date AS TEXT)), '') = ''",
+    "NOT EXISTS (SELECT 1 FROM follow_ups fx WHERE fx.related_module = 'leads' AND fx.related_record_id = l.id AND fx.status = 'Scheduled')"];
+  const params = [...CLOSED_LEAD];
+  const scope = access.where(user, 'leads', 'l');
+  if (scope.sql) { where.push(scope.sql.replace(/^\s*AND\s*/i, '')); params.push(...scope.params); }
+  if (ids !== null) {
+    const ow = viewing.ownerWhere('leads', 'l', ids);
+    if (ow.sql) { where.push(ow.sql.replace(/^\s*AND\s*/i, '')); params.push(...ow.params); }
+  }
+  if (term) {
+    const p = `%${String(term).toLowerCase().replace(/[\\%_]/g, '\\$&')}%`;
+    where.push("(LOWER(COALESCE(l.student_name, '')) LIKE ? OR LOWER(COALESCE(l.mobile, '')) LIKE ? OR LOWER(COALESCE(l.account_name, '')) LIKE ?)");
+    params.push(p, p, p);
+  }
+  const W = `FROM leads l WHERE ${where.join(' AND ')}`;
+  const count = Number(db.prepare(`SELECT COUNT(*) AS n ${W}`).get(...params).n) || 0;
+  const rows = limit > 0 ? db.prepare(`SELECT l.id, l.student_name, l.account_name, l.mobile, l.status, l.lead_rating, l.assigned_counselor, l.created_at,
+      (SELECT MAX(cx.start_time) FROM calls cx WHERE cx.related_module = 'leads' AND cx.related_record_id = l.id) AS last_call
+    ${W} ORDER BY CASE LOWER(COALESCE(l.lead_rating, '')) WHEN 'hot' THEN 0 WHEN 'warm' THEN 1 ELSE 2 END, l.id DESC LIMIT ${Number(limit)}`).all(...params) : [];
+  return { count, rows };
 }
 
 /**
@@ -75,6 +106,23 @@ function list(user, q = {}) {
     dates: (x) => x.f.due_date >= from && x.f.due_date <= to,
   };
   const counts = { overdue: mine.filter(pick.overdue).length, today: mine.filter(pick.today).length, week: mine.filter(pick.week).length };
+  // (v1.7) leads nobody has planned a follow-up for
+  const termNone = String(q.q || '').trim();
+  const nop = noPlanLeads(user, ids, range === 'none' ? termNone : '', range === 'none' ? MAX_ROWS : 0);
+  counts.none = range === 'none' && termNone ? noPlanLeads(user, ids, '', 0).count : nop.count;
+  if (range === 'none') {
+    const owners = new Map(db.prepare("SELECT id, COALESCE(NULLIF(TRIM(full_name), ''), username) AS name FROM users").all().map((u) => [u.name, Number(u.id)]));
+    return {
+      range, view, view_label: viewing.labelOf(user, view), today, week_end: wEnd, from: null, to: null,
+      counts, total: nop.count, by_person: [], more: nop.count > nop.rows.length,
+      rows: nop.rows.map((l) => ({
+        id: -Number(l.id), module: 'leads', record_id: Number(l.id), title: l.student_name || `#${l.id}`, company: l.account_name || '', subject: '', notes: '',
+        due_at: null, due_date: null, has_time: false, snoozed_until: null, status: 'No follow-up', overdue: false, no_plan: true,
+        lead_status: l.status || '', rating: l.lead_rating || '', phone: l.mobile || '', created_at: l.created_at, last_call: l.last_call || null,
+        assignee_id: owners.get(l.assigned_counselor) || null, assignee_name: l.assigned_counselor || '',
+      })),
+    };
+  }
   // (v1.5) a search: the customer's name, the follow-up's subject or note
   const term = String(q.q || '').trim().toLowerCase();
   const found = (x) => !term || [x.info.label, x.f.subject, x.f.notes].some((v) => String(v || '').toLowerCase().includes(term));

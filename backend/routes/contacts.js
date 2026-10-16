@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const validate = require('../services/validate');
+const CONTACT_RULES = { required: ['first_name'], phone: ['phone', 'mobile', 'whatsapp'], email: ['email', 'secondary_email'], url: ['website'] };
 const db = require('../db');
 const { relatedActivity } = require('../services/relatedActivity');
 const { requirePermission } = require('../middleware/auth');
@@ -51,7 +53,7 @@ router.get('/:id', requirePermission('contacts', 'view'), (req, res) => {
 
 router.post('/', requirePermission('contacts', 'create'), (req, res) => {
   const b = req.body;
-  if (!b.first_name) return res.status(400).json({ error: 'first_name is required' });
+  if (validate.reject(res, validate.check(b, CONTACT_RULES))) return;
   access.ownerDefault(req.user, 'contacts', b);
   { const no = access.linkDenied(req.user, b); if (no) return res.status(403).json(no); }
   // Same mobile or email as a contact that is already here → shown to the
@@ -84,6 +86,7 @@ router.put('/:id', requirePermission('contacts', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM contacts WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   { const no = access.linkDenied(req.user, req.body, existing); if (no) return res.status(403).json(no); }
+  if (validate.reject(res, validate.check(req.body, CONTACT_RULES, { partial: true }))) return;
   const m = { ...existing, ...req.body };
   db.prepare(`
     UPDATE contacts SET salutation=?, first_name=?, middle_name=?, last_name=?, job_title=?, department=?, account_id=?, email=?,

@@ -235,7 +235,7 @@ function checked(o, sureOf = () => 'high') {
 // ---------------------------------------------------------------------------
 // Reading the TEXT of a card (read on the phone / computer)
 // ---------------------------------------------------------------------------
-const COMPANY_WORDS = /\b(pvt|private|ltd|limited|llp|inc|corp(oration)?|co\.|company|industries|industry|enterprises?|technolog(y|ies)|tech|solutions?|services|traders?|trading|associates|group|consultan(ts?|cy)|systems|labs?|international|exports?|imports?|agenc(y|ies)|& ?sons|infotech|infra(structure)?|motors|steels?|pharma|foods?|textiles?|engineering|engineers|works|studio|logistics|distributors?|marketing|ventures|global|software|chemicals?|plastics?|electricals?|hospital|clinic|academy|institute|school|college|realty|developers|builders|constructions?|hotels?|bank|finance|insurance|media)\b/i;
+const COMPANY_WORDS = /\b(pvt|private|ltd|limited|llp|inc|corp(oration)?|co\.|company|industries|industry|enterprises?|technolog(y|ies)|tech|solutions?|services|traders?|trading|associates|group|consultan(ts?|cy)|systems|labs?|international|exports?|imports?|agenc(y|ies)|& ?sons|infotech|infra(structure)?|motors|steels?|pharma|foods?|textiles?|engineering|engineers|works|studio|logistics|distributors?|marketing|ventures|global|software|chemicals?|plastics?|electricals?|hospital|clinic|academy|institute|school|college|realty|developers|builders|constructions?|hotels?|bank|finance|insurance|media|books?|stationers?|stores?|mart|emporium|bros|brothers|cent(er|re)s?|bhandar|kendra|mills?|press|printers?|printing|jewell?ers?|jewellery|opticals?|pharmacy|medicals?|dairy|garage|cars|auto(mobiles?)?|enterprise|co\b|& ?co|fabricators?|packaging|bio|labs?|energy|power|telecom|networks?|digital|education|coaching|classes|academy|institutes?)\b/i;
 const TITLE_WORDS = /\b(manager|director|ceo|cto|cfo|coo|cmo|founder|co-?founder|owner|proprietor|partner|president|vice\s*president|vp|head|lead|chief|officer|executive|engineer|consultant|advisor|adviser|analyst|architect|designer|developer|specialist|coordinator|representative|associate|assistant|supervisor|accountant|administrator|chairman|principal|professor|doctor|dr\.|sales|marketing|purchase|procurement|business\s*development|bdm|bde|hr|admin)\b/i;
 const ADDRESS_WORDS = /\b(road|rd\.?|street|st\.|nagar|floor|flr|plot|near|nr\.?|opp\.?|sector|phase|building|bldg|tower|complex|lane|marg|chowk|colony|area|midc|gidc|estate|park|block|wing|shop|office\s*no|no\.|layout|cross|main|society|apartment|apt|plaza|mall|highway|hwy|bypass|village|taluka|tal\.|dist\.?|district|p\.?o\.?|post|ward|gali|bazar|bazaar|market|enclave|vihar|puram|pur|bagh|ganj)\b|#\s*\d|\b\d{3}\s?\d{3}\b/i;
 const NOT_NAME = /@|www\.|https?:|\d|\b(tel|ph|phone|mob|mobile|fax|email|e-mail|web|website|gst|gstin|address|addr)\b/i;
@@ -243,9 +243,13 @@ const PHONE_RUN = /(?:\+?\d[\d\s\-().]{6,}\d)/g;
 
 function linesOf(text) {
   return String(text || '').replace(/\u0000/g, '').slice(0, 8000).split(/\r?\n|\s{3,}|\s\|\s/)
+    // ("Anil Kumar Verma GSTIN 09AAB…" is two things on one line)
+    .flatMap((l) => l.split(/\s+(?=(?:GSTIN|GST\s*No|Tel|Ph|Phone|Mob|Mobile|Email|E-?mail|Web)\b\s*[:.-]?\s*[\w+(@])/i))
     .map((l) => l.replace(/[\t ]+/g, ' ').replace(/^[^\w+#(@]+|[^\w).]+$/g, '').trim()).filter((l) => l.length > 1).slice(0, 80);
 }
-function looksLikeName(line) {
+const HONOUR = /^(?:mr|mrs|ms|miss|dr|prof|shri|shree|smt|sri|er|ca|adv|capt|col|maj)\b\.?\s+/i;
+function looksLikeName(line0) {
+  const line = line0.replace(HONOUR, '');
   if (NOT_NAME.test(line) || COMPANY_WORDS.test(line) || ADDRESS_WORDS.test(line)) return false;
   const words = line.replace(/[.,]/g, ' ').split(/\s+/).filter(Boolean);
   if (words.length < 1 || words.length > 4) return false;
@@ -293,7 +297,7 @@ function parseText(text) {
   let nameAt = -1;
   if (titleAt > 0 && looksLikeName(lines[titleAt - 1]) && !used.has(titleAt - 1)) nameAt = titleAt - 1;
   if (nameAt < 0) nameAt = lines.findIndex((l, i) => !used.has(i) && looksLikeName(l));
-  if (nameAt >= 0) { o.full_name = lines[nameAt].replace(/\s+/g, ' '); used.add(nameAt); }
+  if (nameAt >= 0) { o.full_name = lines[nameAt].replace(/\s+/g, ' ').replace(HONOUR, '').trim(); used.add(nameAt); }
   if (!o.company && o.website) {
     const host = o.website.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[./]/)[0];
     if (host && host.length > 2) o.company = host.charAt(0).toUpperCase() + host.slice(1);
@@ -307,13 +311,20 @@ function parseText(text) {
   const hay = (addr.length ? addr.join(' ') : whole);
   const st = inStates.find((s) => new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(hay));
   if (st) o.state = st;
-  const words = hay.split(/[^A-Za-z]+/).filter((w) => w.length > 2);
-  for (let i = 0; i < words.length && !o.city; i += 1) {
-    for (const n of [2, 1]) {
-      const cand = words.slice(i, i + n).join(' ');
-      const canon = (ALIASES[cand.toLowerCase()] || cand).toLowerCase();
-      const known = cityToState.get(canon);
-      if (known && (!o.state || known.state === o.state)) { o.city = known.city; o.state = o.state || known.state; break; }
+  // (from the end of the address backwards: the city comes after the street, and a word like "Sector" is not a city)
+  const NOT_CITY = /^(sector|phase|block|plot|road|street|nagar|colony|floor|tower|building|near|opposite|main|cross|lane|area|market|bazar|bazaar|office|shop|wing|park|estate|complex|chowk|marg|layout|society|india)$/i;
+  const parts = hay.split(/[,\n]|\s-\s/).map((x) => x.replace(/[^A-Za-z\s]/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean).reverse();
+  for (const part of parts) {
+    if (o.city) break;
+    const w = part.split(' ').filter((x) => x.length > 2);
+    for (let i = 0; i < w.length && !o.city; i += 1) {
+      for (const n of [3, 2, 1]) {
+        const cand = w.slice(i, i + n).join(' ');
+        if (n === 1 && NOT_CITY.test(cand)) continue;
+        const canon = (ALIASES[cand.toLowerCase()] || cand).toLowerCase();
+        const known = cityToState.get(canon);
+        if (known && (!o.state || known.state === o.state)) { o.city = known.city; o.state = o.state || known.state; break; }
+      }
     }
   }
   if (/\bindia\b/i.test(whole) || o.state) o.country = 'India';
@@ -351,7 +362,7 @@ async function readWithAI(images) {
   content.push({ type: 'text', text: ASK });
   let answer;
   try {
-    answer = await ai.anthropic.messages.create({ model: ai.MODEL, max_tokens: 500, messages: [{ role: 'user', content }] }, { timeout: 30000, maxRetries: 0 });
+    answer = await ai.anthropic.messages.create({ model: ai.MODEL, max_tokens: 500, messages: [{ role: 'user', content }] }, { timeout: 45000, maxRetries: 1 });
   } catch (e) {
     console.warn('[cards] the assistant could not read a card:', e && e.message ? e.message : e);
     throw bad('The card could not be read just now. Type the details in, or try again.', 502);

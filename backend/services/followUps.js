@@ -41,7 +41,7 @@ const DATE_ONLY_HOUR = 9;                 // when a follow-up with no time remin
 const DUE_WINDOW_MS = 60 * 60 * 1000;     // "Due" for an hour, then "Overdue"
 const STALE_MS = 12 * 60 * 60 * 1000;     // a due reminder this late is not worth a popup
 const MAX_OVERDUE_REMINDERS = 3;
-const CLOSED_LEAD_STATUSES = ['Converted', 'Not Interested', 'Dropped'];
+const CLOSED_LEAD_STATUSES = ['Converted', 'Not Interested', 'Dropped', 'Lost'];
 
 // The record's own "next follow-up" column, per module.
 // `reconcile`: dates written into that column by other paths (imports, the

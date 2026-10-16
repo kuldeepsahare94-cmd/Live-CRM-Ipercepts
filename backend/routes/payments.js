@@ -7,6 +7,7 @@ const { companyProfile } = require('../services/documentPdf');
 const { fireEvent } = require('../services/whatsapp/workflowEngine');
 const { fireWorkflows } = require('../services/workflowAutomation');
 const access = require('../services/recordAccess');
+const validate = require('../services/validate');
 
 // A payment belongs to whoever owns what it pays for (the subscription, the
 // invoice, the deal or the account). A role that sees only its own / its
@@ -76,6 +77,7 @@ router.get('/:id', requirePermission('payments', 'view'), (req, res) => {
 router.post('/', requirePermission('payments', 'create'), (req, res) => {
   const b = req.body;
   { const no = access.linkDenied(req.user, b); if (no) return res.status(403).json(no); }
+  if (validate.reject(res, validate.check(b, { positive: ['amount'] }))) return;
   if (!b.account_id && !b.opportunity_id && !b.quotation_id && !b.payer_name) {
     return res.status(400).json({ error: 'Provide account_id, opportunity_id, quotation_id, or a payer_name' });
   }
@@ -99,6 +101,7 @@ router.post('/', requirePermission('payments', 'create'), (req, res) => {
 router.put('/:id', requirePermission('payments', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM payments WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (validate.reject(res, validate.check(req.body, { positive: ['amount'] }, { partial: true }))) return;
   const m = { ...existing, ...req.body };
   db.prepare(`
     UPDATE payments SET payment_date=?, amount=?, payment_mode=?, transaction_number=?, status=?, remarks=?,

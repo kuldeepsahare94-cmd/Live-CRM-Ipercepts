@@ -365,6 +365,8 @@ function moduleQuery(plan, words, limit, canSee, user) {
     if (w.digits) {
       plan.phone.forEach((c) => { parts.push(`regexp_replace(COALESCE(t.${c}, ''), '[^0-9]', '', 'g') LIKE ?`); params.push(`%${w.digits}%`); });
     }
+    // (v1.8) an extra email address kept for the record
+    if (plan.mod && plan.mod.api_name && /[@.]/.test(w.text)) { parts.push('EXISTS (SELECT 1 FROM record_emails re WHERE re.module = ? AND re.record_id = t.id AND re.email_lower LIKE ?)'); params.push(plan.mod.api_name, `%${String(w.text).toLowerCase()}%`); }
     if (account) { parts.push(`EXISTS (SELECT 1 FROM accounts x WHERE x.id = t.${account} AND x.account_name LIKE ?)`); params.push(`%${w.text}%`); }
     if (contact) {
       parts.push(`EXISTS (SELECT 1 FROM contacts x WHERE x.id = t.${contact} AND ${CONTACT_HAY} LIKE ?)`); params.push(`%${w.text}%`);

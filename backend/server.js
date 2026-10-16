@@ -41,6 +41,9 @@ require('./db-phase48-option-management');
 require('./db-phase49-follow-ups');
 require('./db-phase50-settings-cleanup');
 require('./db-phase51-geo');
+require('./db-phase52-placement');
+require('./db-phase53-polish');
+require('./db-phase54-multi-email');
 
 
 const app = express();
@@ -145,6 +148,17 @@ app.get('/api/m-file/:kind/:id', (req, res) => require('./services/sfa/mfiles').
   }), require('./routes/expenses'));
 }
 
+// Placement desk (recruitment consultancy): jobs, candidates, pipeline, interviews,
+// offers, contract staffing. A resume travels inside the request, so a bigger body.
+{
+  const readPlacementBody = express.json({ limit: '12mb' });
+  app.use('/api/placement', requireAuth, (req, res, next) => readPlacementBody(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.status === 413 || err.type === 'entity.too.large';
+    return res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'The file is too large to send.' : 'The request could not be read.' });
+  }), require('./routes/placement'));
+}
+
 // Visiting cards: the photo of a card (front and back) travels inside the request.
 {
   const readCardBody = express.json({ limit: '16mb' });
@@ -214,8 +228,11 @@ app.get('/api/health/db', (req, res) => {
 // be created with every required field blank.
 const { enforceRequiredFields } = require('./middleware/requiredFields');
 app.use('/api', enforceRequiredFields);
+// (v1.8) more than one email address on a record: the list rides along with the record's own save
+app.use('/api', require('./middleware/extraEmails').extraEmails);
 
 // Everything below requires a valid, active login
+app.use('/api/record-emails', requireAuth, require('./routes/recordEmails'));
 app.use('/api/leads', requireAuth, require('./routes/leads'));
 app.use('/api/payments', requireAuth, require('./routes/payments'));
 app.use('/api/dashboard', requireAuth, require('./routes/dashboard'));

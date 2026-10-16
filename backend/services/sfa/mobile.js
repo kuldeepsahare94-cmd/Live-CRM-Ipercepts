@@ -24,6 +24,10 @@ const LIST = {
   leads: {
     table: 'leads', title: 't.student_name', sub: "COALESCE(NULLIF(t.account_name, ''), t.city, t.email)", status: 't.status', phone: 't.mobile',
     date: 't.follow_up_date', search: ['t.student_name', 't.mobile', 't.email', 't.account_name', 't.city'], order: 't.id DESC', ownerName: 't.assigned_counselor',
+    // (v1.7) what a salesperson wants on the row: where, how hot, when last spoken to
+    more: ['t.city AS m_city', 't.lead_rating AS m_rating',
+      "(SELECT MAX(cx.start_time) FROM calls cx WHERE cx.related_module = 'leads' AND cx.related_record_id = t.id) AS m_last_call",
+      "(SELECT COUNT(*) FROM calls cx WHERE cx.related_module = 'leads' AND cx.related_record_id = t.id) AS m_calls"],
   },
   contacts: {
     table: 'contacts', title: "TRIM(COALESCE(t.first_name, '') || ' ' || COALESCE(t.last_name, ''))", sub: "COALESCE(a.account_name, t.job_title, t.city)", status: 't.contact_status',
@@ -46,13 +50,21 @@ const LIST = {
     amount: 't.recurring_amount', date: 't.renewal_date', join: 'LEFT JOIN accounts a ON a.id = t.account_id', search: ['t.subscription_number', 't.plan', 'a.account_name'], order: 't.id DESC', owner: 't.owner_id',
   },
   meetings: {
-    table: 'meetings', title: 't.meeting_title', sub: 't.location', status: 't.status', date: 't.start_datetime', search: ['t.meeting_title', 't.location'], order: 't.start_datetime DESC', owner: 't.assigned_user_id', activity: true,
+    table: 'meetings', title: 't.meeting_title', sub: 't.location', status: 't.status', date: 't.start_datetime', search: ['t.meeting_title', 't.location'], owner: 't.assigned_user_id', activity: true,
+    // (v1.7) today and what is coming first (soonest first), then the past (latest first)
+    order: (today) => `CASE WHEN SUBSTR(CAST(t.start_datetime AS TEXT), 1, 10) >= '${today}' THEN 0 ELSE 1 END, CASE WHEN SUBSTR(CAST(t.start_datetime AS TEXT), 1, 10) >= '${today}' THEN t.start_datetime END ASC, t.start_datetime DESC`,
+    more: ['t.meeting_type AS m_type', 't.end_datetime AS m_end', "COALESCE(NULLIF(t.video_link, ''), NULLIF(t.online_dial_in, '')) AS m_link"],
   },
   calls: {
     table: 'calls', title: 't.call_subject', sub: 't.phone_number', status: 't.status', phone: 't.phone_number', date: 't.start_time', search: ['t.call_subject', 't.phone_number'], order: 't.id DESC', owner: 't.assigned_user_id', activity: true,
+    // (v1.7) WHO the call was with, which way, how long
+    more: ["CASE t.related_module WHEN 'leads' THEN (SELECT x.student_name FROM leads x WHERE x.id = t.related_record_id) WHEN 'contacts' THEN (SELECT TRIM(COALESCE(x.first_name, '') || ' ' || COALESCE(x.last_name, '')) FROM contacts x WHERE x.id = t.related_record_id) WHEN 'accounts' THEN (SELECT x.account_name FROM accounts x WHERE x.id = t.related_record_id) END AS m_who",
+      't.direction AS m_direction', 't.duration_seconds AS m_seconds', 't.call_outcome AS m_outcome', 't.connected AS m_connected'],
   },
   tasks: {
-    table: 'tasks', title: 't.task_title', sub: 't.priority', status: 't.status', date: 't.due_date', search: ['t.task_title'], order: "CASE WHEN t.status = 'Completed' THEN 1 ELSE 0 END, t.due_date", owner: 't.assigned_to_id', activity: true,
+    table: 'tasks', title: 't.task_title', sub: 't.priority', status: 't.status', date: 't.due_date', search: ['t.task_title'], owner: 't.assigned_to_id', activity: true,
+    // (v1.7) today first, then overdue (the latest first), then what is coming, then undated, finished last
+    order: (today) => `CASE WHEN t.status = 'Completed' THEN 4 WHEN t.due_date IS NULL OR CAST(t.due_date AS TEXT) = '' THEN 3 WHEN SUBSTR(CAST(t.due_date AS TEXT), 1, 10) = '${today}' THEN 0 WHEN SUBSTR(CAST(t.due_date AS TEXT), 1, 10) < '${today}' THEN 1 ELSE 2 END, CASE WHEN SUBSTR(CAST(t.due_date AS TEXT), 1, 10) > '${today}' THEN t.due_date END ASC, t.due_date DESC`,
   },
   products: {
     table: 'products', title: 't.product_name', sub: "TRIM(COALESCE(t.sku, '') || CASE WHEN t.category IS NOT NULL AND t.category <> '' THEN ' · ' || t.category ELSE '' END)", status: "CASE WHEN t.active = 1 THEN 'Active' ELSE 'Inactive' END",
@@ -68,6 +80,13 @@ function companyName() {
     const p = db.prepare('SELECT * FROM company_profile WHERE id = 1').get() || {};
     return p.trade_name || p.legal_name || 'CRM';
   } catch { return 'CRM'; }
+}
+// the Placement desk (recruitment): in the app once it is switched on and the role may see it
+function placementFor(user) {
+  try {
+    if (!require('../placement/store').isEnabled() || !can(user, 'placement', 'view')) return false;
+    return { create: can(user, 'placement', 'create'), edit: can(user, 'placement', 'edit') };
+  } catch { return false; }
 }
 function expensesOn() { try { return !!require('../expenses/store').getSettings().enabled; } catch { return false; } }
 
@@ -168,6 +187,7 @@ function bootstrap(user) {
       meeting_rec_on: s.meeting_rec_on, meeting_consent: s.meeting_consent, meeting_consent_text: s.meeting_consent_text, meeting_max_minutes: s.meeting_max_minutes,
     } : { enabled: false },
     expenses: expensesOn() && can(user, 'expenses', 'view'),
+    placement: placementFor(user),
     // calls from the app (Settings → Field force → Calls)
     calls: can(user, 'calls', 'create') ? {
       enabled: true, auto_log: s.call_auto_log, scan_phone: s.call_scan_phone, daily_target: s.call_daily_target,
@@ -239,6 +259,13 @@ function filterSpec(user, module) {
   };
 }
 
+const CLOSED_LEAD = ['Converted', 'Not Interested', 'Dropped', 'Lost'];
+// no follow-up planned: the lead has no follow-up date and no open follow-up
+const NO_FOLLOWUP = "(COALESCE(TRIM(CAST(t.follow_up_date AS TEXT)), '') = '' AND NOT EXISTS (SELECT 1 FROM follow_ups fx WHERE fx.related_module = 'leads' AND fx.related_record_id = t.id AND fx.status = 'Scheduled'))";
+const todayCrm = () => { try { const d = require('../followUps').crmDate(new Date().toISOString()); if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d; } catch { /* fall through */ } return new Date().toISOString().slice(0, 10); };
+function statusPicked(f) {
+  try { const o = typeof f === 'string' ? JSON.parse(f) : f; return !!(o && Array.isArray(o.status) ? o.status.length : o && o.status); } catch { return false; }
+}
 const listOf = (v) => (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : [v]).map((x) => String(x).slice(0, 120)).slice(0, 50);
 const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
 /** the filters of the panel, as more WHERE conditions */
@@ -293,7 +320,12 @@ function list(user, module, q = {}) {
   const scope = c.activity ? access.whereActivity(user, module, 't', relId ? relMod : null, relId) : access.where(user, module, 't');
   where.push(scope.sql.replace(/^\s*AND\s*/i, '') || '1 = 1'); params.push(...scope.params);
   const term = String(q.q || '').replace(/\u0000/g, '').trim().slice(0, 60);
-  if (term) { where.push(`(${c.search.map((col) => `${col} LIKE ?`).join(' OR ')})`); params.push(...c.search.map(() => `%${term}%`)); }
+  if (term) {
+    // (v1.8) …and an extra email address kept for the record
+    const extra = ['leads', 'contacts', 'accounts'].includes(module) && term.includes('@') ? ' OR EXISTS (SELECT 1 FROM record_emails re WHERE re.module = ? AND re.record_id = t.id AND re.email_lower LIKE ?)' : '';
+    where.push(`(${c.search.map((col) => `${col} LIKE ?`).join(' OR ')}${extra})`); params.push(...c.search.map(() => `%${term}%`));
+    if (extra) params.push(module, `%${term.toLowerCase()}%`);
+  }
   if (q.status && c.status && !c.status.startsWith('CASE')) { where.push(`${c.status} = ?`); params.push(String(q.status).slice(0, 60)); }
   if (q.mine === '1' || q.mine === 'true') {
     if (c.owner) { where.push(`${c.owner} = ?`); params.push(user.id); }
@@ -307,6 +339,12 @@ function list(user, module, q = {}) {
     if (ow.sql) { where.push(ow.sql.replace(/^\s*AND\s*/i, '')); params.push(...ow.params); }
   }
   if (q.f) applyFilters(module, c, q.f, where, params);
+  // (v1.7) the leads list shows the leads still being worked on: Converted, Dropped, Lost and Not Interested only when asked for
+  if (module === 'leads') {
+    if ((q.active === '1' || q.active === 'true') && !q.status && !statusPicked(q.f)) { where.push(`COALESCE(t.status, '') NOT IN (${CLOSED_LEAD.map(() => '?').join(',')})`); params.push(...CLOSED_LEAD); }
+    if (q.followup === 'none') where.push(NO_FOLLOWUP);
+    else if (q.followup === 'planned') where.push(`NOT (${NO_FOLLOWUP})`);
+  }
   if (relId) { where.push('t.related_module = ? AND t.related_record_id = ?'); params.push(relMod, relId); }
   if (!c.activity && idOf(q.account_id) && ['contacts', 'opportunities', 'quotations', 'subscriptions'].includes(module)) { where.push('t.account_id = ?'); params.push(idOf(q.account_id)); }
   if (module === 'products' && q.all !== '1') where.push('t.active = 1');
@@ -315,8 +353,9 @@ function list(user, module, q = {}) {
   const W = `FROM ${c.table} t ${c.join || ''} WHERE ${where.join(' AND ')}`;
   const total = Number(db.prepare(`SELECT COUNT(*) AS n ${W}`).get(...params).n) || 0;
   const cols = [`t.id`, `${c.title} AS title`, `${c.sub} AS sub`, c.status ? `${c.status} AS status` : 'NULL AS status', c.phone ? `${c.phone} AS phone` : 'NULL AS phone',
-    c.amount ? `${c.amount} AS amount` : 'NULL AS amount', c.date ? `${c.date} AS date` : 'NULL AS date', ...(c.extra || [])];
-  const rows = db.prepare(`SELECT ${cols.join(', ')} ${W} ORDER BY ${c.order} LIMIT ? OFFSET ?`).all(...params, size, (page - 1) * size);
+    c.amount ? `${c.amount} AS amount` : 'NULL AS amount', c.date ? `${c.date} AS date` : 'NULL AS date', ...(c.extra || []), ...(c.more || [])];
+  let order = typeof c.order === 'function' ? c.order(todayCrm()) : c.order;
+  const rows = db.prepare(`SELECT ${cols.join(', ')} ${W} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...params, size, (page - 1) * size);
   let photos = new Map();
   if (c.photo && rows.length) {
     try {
@@ -337,6 +376,7 @@ function list(user, module, q = {}) {
       id: Number(r.id), title: r.title || `#${r.id}`, sub: r.sub || '', status: r.status || '', phone: r.phone || '',
       amount: r.amount === null || r.amount === undefined ? null : Number(r.amount), date: r.date || null,
       thumb_url: photos.get(Number(r.id)) || undefined, place: places.get(Number(r.id)) || undefined,
+      ...(c.more ? { more: Object.fromEntries(c.more.map((x) => x.split(' AS ').pop()).map((k) => [k.replace(/^m_/, ''), r[k] === undefined ? null : r[k]])) } : {}),
       ...(module === 'products' ? { tax_percent: Number(r.tax_percent) || 0, unit: r.unit || '', currency: r.currency || '' } : {}),
     })),
   };

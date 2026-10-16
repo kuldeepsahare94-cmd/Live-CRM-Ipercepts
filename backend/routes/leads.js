@@ -7,6 +7,7 @@ const { fireWorkflows } = require('../services/workflowAutomation');
 const { computeLeadScore } = require('../services/leadScore');
 const followUps = require('../services/followUps');
 const duplicates = require('../services/duplicates');
+const validate = require('../services/validate');
 const access = require('../services/recordAccess');
 const leadList = require('../services/leadList');
 
@@ -69,9 +70,10 @@ router.get('/:id', requirePermission('leads', 'view'), (req, res) => {
   });
 });
 
+const LEAD_RULES = { required: ['student_name'], phone: ['mobile', 'alternate_mobile'], email: ['email'] };
 router.post('/', requirePermission('leads', 'create'), (req, res) => {
   const b = req.body;
-  if (!b.student_name) return res.status(400).json({ error: 'student_name is required' });
+  if (validate.reject(res, validate.check(b, LEAD_RULES))) return;
   // someone who only sees their own leads becomes the owner of what they add
   access.ownerDefault(req.user, 'leads', b);
   // Same mobile or email as a lead that is already here? Then no second lead
@@ -112,6 +114,7 @@ router.post('/', requirePermission('leads', 'create'), (req, res) => {
 router.put('/:id', requirePermission('leads', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM leads WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (validate.reject(res, validate.check(req.body, LEAD_RULES, { partial: true }))) return;
   const m = { ...existing, ...req.body };
   db.prepare(`
     UPDATE leads SET student_name=?, account_name=?, mobile=?, alternate_mobile=?, email=?, gender=?, date_of_birth=?, address=?, city=?,

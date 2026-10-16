@@ -303,7 +303,7 @@ router.get('/report', requirePermission('calls', 'view'), (req, res) => {
   const leadParams = userId ? [userId] : [];
 
   const dueToday = one(`SELECT COUNT(*) c FROM leads l WHERE date(l.follow_up_date)=date(?) ${leadWhere}`, today, ...leadParams).c || 0;
-  const overdue = one(`SELECT COUNT(*) c FROM leads l WHERE l.follow_up_date IS NOT NULL AND date(l.follow_up_date) < date(?) AND l.status NOT IN ('Converted','Not Interested','Dropped') ${leadWhere}`, today, ...leadParams).c || 0;
+  const overdue = one(`SELECT COUNT(*) c FROM leads l WHERE l.follow_up_date IS NOT NULL AND date(l.follow_up_date) < date(?) AND l.status NOT IN ('Converted','Not Interested','Dropped','Lost') ${leadWhere}`, today, ...leadParams).c || 0;
   const doneToday = one(`SELECT COUNT(DISTINCT c.related_record_id) c FROM calls c WHERE c.related_module='leads' AND date(COALESCE(c.disposed_at,c.created_at))=date(?) ${userId ? 'AND c.assigned_user_id=?' : ''}`, today, ...(userId ? [userId] : [])).c || 0;
 
   const connectRate = overview.total_calls ? (overview.connected_calls / overview.total_calls) * 100 : 0;

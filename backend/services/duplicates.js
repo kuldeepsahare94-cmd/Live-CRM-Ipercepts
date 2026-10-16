@@ -239,16 +239,17 @@ function keysOf(module, values, rule) {
   const m = MODULES[module];
   return {
     phones: rule.match_mobile ? uniq(m.phone.map((c) => phoneKey(values[c]))) : [],
-    emails: rule.match_email ? uniq(m.email.map((c) => emailKey(values[c]))) : [],
+    // (v1.8) the extra addresses a person typed count as well as the main ones
+    emails: rule.match_email ? uniq([...m.email.map((c) => emailKey(values[c])), ...(Array.isArray(values._extra_emails) ? values._extra_emails.map((x) => emailKey(x && x.email)) : [])]) : [],
     name: rule.match_name && m.name ? nameKey(values[m.name]) : '',
   };
 }
 
-function matchedOn(module, row, keys) {
+function matchedOn(module, row, keys, extras) {
   const m = MODULES[module];
   const on = [];
   if (keys.phones.length && m.phone.some((c) => keys.phones.includes(phoneKey(row[c])))) on.push('mobile');
-  if (keys.emails.length && m.email.some((c) => keys.emails.includes(emailKey(row[c])))) on.push('email');
+  if (keys.emails.length && (m.email.some((c) => keys.emails.includes(emailKey(row[c]))) || (extras || []).some((x) => keys.emails.includes(emailKey(x.email))))) on.push('email');
   if (keys.name && m.name && nameKey(row[m.name]) === keys.name) on.push('name');
   return on;
 }
@@ -269,6 +270,8 @@ function findMatches(module, values, { rule, excludeId = null, limit = 10 } = {}
   }
   if (keys.emails.length) {
     for (const c of m.email.filter((x) => cols.has(x))) { where.push(`${emailSql(c)} IN (${marks(keys.emails.length)})`); params.push(...keys.emails); }
+    // …and the extra addresses kept for the record
+    where.push(`id IN (SELECT record_id FROM record_emails WHERE module = ? AND email_lower IN (${marks(keys.emails.length)}))`); params.push(module, ...keys.emails);
   }
   if (keys.name && cols.has(m.name)) { where.push(`${nameSql(m.name)} = ?`); params.push(keys.name); }
   if (!where.length) return [];
@@ -277,8 +280,10 @@ function findMatches(module, values, { rule, excludeId = null, limit = 10 } = {}
   if (excludeId) { sql += ' AND id <> ?'; params.push(Number(excludeId)); }
   sql += ' ORDER BY id LIMIT 50';
 
-  return db.prepare(sql).all(...params)
-    .map((record) => ({ record, matched_on: matchedOn(module, record, keys) }))
+  const found = db.prepare(sql).all(...params);
+  const extras = keys.emails.length ? require('./recordEmails').listMany(module, found.map((r) => r.id)) : {};
+  return found
+    .map((record) => ({ record, matched_on: matchedOn(module, record, keys, extras[record.id]) }))
     .filter((x) => x.matched_on.length)
     // Matching on more things is a surer match; after that, the oldest record
     // is the original.

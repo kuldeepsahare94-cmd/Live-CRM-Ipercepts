@@ -25,6 +25,9 @@ const db = require('../db');
 const access = require('./recordAccess');
 
 const BLANK = '__blank__';               // the "no status" card (StatusCards.jsx)
+// (v1.7) the leads still being worked on: everything but these — the list's default
+const ACTIVE = '__active__';
+const CLOSED = ['Converted', 'Not Interested', 'Dropped', 'Lost'];
 const MAX_PAGE = 1000;
 const MAX_IDS = 50000;
 const FACET_FIELDS = ['status', 'city', 'campaign', 'product_interest', 'service_interest', 'qualification', 'source', 'lead_rating', 'gender', 'account_name'];
@@ -162,10 +165,17 @@ function baseWhere(user, body, ctx) {
   const q = String(body.q || '').trim();
   if (q) {
     const p = `%${like(q)}%`;
-    add({ sql: `(LOWER(COALESCE(l.student_name, '')) LIKE ? OR LOWER(COALESCE(l.mobile, '')) LIKE ? OR LOWER(COALESCE(l.email, '')) LIKE ?)`, params: [p, p, p] });
+    add({ sql: `(LOWER(COALESCE(l.student_name, '')) LIKE ? OR LOWER(COALESCE(l.mobile, '')) LIKE ? OR LOWER(COALESCE(l.email, '')) LIKE ? OR EXISTS (SELECT 1 FROM record_emails re WHERE re.module = 'leads' AND re.record_id = l.id AND re.email_lower LIKE ?))`, params: [p, p, p, p] });
   }
   if (!blank(body.source)) add({ sql: 'l.source = ?', params: [String(body.source)] });
   if (!blank(body.owner)) add({ sql: 'l.assigned_counselor = ?', params: [String(body.owner)] });
+  // (v1.7) the follow-up a person planned: none yet / overdue / today / coming up
+  const NONE = "(COALESCE(TRIM(CAST(l.follow_up_date AS TEXT)), '') = '' AND NOT EXISTS (SELECT 1 FROM follow_ups fx WHERE fx.related_module = 'leads' AND fx.related_record_id = l.id AND fx.status = 'Scheduled'))";
+  const closedIn = `COALESCE(l.status, '') IN (${CLOSED.map(() => '?').join(',')})`;
+  if (body.followup === 'none') add({ sql: `${NONE} AND NOT ${closedIn}`, params: [...CLOSED] });
+  else if (body.followup === 'overdue') add({ sql: `COALESCE(TRIM(CAST(l.follow_up_date AS TEXT)), '') <> '' AND SUBSTR(CAST(l.follow_up_date AS TEXT), 1, 10) < ? AND NOT ${closedIn}`, params: [ctx.today, ...CLOSED] });
+  else if (body.followup === 'today') add({ sql: `SUBSTR(CAST(l.follow_up_date AS TEXT), 1, 10) = ? AND NOT ${closedIn}`, params: [ctx.today, ...CLOSED] });
+  else if (body.followup === 'upcoming') add({ sql: `SUBSTR(CAST(l.follow_up_date AS TEXT), 1, 10) > ? AND NOT ${closedIn}`, params: [ctx.today, ...CLOSED] });
   // (v1.4) whose leads: one person, a team, a role — within what this person may see
   if (!blank(body.view) && body.view !== 'all') {
     const viewing = require('./sfa/viewing');
@@ -214,6 +224,7 @@ function baseWhere(user, body, ctx) {
 function statusWhere(status) {
   if (blank(status)) return { sql: '', params: [] };
   if (status === BLANK) return { sql: " AND TRIM(COALESCE(l.status, '')) = ''", params: [] };
+  if (status === ACTIVE) return { sql: ` AND COALESCE(l.status, '') NOT IN (${CLOSED.map(() => '?').join(',')})`, params: [...CLOSED] };
   return { sql: ' AND l.status = ?', params: [String(status)] };
 }
 
@@ -238,10 +249,12 @@ function query(user, body = {}) {
     .map((r) => ({ value: r.value, n: Number(r.n) || 0 }));
   const baseTotal = counts.reduce((s, r) => s + r.n, 0);
   const keyOf = (v) => (v === null || v === undefined || String(v).trim() === '' ? BLANK : String(v));
-  const total = blank(body.status) ? baseTotal : counts.filter((r) => keyOf(r.value) === body.status).reduce((s, r) => s + r.n, 0);
+  const closedTotal = counts.filter((r) => CLOSED.includes(String(r.value))).reduce((s, r) => s + r.n, 0);
+  const activeTotal = baseTotal - closedTotal;
+  const total = blank(body.status) ? baseTotal : body.status === ACTIVE ? activeTotal : counts.filter((r) => keyOf(r.value) === body.status).reduce((s, r) => s + r.n, 0);
 
   const size = Math.min(MAX_PAGE, Math.max(1, Number(body.page_size) || 50));
-  const out = { total, base_total: baseTotal, status_counts: counts, page_size: size };
+  const out = { total, base_total: baseTotal, active_total: activeTotal, closed_total: closedTotal, status_counts: counts, page_size: size };
 
   if (body.board) {
     // Kanban: the newest leads of every status in one go; "more" of one
@@ -283,4 +296,4 @@ function query(user, body = {}) {
   return out;
 }
 
-module.exports = { query, conditionSql, isComplete, BLANK };
+module.exports = { query, conditionSql, isComplete, BLANK, ACTIVE, CLOSED };

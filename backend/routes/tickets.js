@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const validate = require('../services/validate');
 const db = require('../db');
 const { relatedActivity } = require('../services/relatedActivity');
 const { requirePermission } = require('../middleware/auth');
@@ -30,6 +31,18 @@ const whatsappOn = (event) => sla.setting('notifications', {})[event]?.whatsapp 
 const SUPPORT_COLUMNS = ['ticket_type', 'team_id', 'issue_type', 'subscription_id', 'asset_id', 'major_incident_id', 'problem_id',
   'closure_reason', 'related_module', 'related_record_id', 'catalog_item_id'];
 const normPriority = (p) => (p === 'Urgent' ? 'Critical' : p);
+// (v1.7) the priorities of the company's own list (Settings → Dropdown Options); "Urgent" is the old name of Critical
+function priorities() {
+  try {
+    const f = db.prepare("SELECT f.options_json, f.option_list FROM module_fields f JOIN modules m ON m.id = f.module_id WHERE m.api_name = 'tickets' AND f.api_name = 'priority'").get();
+    const svc = require('../services/optionLists');
+    const list = f ? (f.option_list ? svc.sharedOptions(f.option_list) : svc.parseOptions(f.options_json)) : [];
+    const v = list.map((o) => o.value);
+    if (v.length) return [...v, 'Urgent'];
+  } catch { /* fall back */ }
+  return ['Low', 'Medium', 'High', 'Critical', 'Urgent'];
+}
+const TICKET_RULES = () => ({ required: ['subject'], phone: ['phone'], email: ['email'], oneOf: { priority: priorities() } });
 const blank = (v) => (v === '' ? null : v);
 
 function resolveMobile(accountId, contactId) {
@@ -110,7 +123,7 @@ router.get('/:id', requirePermission('tickets', 'view'), (req, res) => {
 
 router.post('/', requirePermission('tickets', 'create'), (req, res) => {
   const b = { ...req.body };
-  if (!b.subject) return res.status(400).json({ error: 'subject is required' });
+  if (validate.reject(res, validate.check(b, TICKET_RULES()))) return;
   if (b.priority) b.priority = normPriority(b.priority);
   // Expired Subscription/AMC coverage: allow, require approval, critical
   // only, treat as paid, or block — as configured in Support Settings.
@@ -147,6 +160,7 @@ router.put('/:id', requirePermission('tickets', 'edit'), (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Not found' });
   if (!inScope(req.user, existing.id)) return res.status(403).json({ error: 'This ticket is outside your support queue.' });
   const body = { ...req.body };
+  if (validate.reject(res, validate.check(body, TICKET_RULES(), { partial: true }))) return;
   // SLA fields are owned by the SLA engine; changing them goes through the
   // audited override endpoint, never a plain edit.
   ['sla_policy_id', 'first_response_due_at', 'resolution_due_at', 'sla_state', 'sla_paused_at', 'sla_paused_minutes', 'sla_overridden',

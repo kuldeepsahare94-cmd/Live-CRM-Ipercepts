@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const validate = require('../services/validate');
+const ACCOUNT_RULES = { required: ['account_name'], phone: ['phone', 'whatsapp'], email: ['email'], url: ['website'] };
 const db = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const { fireWorkflows } = require('../services/workflowAutomation');
@@ -94,7 +96,7 @@ router.get('/:id', requirePermission('accounts', 'view'), (req, res) => {
 
 router.post('/', requirePermission('accounts', 'create'), (req, res) => {
   const b = req.body;
-  if (!b.account_name) return res.status(400).json({ error: 'account_name is required' });
+  if (validate.reject(res, validate.check(b, ACCOUNT_RULES))) return;
   access.ownerDefault(req.user, 'accounts', b);
   { const no = access.linkDenied(req.user, b); if (no) return res.status(403).json(no); }
   // Same company name, phone or email as an account that is already here →
@@ -125,6 +127,7 @@ router.put('/:id', requirePermission('accounts', 'edit'), (req, res) => {
   const existing = db.prepare('SELECT * FROM accounts WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   { const no = access.linkDenied(req.user, req.body, existing); if (no) return res.status(403).json(no); }
+  if (validate.reject(res, validate.check(req.body, ACCOUNT_RULES, { partial: true }))) return;
   const m = { ...existing, ...req.body };
   db.prepare(`
     UPDATE accounts SET account_name=?, account_type=?, industry=?, website=?, email=?, phone=?, whatsapp=?,
