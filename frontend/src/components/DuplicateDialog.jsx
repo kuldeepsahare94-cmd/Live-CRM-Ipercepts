@@ -305,22 +305,30 @@ export function DuplicateHint({ module, values, excludeId, what = 'lead' }) {
   const alt = String(values?.alternate_mobile || '').trim();
   const email = String(values?.email || '').trim();
   const name = String(values?.name || '').trim();
+  // (v1.8) the other email addresses typed into the form are checked as well
+  const moreKey = (Array.isArray(values?.extra_emails) ? values.extra_emails : []).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(String(e).trim())).join('|');
 
   useEffect(() => {
     const digits = (v) => v.replace(/\D/g, '').length;
-    const worth = digits(mobile) >= 8 || digits(alt) >= 8 || /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email) || name.length >= 3;
+    const worth = digits(mobile) >= 8 || digits(alt) >= 8 || /^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(email) || !!moreKey || name.length >= 3;
     const mine = ++seq.current;
     if (!worth) { setMatches([]); return undefined; }
     const t = setTimeout(() => {
-      api.checkDuplicate(module, {
+      const base = {
         mobile: digits(mobile) >= 8 ? mobile : undefined,
         alternate_mobile: digits(alt) >= 8 ? alt : undefined,
         email: email || undefined, name: name || undefined, exclude_id: excludeId,
+      };
+      const extraCalls = moreKey ? moreKey.split('|').slice(0, 5).map((e) => api.checkDuplicate(module, { email: e, exclude_id: excludeId }).catch(() => ({ matches: [] }))) : [];
+      Promise.all([api.checkDuplicate(module, base), ...extraCalls]).then((rs) => {
+        const seen = new Set(); const all = [];
+        rs.forEach((r) => (r?.matches || []).forEach((m) => { if (!seen.has(m.id)) { seen.add(m.id); all.push(m); } }));
+        return { matches: all };
       }).then((r) => { if (mine === seq.current) setMatches(r?.matches || []); })
         .catch(() => { if (mine === seq.current) setMatches([]); });
     }, 450);
     return () => clearTimeout(t);
-  }, [module, mobile, alt, email, name, excludeId]);
+  }, [module, mobile, alt, email, name, excludeId, moreKey]);
 
   if (!matches.length) return null;
   return (

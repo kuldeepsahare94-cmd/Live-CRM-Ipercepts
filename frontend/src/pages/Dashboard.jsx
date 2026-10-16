@@ -434,6 +434,7 @@ function NeedsAttention({ attention, ctx, windows }) {
         </div>
         <ViewAllMenu items={[
           { label: 'Overdue tasks', to: drillHref(a.tasks_overdue, ctx), count: a.tasks_overdue.count },
+          ...(a.leads_no_followup ? [{ label: 'Leads with no follow-up planned', to: drillHref(a.leads_no_followup, ctx), count: a.leads_no_followup.count }] : []),
           { label: 'High-priority tickets', to: drillHref(a.tickets_high_priority, ctx), count: a.tickets_high_priority.count },
           { label: 'Expired / expiring quotations', to: drillHref(a.quotes_expiring, ctx), count: a.quotes_expiring.count },
           { label: `Renewals due (next ${windows.renewal_days} days)`, to: drillHref(a.renewals_due, ctx), count: a.renewals_due.count },
@@ -442,6 +443,7 @@ function NeedsAttention({ attention, ctx, windows }) {
       </div>
       <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-3.5">
         <AttentionCard m={a.tasks_overdue} icon={CalendarClock} tone={COLORS.rose} label="Overdue tasks" sub="Not completed, due before today" action="View Tasks" ctx={ctx} />
+        {a.leads_no_followup && <AttentionCard m={a.leads_no_followup} icon={PhoneCall} tone={COLORS.purple} label="Leads with no follow-up" sub="Open leads · nothing planned" action="Plan" ctx={ctx} />}
         <AttentionCard m={a.tickets_high_priority} icon={Zap} tone={COLORS.orange} label="High-priority tickets" sub="Open · Urgent and High" action="Resolve" ctx={ctx} />
         <AttentionCard m={a.quotes_expiring} icon={FileText} tone={COLORS.amber} label="Expired / expiring quotations" sub={`Sent or viewed · expired or ≤ ${windows.quote_days} days`} action="Follow Up" ctx={ctx} />
         <AttentionCard m={a.renewals_due} icon={Repeat} tone={COLORS.emerald} label="Renewals due" sub={`Next ${windows.renewal_days} days`} action="View Renewals" ctx={ctx}

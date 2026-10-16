@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import {
   CalendarDays, Settings as SettingsIcon, Sparkles, Database, ShieldCheck, Boxes, Zap, GitBranch, Users2, History,
   Percent, Mail, LayoutList, Check, AlertTriangle, Building2, LayoutTemplate, ListChecks, Bell, Search, Palette,
-  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge, PhoneCall, ReceiptText, MapPinned, ChevronRight
+  UserCog, KeyRound, LifeBuoy, MessageCircle, Radio, Wrench, GitMerge, PhoneCall, ReceiptText, MapPinned, ChevronRight, UserSearch
 } from 'lucide-react';
 import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
@@ -111,6 +111,13 @@ function sections(can) {
           desc: 'The mobile app for the field team: punch in / out with location and selfie, live tracking, km per day, visits at customers, km as an expense.' },
         { to: '/settings/expenses', icon: ReceiptText, tint: '#0D9488', title: 'Expenses', show: can('settings', 'view'),
           desc: 'Field expenses with bill photos, km and daily allowance: categories and limits, who approves, who pays, advances. Also what the mobile app uses.' },
+      ],
+    },
+    {
+      title: 'Placement (Recruitment)', icon: UserSearch, tint: '#6C4FF7',
+      items: [
+        { to: '/settings/placement', icon: UserSearch, tint: '#6C4FF7', title: 'Placement desk', show: can('settings', 'edit'),
+          desc: 'Switch the recruitment desk on for this customer, set the default fee, guarantee and GST, and load or remove demo data.' },
       ],
     },
     {

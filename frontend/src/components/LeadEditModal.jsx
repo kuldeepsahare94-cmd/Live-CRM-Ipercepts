@@ -78,6 +78,7 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
   const managedOptions = useModuleOptions('leads');
   const [ready, setReady] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [extras, setExtras] = useState(null);   // (v1.8) the lead's other email addresses
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +97,9 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
           api.listUsers().catch(() => (api.chatUsers ? api.chatUsers().catch(() => []) : [])),
         ]);
         if (cancelled) return;
+        const ex = await api.recordEmails('leads', leadId).catch(() => []);
+        if (cancelled) return;
+        setExtras(Array.isArray(ex) ? ex : []);
         setLead(l);
         setMeta({ module: mod, fields });
         setCustom(cv || {});
@@ -161,7 +165,7 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
   // stored row, and it logs activity and fires automations when status or
   // follow-up date change — re-sending an untouched follow-up date (trimmed
   // to a day for the form) would log a reschedule nobody made.
-  const save = async (values, changed) => {
+  const save = async (values, changed, em) => {
     const touched = new Set(changed);
     const core = {};
     const customPayload = {};
@@ -175,6 +179,7 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
     }));
     if (Object.keys(core).length) await api.updateLead(leadId, core);
     if (Object.keys(customPayload).length) await api.saveCustomFieldValues('leads', leadId, customPayload);
+    if (em && em.changed) await api.saveRecordEmails('leads', leadId, em.extras, em.primary);
     onSaved?.();
   };
 
@@ -185,6 +190,7 @@ export default function LeadEditModal({ leadId, lead: leadIn, focusSection, onCl
       accent={accentFor('leads').solid}
       sections={sections}
       initial={initial}
+      initialExtras={extras}
       loading={!ready && !loadError}
       loadError={loadError}
       focusSection={focusSection}

@@ -759,6 +759,9 @@ export const api = {
     : req('POST', recordsBase(module), body)),
   universalUpdate: (module, id, body) => req('PUT', `${recordsBase(module)}/${id}`, body),
   universalDelete: (module, id) => req('DELETE', `${recordsBase(module)}/${id}`),
+  // (v1.8) the extra email addresses of a record (the main one stays in its `email` field)
+  recordEmails: (moduleApiName, id) => req('GET', `/record-emails/${moduleApiName}/${id}`),
+  saveRecordEmails: (moduleApiName, id, emails, primary) => req('PUT', `/record-emails/${moduleApiName}/${id}`, { emails, primary }),
 
   // Product photos (one per product; sized in the browser, see utils/productPhoto.js)
   productImageRules: () => req('GET', '/products/image-rules'),
@@ -1002,6 +1005,10 @@ export const api = {
   decideFieldLeave: (id, body) => req('POST', `/sfa/leaves/${id}/decide`, body),
   visitRecording: (id) => req('GET', `/sfa/visits/${id}/recording`),
   transcribeVisit: (id) => req('POST', `/sfa/visits/${id}/recording/transcribe`, {}),
+
+  // Placement desk (recruitment consultancy): everything under /placement (frontend/src/pages/placement)
+  placement: (method, path, body) => req(method, '/placement' + path, body),
+  openPlacementFile: (id) => openFileInTab(`/placement/files/${id}`),
 
   // Expense management: expenses with bills, claims, approvals, advances, payment
   expenseMeta: () => req('GET', '/expenses/meta'),

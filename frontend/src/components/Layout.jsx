@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Users as UsersIcon, Wallet, BarChart3, Settings as SettingsIcon,
   LogOut, UserCog, ShieldCheck, Palette, Menu, X, MessageCircle, Radio, ChevronRight,
   ChevronDown, PhoneCall, Inbox, Megaphone, Plus, Sparkles, LifeBuoy, ListOrdered, Headphones, ReceiptText, MapPinned, ScanLine,
+  UserSearch, Briefcase, Kanban, CalendarClock, BadgeCheck, Building2, Clock,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api, noteNavigation, prefetchRoute } from '../api';
@@ -30,6 +31,7 @@ import ExpenseHost from './expenses/ExpenseHost';
 const ScanCardModal = lazy(() => import('./cards/ScanCardModal'));
 import { useExpenseMeta } from './expenses/expenses';
 import { useFieldMeta } from './field/field';
+import { usePlacementMeta } from '../pages/placement/pl';
 
 // Hand-written links for the modules that have bespoke pages. Everything
 // else is generated from the module registry below, so a module created
@@ -131,6 +133,21 @@ function SidebarContent({ onNavigate, showClose, onClose }) {
   // Field team: attendance, live map, routes and km (once Field force is on)
   const fieldMeta = useFieldMeta();
   if (fieldMeta?.available) callLinks.push({ to: '/field', label: 'Field team', icon: MapPinned, accent: 'meetings' });
+  // Placement desk (recruitment): its own group, shown once it is on for this
+  // customer and the role has the permission. Administrators see it to set it up.
+  const placementMeta = usePlacementMeta();
+  const placementLinks = placementMeta?.available ? [
+    { to: '/placement', label: 'Placement dashboard', icon: UserSearch, accent: 'leads', end: true },
+    { to: '/placement/jobs', label: 'Job openings', icon: Briefcase, accent: 'deals' },
+    { to: '/placement/candidates', label: 'Candidates', icon: UsersIcon, accent: 'contacts' },
+    { to: '/placement/board', label: 'Pipeline board', icon: Kanban, accent: 'leads' },
+    { to: '/placement/interviews', label: 'Interviews', icon: CalendarClock, accent: 'meetings' },
+    { to: '/placement/offers', label: 'Offers & joinings', icon: BadgeCheck, accent: 'payments' },
+    { to: '/placement/clients', label: 'Placement clients', icon: Building2, accent: 'accounts' },
+    { to: '/placement/deployed', label: 'Deployed resources', icon: UsersIcon, accent: 'contacts' },
+    { to: '/placement/timesheets', label: 'Timesheets', icon: Clock, accent: 'tasks' },
+    { to: '/placement/invoices', label: 'Placement invoices', icon: ReceiptText, accent: 'payments' },
+  ] : [];
 
   return (
     <div className="flex flex-col h-full" style={{ background: '#111A3A' }}>
@@ -168,6 +185,19 @@ function SidebarContent({ onNavigate, showClose, onClose }) {
             )}
           </NavLink>
         ))}
+
+        {placementLinks.length > 0 && (
+          <div data-testid="nav-placement">
+            <GroupLabel>Placement{placementMeta.admin_only ? ' (off)' : ''}</GroupLabel>
+            {placementLinks.map((l) => (
+              <NavLink key={l.to} to={l.to} end={l.end} onClick={onNavigate} className={navItem}>
+                {({ isActive }) => (
+                  <><NavIcon Icon={l.icon} accentKey={l.accent} active={isActive} />{l.label}</>
+                )}
+              </NavLink>
+            ))}
+          </div>
+        )}
 
         {moduleGroups.map(([group, mods]) => (
           <div key={group}>
@@ -424,7 +454,7 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className="px-4 sm:px-6 py-6">
+        <main className="px-4 sm:px-6 pt-6 pb-24">{/* (v1.7) room under the page for the round AI button, so it never covers the last row or the pager */}
           <ErrorBoundary key={location.pathname}>
             {/* Routes are lazy-loaded (see App.jsx). Keeping the boundary
                 here rather than around the whole app means the sidebar and

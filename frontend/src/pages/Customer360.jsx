@@ -368,7 +368,7 @@ export default function Customer360() {
         }} />
       </div>
 
-      <div className="relative z-10">
+      <div className="relative">{/* (v1.8) no z-index: it made a stacking context that kept every pop-up under the top bar */}
       <button onClick={() => navigate('/records/accounts')} className="btn btn-ghost mb-3 -ml-2">
         <ArrowLeft className="w-4 h-4" /> Accounts
       </button>

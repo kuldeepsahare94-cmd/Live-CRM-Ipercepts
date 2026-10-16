@@ -32,6 +32,7 @@ import { USER_TYPES } from './fieldUtils';
 import DetailSkeleton from '../../components/DetailSkeleton';
 import { remember, recall } from '../../screenMemory';
 import { openCompose } from '../../components/EmailCompose';
+import { ExtraEmails, useRecordEmails } from '../../components/EmailsField';
 import RecordEmails from '../../components/RecordEmails';
 import { SimilarBanner } from '../../components/DuplicateDialog';
 import { useCallAction } from '../../components/telephony/CallButton';
@@ -740,6 +741,9 @@ export default function UniversalDetail() {
     }
   }, [searchParams, record, editFields, editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // (v1.8) the record's other email addresses, shown under its main one
+  const moreEmails = useRecordEmails(module?.api_name, Number(id), record);
+
   if (loading) {
     const preview = location.state?.preview;
     return <DetailSkeleton title={preview && String(preview.id) === String(id) ? preview.title : ''} />;
@@ -763,6 +767,9 @@ export default function UniversalDetail() {
   // Who an email from this record goes to: its own address, or — for a deal,
   // quotation or ticket — the contact / account it belongs to.
   const emailTo = heroSummary(record, fields).email || linkedComms(record).email || '';
+  const mainEmailField = (fields.find((x) => x.api_name === 'email' && x.field_type === 'email') || fields.find((x) => x.field_type === 'email') || {}).api_name;
+  const valueOf = (f) => (f.api_name === mainEmailField && moreEmails.length
+    ? <>{renderFieldValue(record, f)}<ExtraEmails list={moreEmails} /></> : renderFieldValue(record, f));
   const showEmails = module.api_name !== 'emails' && !embeddedRelations.some(([k]) => k === 'emails')
     && can('emails', 'view') && (EMAIL_TAB_MODULES.has(module.api_name) || !!emailTo);
   const writeEmail = () => openCompose({ to: emailTo, name: title, module: module.api_name, recordId: Number(id) });
@@ -788,7 +795,7 @@ export default function UniversalDetail() {
         }} />
       </div>
 
-      <div className="relative z-10">
+      <div className="relative">{/* (v1.8) no z-index: it made a stacking context that kept every pop-up under the top bar */}
       <button onClick={() => navigate(`/records/${module.api_name}`)} className="text-slate-500 hover:text-ink text-sm inline-flex items-center gap-1 mb-4">
         <ArrowLeft className="w-4 h-4" /> {module.plural_label}
       </button>
@@ -1190,7 +1197,7 @@ export default function UniversalDetail() {
                       const f = fields.find((x) => x.api_name === apiName);
                       if (!f) return null;
                       return <DetailRow key={apiName} label={fieldLabel(f)}
-                        value={renderFieldValue(record, f)} />;
+                        value={valueOf(f)} />;
                     })}
                   </dl>
                 </div>
@@ -1210,7 +1217,7 @@ export default function UniversalDetail() {
                   <dl>
                     {group.fields.map((f) => (
                       <DetailRow key={f.id} label={fieldLabel(f)}
-                        value={renderFieldValue(record, f)} />
+                        value={valueOf(f)} />
                     ))}
                   </dl>
                 </div>
@@ -1226,7 +1233,7 @@ export default function UniversalDetail() {
             <div className="flex justify-end mb-2">
               <button onClick={() => (key === 'meetings' ? setSchedulingMeeting(true) : setAddingRelation(key))}
                 className="btn btn-primary">
-                + Add {key.replace(/_/g, ' ').replace(/s$/, '')}
+                + Add {key.replace(/_/g, ' ').replace(/ies$/, 'y').replace(/s$/, '')}
               </button>
             </div>
           )}
@@ -1308,7 +1315,7 @@ export default function UniversalDetail() {
 
       {addingRelation && (
         <AddRelatedModal relationKey={addingRelation} parentModule={module.api_name}
-          parentId={id} parentLabel={title}
+          parentId={id} parentLabel={title} parentRecord={record}
           onClose={() => setAddingRelation(null)}
           onCreated={() => { setAddingRelation(null); load(); }} />
       )}

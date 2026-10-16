@@ -281,26 +281,31 @@ export default function ScheduleMeetingModal({ initial, relatedTo, onClose, onSa
     }
   };
 
-  const field = 'w-full border border-line rounded-lg px-3 py-2 text-sm min-w-0';
+  const field = 'input w-full min-w-0';
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="absolute inset-0 bg-ink/30" onClick={onClose} />
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-label={meetingId ? 'Edit meeting' : 'New meeting'}>
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      {/* (v1.8) the same frame as every other create / edit popup: a header with a line under it,
+          the form in the middle, Cancel and Save at the bottom right */}
       <form onSubmit={submit}
-        className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[88vh] overflow-y-auto p-5">
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold text-ink">
-            {meetingId ? 'Edit meeting' : 'New meeting'}
-          </h2>
-          <button type="button" onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-canvas">
+        className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] sm:max-h-[88vh] flex flex-col overflow-hidden">
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-line">
+          <div className="min-w-0">
+            <h2 className="text-[16px] font-semibold leading-tight text-ink">
+              {meetingId ? 'Edit meeting' : 'New meeting'}
+            </h2>
+            {record && <p className="text-[12px] truncate mt-0.5 text-[var(--color-muted)]">Will be linked to {record.name}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-canvas shrink-0">
             <X className="w-4 h-4 text-[var(--color-muted)]" />
           </button>
         </div>
 
         {hydrating ? (
-          <div className="py-16 text-center text-[13px]" style={{ color: 'var(--color-muted)' }}>Loading meeting…</div>
+          <div className="py-16 text-center text-[13px] flex-1" style={{ color: 'var(--color-muted)' }}>Loading meeting…</div>
         ) : (
-        <div className="space-y-3 mt-4">
+        <div className="space-y-3 px-5 py-4 flex-1 overflow-y-auto">
           <label className="block">
             <span className="block text-xs font-medium text-ink mb-1">Title *</span>
             <input value={form.meeting_title} onChange={(e) => set('meeting_title', e.target.value)}
@@ -460,23 +465,22 @@ export default function ScheduleMeetingModal({ initial, relatedTo, onClose, onSa
             <textarea value={form.agenda} onChange={(e) => set('agenda', e.target.value)} rows={3} className={field}
               placeholder="What needs to be covered" />
           </label>
+          <p className="t-meta">
+            Saved to the CRM, blocked on the calendar, and pushed to your connected calendars.
+            Times are in {VIEWER_TZ}.
+          </p>
         </div>
         )}
 
-        {error && <p className="text-xs text-[var(--color-danger)] mt-3">{error}</p>}
-
-        <div className="flex gap-2 mt-5">
-          <button type="submit" disabled={saving || hydrating}
-            className="btn-primary text-sm font-semibold px-4 py-2 rounded-lg disabled:opacity-60">
-            {saving ? 'Saving…' : meetingId ? 'Save changes' : 'Create meeting'}
+        <div className="shrink-0 px-5 py-3 border-t border-line flex items-center gap-3" style={{ background: 'var(--color-canvas)' }}>
+          <div className="flex-1 min-w-0 text-[12px]">
+            {error ? <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--color-danger)' }}>{error}</span> : <span style={{ color: 'var(--color-faint)' }}><span style={{ color: 'var(--color-danger)' }}>*</span> required</span>}
+          </div>
+          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
+          <button type="submit" disabled={saving || hydrating} className="btn btn-primary disabled:opacity-60">
+            {saving ? 'Saving…' : meetingId ? 'Save changes' : 'Create'}
           </button>
-          <button type="button" onClick={onClose}
-            className="text-sm font-medium px-4 py-2 rounded-lg border border-line hover:bg-canvas">Cancel</button>
         </div>
-        <p className="t-meta mt-3">
-          Saved to the CRM, blocked on the calendar, and pushed to your connected calendars.
-          Times are in {VIEWER_TZ}.
-        </p>
       </form>
     </div>
   );

@@ -247,6 +247,9 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
     if (done.length) setFresh((x) => [...x, ...done]);
     if (problems.length) setError(problems[0]);
     setReading(false);
+    // the bill is read as soon as it is added (the boxes still empty are filled; what was typed is left alone)
+    const newest = [...done].reverse().find((b) => mode === 'ai' || !/pdf/.test(b.mime || ''));
+    if (newest && mode !== 'off') readBill(newest, true);
   };
   const removeSaved = async (bill) => {
     if (!window.confirm('Remove this bill from the expense?')) return;
@@ -258,45 +261,58 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
   const readable = (b) => (mode === 'ai' ? true : !/pdf/.test(b.mime || ''));
   const toRead = [...allBillsNow()].reverse().find(readable) || null;
   function allBillsNow() { return [...((expense && expense.receipt_list) || []), ...fresh]; }
-  const readBill = async () => {
-    if (!toRead) return;
+  // Reads one bill. The assistant first (when it is set up) — and if it cannot, the photo is read on this device.
+  const readBill = async (bill, auto) => {
+    const target = bill || toRead;
+    if (!target) return;
     setScan({ busy: true, progress: 0 });
+    const isPdf = /pdf/.test(target.mime || '');
+    const onDevice = async () => {
+      const src = target.data ? `data:${target.mime || 'image/jpeg'};base64,${target.data}` : (await billUrl(target.id)).url;
+      const text = await readText(src, (st, p) => setScan((x) => (x && x.busy ? { ...x, progress: /recogniz/i.test(st) ? p : x.progress, status: st } : x)));
+      if (!text.trim()) return { found: 0, fields: {}, sure: {} };
+      return api.readExpenseBill({ text });
+    };
     try {
-      let body;
+      let r = null;
+      let err = null;
       if (mode === 'ai') {
-        const data = toRead.data || await blobToBase64(await (await fetch((await billUrl(toRead.id)).url)).blob());
-        body = { image: { mime: toRead.mime || 'image/jpeg', data } };
-      } else {
-        const src = toRead.data ? `data:${toRead.mime || 'image/jpeg'};base64,${toRead.data}` : (await billUrl(toRead.id)).url;
-        const text = await readText(src, (st, p) => setScan((x) => (x && x.busy ? { ...x, progress: /recogniz/i.test(st) ? p : x.progress, status: st } : x)));
-        if (!text.trim()) { setScan({ result: { found: 0, fields: {}, sure: {} } }); return; }
-        body = { text };
+        try {
+          const data = target.data || await blobToBase64(await (await fetch((await billUrl(target.id)).url)).blob());
+          r = await api.readExpenseBill({ image: { mime: target.mime || 'image/jpeg', data } });
+          if (!r || !r.found) r = null;               // nothing found by the assistant: this device tries as well
+        } catch (e) { err = e; r = null; }
       }
-      const r = await api.readExpenseBill(body);
+      if (!r && !isPdf) {
+        try { r = await onDevice(); } catch (e) { if (!err) err = e; }
+      }
+      if (!r) { setScan({ error: (err && err.message) || (isPdf ? 'This PDF could not be read. Type the details in.' : 'The bill could not be read. Type the details in.') }); return; }
+      if (auto && r.found) { applyFound(r, true); return; }
       setScan({ result: r });
     } catch (e) {
       setScan({ error: e.message || 'The bill could not be read.' });
     }
   };
-  const useFound = () => {
-    const r = scan && scan.result;
-    if (!r) return;
-    const x = r.fields || {};
+  // Puts what was found into the form. Automatically (right after a bill is added) only the boxes that are still empty are filled.
+  const applyFound = (r, onlyEmpty) => {
+    const x = (r && r.fields) || {};
     setF((cur) => {
       const n = { ...cur };
-      if (x.expense_date) n.expense_date = x.expense_date;
-      if (x.merchant) n.merchant = x.merchant;
-      if (x.bill_number) n.bill_number = x.bill_number;
-      if (x.gstin) n.gstin = x.gstin;
-      if (x.category_id && !cur.category_id && cats.some((c) => Number(c.id) === Number(x.category_id))) n.category_id = String(x.category_id);
+      const set = (k, v) => { if (v === undefined || v === null || v === '') return; if (onlyEmpty && String(cur[k] || '').trim() && !(k === 'expense_date' && cur[k] === today())) return; n[k] = v; };
+      set('expense_date', x.expense_date);
+      set('merchant', x.merchant);
+      set('bill_number', x.bill_number);
+      set('gstin', x.gstin);
+      if (x.category_id && !cur.category_id && cats.some((c) => Number(c.id) === Number(x.category_id))) { n.category_id = String(x.category_id); }
       if (x.currency && meta.multi_currency && currencies.some((c) => c.code === x.currency)) { n.currency = x.currency; n.fx_rate = ''; }
-      if (x.amount) n.amount = String(x.amount);
-      if (x.tax_amount !== undefined && x.tax_amount !== null) n.tax_amount = String(x.tax_amount);
+      if (x.amount) set('amount', String(x.amount));
+      if (x.tax_amount !== undefined && x.tax_amount !== null) set('tax_amount', String(x.tax_amount));
       return n;
     });
     if (x.bill_number || x.gstin || x.tax_amount) setMore(true);
-    setScan(null);
+    setScan(onlyEmpty ? { filled: Object.keys(x).filter((k) => k !== 'currency').map((k) => FOUND_LABEL[k] || k), low: Object.keys((r && r.sure) || {}).filter((k) => r.sure[k] === 'low').map((k) => FOUND_LABEL[k] || k), result: r } : null);
   };
+  const useFound = () => applyFound(scan && scan.result, false);
 
   const save = async (another = false) => {
     setError('');
@@ -485,9 +501,9 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
               {!readOnly && mode !== 'off' && allBills.length > 0 && (
                 <div className="mt-2">
                   {!scan && (
-                    <button type="button" className="btn btn-secondary" onClick={readBill} disabled={!toRead || reading || busy} data-testid="read-bill"
+                    <button type="button" className="btn btn-secondary" onClick={() => readBill(null, false)} disabled={!toRead || reading || busy} data-testid="read-bill"
                       title={!toRead ? 'A PDF can only be read by the CRM assistant. Type the details in.' : ''}>
-                      <ScanText className="w-4 h-4" /> Read the bill
+                      <ScanText className="w-4 h-4" /> Read the bill again
                     </button>
                   )}
                   {!scan && !toRead && <p className="t-meta mt-1">A PDF cannot be read on this device — type the details in.</p>}
@@ -499,7 +515,17 @@ export default function ExpenseForm({ id = null, preset = {}, onClose, onSaved }
                   {scan && scan.error && (
                     <div className="flex items-center gap-2"><ErrorNote>{scan.error}</ErrorNote><button type="button" className="btn btn-ghost" onClick={() => setScan(null)}>OK</button></div>
                   )}
-                  {scan && scan.result && (
+                  {scan && scan.filled && (
+                    <div className="rounded-xl p-3 mt-1" style={{ background: 'var(--color-success-soft)', border: '1px solid var(--color-line)' }} data-testid="read-filled">
+                      <p className="text-sm text-ink flex items-start gap-1.5"><Check className="w-4 h-4 mt-0.5 shrink-0" /><span>Filled in from the bill: <span className="font-medium">{scan.filled.join(', ')}</span>. Please check before saving.</span></p>
+                      {scan.low.length > 0 && <p className="t-meta mt-0.5">Not sure about: {scan.low.join(', ')}.</p>}
+                      <div className="flex gap-2 mt-2">
+                        <button type="button" className="btn btn-secondary" onClick={() => setScan(null)}>OK</button>
+                        <button type="button" className="btn btn-ghost" onClick={() => readBill(null, false)} data-testid="read-again">Read again</button>
+                      </div>
+                    </div>
+                  )}
+                  {scan && scan.result && !scan.filled && (
                     <div className="rounded-xl p-3 mt-1" style={{ background: 'var(--color-canvas)', border: '1px solid var(--color-line)' }} data-testid="read-result">
                       {scan.result.found ? (
                         <>

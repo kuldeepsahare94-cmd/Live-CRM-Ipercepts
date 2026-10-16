@@ -69,7 +69,7 @@ export default function AssignPicker({
     : 'inline-flex items-center gap-1.5 max-w-full rounded-full pl-0.5 pr-2 py-0.5 text-[12.5px] border border-transparent transition-colors hover:border-[var(--color-brand-border)] hover:bg-[var(--color-brand-faint)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-brand)]';
 
   return (
-    <div className="relative inline-block max-w-full" ref={ref} onClick={(e) => e.stopPropagation()}>
+    <div className={asInput ? 'relative block w-full' : 'relative inline-block max-w-full'} ref={ref} onClick={(e) => e.stopPropagation()}>
       <button type="button" disabled={disabled || saving} onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox" aria-expanded={open}
         aria-label={current ? `${label}: ${current.name}. Change` : `${label}: unassigned. Assign`}

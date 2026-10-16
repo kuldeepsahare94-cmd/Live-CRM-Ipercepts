@@ -55,6 +55,7 @@ export default function ScanCardModal({ onClose }) {
   const [fields, setFields] = useState(EMPTY);
   const [sure, setSure] = useState({});
   const [source, setSource] = useState('');
+  const [seen, setSeen] = useState('');            // the text found on the photo (device reading), shown so nothing is lost
   const [matches, setMatches] = useState({});
   const [target, setTarget] = useState('');
   const [choices, setChoices] = useState({});
@@ -99,13 +100,22 @@ export default function ScanCardModal({ onClose }) {
     for (let i = 0; i < photos.length; i += 1) {
       setProgress(photos.length > 1 ? `Reading side ${i + 1} in this browser…` : 'Reading the card in this browser…');
       try {
-        text += `${await readText(photos[i], (status, p) => setProgress(`${/load/i.test(status) ? 'Getting the reader' : 'Reading'}… ${Math.round(p * 100)}%`))}\n`;
+        text += `${await readText(photos[i], (status, p) => setProgress(`${/load/i.test(status) ? 'Getting the reader' : 'Reading'}… ${Math.round(p * 100)}%`), { sparse: true })}\n`;
       } catch (e) {
         throw new Error(/loaded|internet/.test(e.message || '') ? 'The text reader could not be loaded (no internet, or it is blocked). Type the details in.' : 'The card could not be read in this browser. Type the details in.');
       }
     }
     if (!text.trim()) throw new Error('No text was found on the photo. Try a sharper photo, or type the details in.');
+    setSeen(text.trim());
     return api.cardsRead({ text });
+  };
+  // fills what the first reading left empty from the second
+  const mergeAnswers = (a, b) => {
+    const out = { ...b, ...a, fields: { ...(b.fields || {}) }, sure: { ...(b.sure || {}) } };
+    for (const [k, v] of Object.entries(a.fields || {})) { out.fields[k] = v; out.sure[k] = (a.sure || {})[k]; }
+    out.found = Object.keys(out.fields).length;
+    out.matches = a.matches && Object.keys(a.matches).length ? a.matches : b.matches;
+    return out;
   };
   const read = async () => {
     setError(''); setStep('reading'); setProgress('Reading the card…');
@@ -113,7 +123,9 @@ export default function ScanCardModal({ onClose }) {
       let out;
       if (meta.mode === 'ai') {
         try { out = await api.cardsRead({ images: photos }); }
-        catch (e) { if (e.status === 502 || e.status === 409) out = await readHere(); else throw e; }
+        catch (e) { out = await readHere(); }                 // (the assistant could not, for any reason: this browser reads it)
+        // the assistant found very little: this browser reads it too, and what is still empty is filled from that
+        if (out && out.source === 'ai' && out.found < 4) { try { out = mergeAnswers(out, await readHere()); } catch { /* what the assistant found stays */ } }
       } else out = await readHere();
       if (!out.found) setError('Nothing could be read from this card. Type the details in (or try another photo).');
       takeAnswer(out);
@@ -162,7 +174,7 @@ export default function ScanCardModal({ onClose }) {
       setError(e.message);
     } finally { setBusy(false); }
   };
-  const again = () => { setPhotos([]); setFields(EMPTY); setSure({}); setMatches({}); setChoices({}); setExtra({}); setResult(null); setAlready([]); setError(''); setWarning(''); setSource(''); setStep('photo'); };
+  const again = () => { setPhotos([]); setFields(EMPTY); setSure({}); setMatches({}); setChoices({}); setExtra({}); setResult(null); setAlready([]); setError(''); setWarning(''); setSource(''); setSeen(''); setStep('photo'); };
   const open = (r) => { onClose(); navigate(LINK[r.module](r.id)); };
 
   const footer = step === 'photo' ? (
@@ -232,6 +244,12 @@ export default function ScanCardModal({ onClose }) {
             {step === 'review' && (
               <>
                 {source && <p className="t-meta flex items-center gap-1.5" data-testid="scan-source"><Sparkles className="w-3.5 h-3.5" style={{ color: 'var(--color-brand)' }} />{source === 'ai' ? 'Read by the CRM assistant.' : 'Read from the text of the photo.'} Check everything before saving.</p>}
+                {seen && (
+                  <details className="text-xs" data-testid="scan-seen">
+                    <summary className="cursor-pointer t-meta">Text found on the photo (copy from here what is missing)</summary>
+                    <pre className="mt-1 p-2 rounded-lg whitespace-pre-wrap select-text" style={{ background: 'var(--color-canvas)', border: '1px solid var(--color-line)', maxHeight: 140, overflow: 'auto' }}>{seen}</pre>
+                  </details>
+                )}
                 <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3" data-testid="scan-fields">
                   {CARD_FIELDS.map(([k, label, type]) => (
                     <Field key={k} label={<>{label}{sure[k] === 'low' && <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: 'var(--color-warning-soft)', color: 'var(--color-warning-strong)' }}>check</span>}</>} className={k === 'address' ? 'sm:col-span-2' : ''}>

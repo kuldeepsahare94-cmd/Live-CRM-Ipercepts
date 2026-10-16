@@ -1,8 +1,7 @@
-import { geoSeed } from '../../components/geo/GeoField';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Kanban as KanbanIcon, Search, MoreHorizontal, Eye, Pencil, LayoutGrid } from 'lucide-react';
-import { UniversalRecordEditModal } from '../../components/RecordEditModal';
+import { UniversalRecordEditModal, UniversalCreateModal } from '../../components/RecordEditModal';
 import ScheduleMeetingModal from '../../components/ScheduleMeetingModal';
 import { ModuleIcon } from '../../components/moduleIcons';
 import { accentFor, accentGradient } from '../../theme/moduleAccents';
@@ -69,8 +68,6 @@ export default function UniversalList() {
   const SALES_DOCUMENTS = ['quotations', 'proforma_invoices', 'invoices'];
   const isQuotations = SALES_DOCUMENTS.includes(moduleApiName);
   const isProducts = moduleApiName === 'products';
-  const [form, setForm] = useState({});
-  const [saving, setSaving] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
   const [openMenu, setOpenMenu] = useState(null);
@@ -83,7 +80,6 @@ export default function UniversalList() {
   // above; null for every other module.
   const [serverCounts, setServerCounts] = useState(shown?.counts || null);
   const loadSeq = useRef(0);
-  const [fieldErrors, setFieldErrors] = useState({});
   const PAGE_SIZE = 25;
   // Opened from a dashboard figure: narrow to exactly the records behind it.
   const drill = useDrill();
@@ -120,24 +116,12 @@ export default function UniversalList() {
 
 
   const listFields = useMemo(() => fields.filter((f) => f.show_in_list), [fields]);
-  const createFields = useMemo(() => fields.filter((f) => f.show_in_create), [fields]);
-
-  const defaultsForCreate = useMemo(() => {
-    const out = geoSeed(createFields);
-    createFields.forEach((f) => {
-      if (f.default_value === null || f.default_value === undefined || f.default_value === '') return;
-      out[f.api_name] = f.field_type === 'checkbox'
-        ? ['1', 'true', 'yes'].includes(String(f.default_value).toLowerCase())
-        : f.default_value;
-    });
-    return out;
-  }, [createFields]);
   // ?new=1 (from the Support Command Center's "New Ticket" and similar
   // shortcuts) opens the create form on arrival.
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     if (searchParams.get('new') !== '1' || !module || !fields.length) return;
-    if (can(module.api_name, 'create')) { setForm(defaultsForCreate); setShowForm(true); }
+    if (can(module.api_name, 'create')) { setShowForm(true); }
     const next = new URLSearchParams(searchParams); next.delete('new');
     setSearchParams(next, { replace: true });
   }, [searchParams, module, fields.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -388,64 +372,38 @@ export default function UniversalList() {
     setRecords((rs) => rs.map((x) => (x.id === r.id ? { ...x, [field.api_name]: value } : x)));
   };
 
-  // Types where an empty value is legitimate, matching the server's list —
-  // a checkbox that is off, or a file uploaded separately, is not "missing".
-  const REQUIRED_EXEMPT = new Set(['checkbox', 'file', 'image']);
-
-  const validateRequired = () => {
-    const errs = {};
-    createFields.forEach((f) => {
-      if (!f.required || REQUIRED_EXEMPT.has(f.field_type)) return;
-      const v = form[f.api_name];
-      if (v === undefined || v === null || String(v).trim() === '') {
-        errs[f.api_name] = `${f.label} is required`;
-      }
-    });
-    setFieldErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!validateRequired()) return;
-    setSaving(true);
-    try {
-      const payload = isQuotations
-        ? {
-          ...form,
-          items: quoteItems.map((i) => ({
-            product_id: i.product_id || null,
-            description: i.description || null,
-            quantity: Number(i.quantity) || 0,
-            unit_price: Number(i.unit_price) || 0,
-            discount_percent: Number(i.discount_percent) || 0,
-            tax_percent: Number(i.tax_percent) || 0,
-          })),
-          overall_discount_type: discountType,
-          overall_discount_value: Number(discountValue) || 0,
-        }
-        : form;
-      const created = await api.universalCreate(module, payload);
-      if (isProducts && newPhoto && created?.id) {
-        const { image, thumb, fit, original_name, original_bytes } = newPhoto;
-        try {
-          await api.saveProductImage(created.id, { image, thumb, fit, original_name, original_bytes });
-        } catch (photoErr) {
-          alert(`The product was saved, but its photo was not: ${photoErr.message}\nOpen the product to add the photo again.`);
-        }
-      }
-      setNewPhoto(null);
-      setForm(defaultsForCreate);
-      setQuoteItems([]);
-      setDiscountValue(0);
-      setShowForm(false);
-      load();
-    } catch (err) {
-      // Closing the "already in the CRM" pop-up is a choice, not a failure.
-      if (!err.cancelled) alert('Could not save: ' + err.message);
-    } finally {
-      setSaving(false);
+  // (v1.8) "+ Add" opens the same popup as everywhere else (UniversalCreateModal:
+  // sections, required first, red marks, discard-changes question). What is
+  // special about a module — quotation items, a product photo — rides along.
+  const quoteBody = (values) => (isQuotations
+    ? {
+      ...values,
+      items: quoteItems.map((i) => ({
+        product_id: i.product_id || null,
+        description: i.description || null,
+        quantity: Number(i.quantity) || 0,
+        unit_price: Number(i.unit_price) || 0,
+        discount_percent: Number(i.discount_percent) || 0,
+        tax_percent: Number(i.tax_percent) || 0,
+      })),
+      overall_discount_type: discountType,
+      overall_discount_value: Number(discountValue) || 0,
     }
+    : values);
+  const afterCreate = async (created) => {
+    if (isProducts && newPhoto && created?.id) {
+      const { image, thumb, fit, original_name, original_bytes } = newPhoto;
+      try {
+        await api.saveProductImage(created.id, { image, thumb, fit, original_name, original_bytes });
+      } catch (photoErr) {
+        alert(`The product was saved, but its photo was not: ${photoErr.message}\nOpen the product to add the photo again.`);
+      }
+    }
+    setNewPhoto(null);
+    setQuoteItems([]);
+    setDiscountValue(0);
+    setShowForm(false);
+    load();
   };
 
   // Lookup columns hold a row id. Exporting those raw produced a spreadsheet
@@ -487,7 +445,7 @@ export default function UniversalList() {
         }} />
       </div>
 
-      <div className="relative z-10">
+      <div className="relative">{/* (v1.8) no z-index: it made a stacking context that kept every pop-up under the top bar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-white shadow-sm"
@@ -510,17 +468,8 @@ export default function UniversalList() {
             <button onClick={exportCsv} className="btn btn-secondary">Export CSV</button>
           )}
           {can(module.api_name, 'create') && (
-            <button onClick={() => setShowForm((s) => {
-              setFieldErrors({});
-              // Opening the form seeds it with each field's configured
-              // default. module_fields has carried a default_value column all
-              // along and nothing ever read it, so every new record started
-              // blank — including Currency, which is INR for this business on
-              // essentially every quotation.
-              if (!s) setForm(defaultsForCreate);
-              return !s;
-            })} className="btn btn-primary">
-              {showForm ? 'Cancel' : `+ Add ${module.singular_label}`}
+            <button onClick={() => setShowForm(true)} className="btn btn-primary" data-testid="list-add">
+              + Add {module.singular_label}
             </button>
           )}
         </div>
@@ -587,48 +536,29 @@ export default function UniversalList() {
         onUpdate={() => setBulk('update')} onAssign={() => setBulk('assign')} onExport={exportSelected} onDelete={() => setBulk('delete')} />
 
       {showForm && (
-        <form onSubmit={submit} className="card p-5 mt-5 grid grid-cols-2 gap-4">
-          {createFields.map((f) => (
-            <div key={f.id} className={f.field_type === 'textarea' ? 'col-span-2' : ''}>
-              <label className="text-xs text-slate-500 font-medium block mb-1">
-                {f.label}
-                {f.required ? <span style={{ color: 'var(--color-danger)' }}> *</span> : null}
-              </label>
-              <div className={fieldErrors[f.api_name] ? 'rounded-lg' : ''}
-                style={fieldErrors[f.api_name] ? { boxShadow: '0 0 0 2px var(--color-danger)' } : undefined}>
-                <FieldInput field={f} value={form[f.api_name]}
-                  values={form} isNew onSet={(k, v) => setForm((p) => ({ ...p, [k]: v }))}
-                  onChange={(v) => {
-                    setForm((p) => ({ ...p, [f.api_name]: v }));
-                    // Clear the error as soon as they start fixing it —
-                    // leaving it red while they type reads as broken.
-                    if (fieldErrors[f.api_name]) {
-                      setFieldErrors((prev) => { const n = { ...prev }; delete n[f.api_name]; return n; });
-                    }
-                  }} />
-              </div>
-              {fieldErrors[f.api_name] && (
-                <p className="text-xs mt-1" style={{ color: 'var(--color-danger)' }}>{fieldErrors[f.api_name]}</p>
+        <UniversalCreateModal
+          module={module} fields={fields}
+          toBody={quoteBody}
+          extraAfter={isQuotations ? 0 : null}
+          extra={(isProducts || isQuotations) ? (
+            <>
+              {isProducts && (
+                <div>
+                  <label className="block text-[12px] font-medium mb-1" style={{ color: 'var(--color-ink)' }}>Product photo</label>
+                  <PhotoChooser value={newPhoto} onChange={setNewPhoto} disabled={false} />
+                </div>
               )}
-            </div>
-          ))}
-          {isProducts && (
-            <div className="col-span-2">
-              <label className="text-xs text-slate-500 font-medium block mb-1">Product photo</label>
-              <PhotoChooser value={newPhoto} onChange={setNewPhoto} disabled={saving} />
-            </div>
-          )}
-          {isQuotations && (
-            <QuotationItemsEditor
-              items={quoteItems} setItems={setQuoteItems}
-              discountType={discountType} setDiscountType={setDiscountType}
-              discountValue={discountValue} setDiscountValue={setDiscountValue}
-            />
-          )}
-          <button type="submit" disabled={saving} className="col-span-2 bg-amber text-white text-sm font-medium py-2 rounded-lg hover:opacity-90 disabled:opacity-50">
-            {saving ? 'Saving…' : `Save ${singularLabel.toLowerCase()}`}
-          </button>
-        </form>
+              {isQuotations && (
+                <QuotationItemsEditor
+                  items={quoteItems} setItems={setQuoteItems}
+                  discountType={discountType} setDiscountType={setDiscountType}
+                  discountValue={discountValue} setDiscountValue={setDiscountValue}
+                />
+              )}
+            </>
+          ) : null}
+          onClose={() => { setShowForm(false); setNewPhoto(null); }}
+          onCreated={afterCreate} />
       )}
 
       <div className="card mt-6 overflow-hidden overflow-x-auto shadow-sm">
@@ -681,12 +611,13 @@ export default function UniversalList() {
                           <ProductThumb url={r.thumb_url} size={32} rounded="rounded-lg" alt="" />
                         ) : (
                           <span className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 shadow-sm"
-                            style={{ background: avatarGradientFor(formatFieldValue(getFieldValue(r, f), f)) }}>
-                            {initialsOf(formatFieldValue(getFieldValue(r, f), f))}
+                            style={{ background: avatarGradientFor(f.field_type === 'lookup' ? recordTitle(r, fields) : formatFieldValue(getFieldValue(r, f), f)) }}>
+                            {initialsOf(f.field_type === 'lookup' ? recordTitle(r, fields) : formatFieldValue(getFieldValue(r, f), f))}
                           </span>
                         )}
                         <span className="text-ink font-medium group-hover:text-[var(--color-brand)] truncate">
-                          {formatFieldValue(getFieldValue(r, f), f)}
+                          {/* (v1.7) a lookup in the first column shows the NAME of the record, not its number */}
+                          {f.field_type === 'lookup' ? renderFieldValue(r, f) : formatFieldValue(getFieldValue(r, f), f)}
                         </span>
                       </Link>
                     ) : f.api_name === statusField?.api_name ? (

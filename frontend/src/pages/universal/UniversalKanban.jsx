@@ -29,10 +29,18 @@ export default function UniversalKanban() {
 
   const accent = accentFor(moduleApiName);
 
+  const [noBoard, setNoBoard] = useState(false);
   const load = async () => {
-    const mod = await api.getModuleMeta(moduleApiName);
-    setModule(mod);
-    const data = await api.kanban(moduleApiName);
+    setNoBoard(false);
+    let mod; let data;
+    try {
+      mod = await api.getModuleMeta(moduleApiName);
+      setModule(mod);
+      // (v1.7) a module without a board (Invoices, Payments…) used to leave this page "Loading…" for ever
+      data = await api.kanban(moduleApiName);
+    } catch (e) {
+      setNoBoard(true); setLoading(false); return;
+    }
     if (Array.isArray(data)) {
       // Tickets shape: [{ status, cards }]
       setColumns(data.map((c) => ({ key: c.status, label: c.status, color: accent.solid, cards: c.cards })));
@@ -100,6 +108,13 @@ export default function UniversalKanban() {
   }, [columns]);
 
   if (loading) return <div className="py-8 t-meta">Loading…</div>;
+  if (noBoard) return (
+    <div className="py-10 text-center" data-testid="no-board">
+      <p className="font-semibold text-ink">There is no board for this list.</p>
+      <p className="t-meta mt-1">Boards are only for lists that move through stages, like Deals and Tickets.</p>
+      <button onClick={() => navigate(`/records/${moduleApiName}`)} className="btn btn-secondary mt-4 mx-auto">Back to the list</button>
+    </div>
+  );
   if (!module) return null;
 
   const hasValue = columns.some((c) => c.total !== undefined);
@@ -120,7 +135,7 @@ export default function UniversalKanban() {
           style={{ background: `radial-gradient(circle, ${accent.solid}2E, transparent 70%)` }} />
       </div>
 
-      <div className="relative z-10">
+      <div className="relative">{/* (v1.8) no z-index: it made a stacking context that kept every pop-up under the top bar */}
         <button onClick={() => navigate(`/records/${module.api_name}`)}
           className="text-slate-500 hover:text-ink text-sm inline-flex items-center gap-1 mb-3">
           <ArrowLeft className="w-4 h-4" /> {module.plural_label}

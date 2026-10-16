@@ -187,7 +187,7 @@ export async function shrinkPhoto(file, maxMb = 4) {
   }
   if (!/^image\//.test(file.type) && !/\.(jpe?g|png|webp|heic|heif)$/i.test(file.name || '')) throw new Error('A bill must be a photo or a PDF.');
   const img = await loadImage(file);
-  const full = draw(img, 1600, 0.72);
+  const full = draw(img, 2000, 0.8);
   const small = draw(img, 220, 0.6);
   const name = `${String(file.name || 'bill').replace(/\.[a-z0-9]+$/i, '')}.jpg`;
   return { key: newRef(), file_name: name, mime: 'image/jpeg', data: base64Of(full), thumb: base64Of(small), preview: small };

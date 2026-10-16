@@ -1,9 +1,4 @@
-import { geoSeed } from '../../components/geo/GeoField';
-import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
-import { api } from '../../api';
-import { FieldInput } from './fieldUtils';
-import { friendlyError } from '../../components/ui';
+import { UniversalCreateModal } from '../../components/RecordEditModal';
 
 /* ------------------------------------------------------------------
    Create a record in a related module directly from a parent record's
@@ -22,17 +17,37 @@ import { friendlyError } from '../../components/ui';
 // Which embedded relation maps to which module, and how it links back.
 // Keyed by the array name the parent record returns.
 const RELATION_TARGETS = {
-  contacts:      { module: 'contacts',      fk: 'account_id' },
-  opportunities: { module: 'opportunities', fk: 'account_id' },
-  quotations:    { module: 'quotations',    fk: 'account_id' },
-  subscriptions: { module: 'subscriptions', fk: 'account_id' },
-  tickets:       { module: 'tickets',       fk: 'account_id' },
-  payments:      { module: 'payments',      fk: 'account_id' },
+  contacts:      { module: 'contacts' },
+  opportunities: { module: 'opportunities' },
+  quotations:    { module: 'quotations' },
+  subscriptions: { module: 'subscriptions' },
+  tickets:       { module: 'tickets' },
+  payments:      { module: 'payments' },
   calls:         { module: 'calls',         polymorphic: true },
   meetings:      { module: 'meetings',      polymorphic: true },
   tasks:         { module: 'tasks',         polymorphic: true },
   notes:         { module: 'notes',         polymorphic: true },
   emails:        { module: 'emails',        polymorphic: true },
+};
+
+// (v1.8) Where a record can be created from, and what it is linked to:
+//   parent module -> relation -> { field of the new record: 'id' (the parent) | a field of the parent }
+// A deal made from a contact is that contact's deal AND its account's; a quotation
+// made from a deal belongs to the deal, its account and its contact. A relation not
+// listed is left read-only rather than creating an orphan.
+const PARENT_LINKS = {
+  accounts: {
+    contacts: { account_id: 'id' }, opportunities: { account_id: 'id' }, quotations: { account_id: 'id' },
+    subscriptions: { account_id: 'id' }, tickets: { account_id: 'id' }, payments: { account_id: 'id' },
+  },
+  contacts: {
+    opportunities: { primary_contact_id: 'id', account_id: 'account_id' },
+    quotations: { contact_id: 'id', account_id: 'account_id' },
+    tickets: { contact_id: 'id', account_id: 'account_id' },
+  },
+  opportunities: {
+    quotations: { opportunity_id: 'id', account_id: 'account_id', contact_id: 'primary_contact_id' },
+  },
 };
 
 // Only offer creation where we actually know how to link the record back.
@@ -42,7 +57,7 @@ export function canCreateRelation(relationKey, parentModuleApiName) {
   const t = RELATION_TARGETS[relationKey];
   if (!t) return false;
   if (t.polymorphic) return true;
-  return parentModuleApiName === 'accounts';
+  return Boolean(PARENT_LINKS[parentModuleApiName] && PARENT_LINKS[parentModuleApiName][relationKey]);
 }
 
 // The module a relation creates into — so the caller checks 'create'
@@ -52,124 +67,37 @@ export function relationTargetModule(relationKey) {
   return RELATION_TARGETS[relationKey]?.module || null;
 }
 
-export default function AddRelatedModal({ relationKey, parentModule, parentId, parentLabel, onClose, onCreated }) {
+/* (v1.8) The form is the SAME popup as "Edit record" and as the "+ Add" of a
+   list (UniversalCreateModal): the same sections, the same field grid, the
+   required fields first, red marks and messages, "Discard changes?" when
+   closed with typing in it, Cancel / Create at the bottom right. Before this
+   each of them looked different. */
+export default function AddRelatedModal({ relationKey, parentModule, parentId, parentLabel, parentRecord, onClose, onCreated }) {
   const target = RELATION_TARGETS[relationKey];
-  const [module, setModule] = useState(null);
-  const [fields, setFields] = useState([]);
-  const [form, setForm] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    api.listModulesMeta()
-      .then((mods) => {
-        const m = mods.find((x) => x.api_name === target.module);
-        if (!m || cancelled) return null;
-        setModule(m);
-        return api.listModuleFields(m.id);
-      })
-      .then((f) => {
-        if (!f || cancelled) return;
-        // Hide the link field itself — it's set for the user.
-        //
-        // For a POLYMORPHIC relation the link is two fields, not one, and
-        // `target.fk` is undefined — so this filter used to hide nothing and
-        // the form rendered an editable "Related Module" dropdown next to a
-        // "Related Record ID" number box. That is both the raw-id input this
-        // CRM is trying to get rid of, and a way to create a task from
-        // Divya Iyer's page and silently attach it to a different record —
-        // precisely the wrong-parent mistake this modal exists to prevent.
-        const hidden = target.polymorphic
-          ? ['related_module', 'related_record_id']
-          : [target.fk];
-        const shownFields = f.filter((x) => x.show_in_create && !hidden.includes(x.api_name));
-        setFields(shownFields);
-        setForm((p) => ({ ...geoSeed(shownFields), ...p }));
-      })
-      .catch((e) => setError(friendlyError(e, 'Could not load the form.').message))
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [relationKey]);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setSaving(true); setError('');
-    try {
-      const body = { ...form };
-      if (target.polymorphic) {
-        // `related_module` is a TEXT column, so it needs the api_name string.
-        // Callers reasonably assume a prop called "parentModule" takes the
-        // module object, and passing one sends an object straight into a
-        // bound parameter — SQLite rejects it with "can only bind numbers,
-        // strings, bigints, buffers, and null" and the save fails with a 500.
-        // Accepting either shape costs one line and removes the trap.
-        body.related_module = typeof parentModule === 'string'
-          ? parentModule
-          : (parentModule && parentModule.api_name);
-        body.related_record_id = parentId;
-      } else {
-        body[target.fk] = parentId;
-      }
-      await api.universalCreate(module, body);
-      onCreated();
-    } catch (err) {
-      // Closing the "already in the CRM" pop-up is a choice, not a failure.
-      setError(err.cancelled ? '' : friendlyError(err, 'Could not create the record.').message);
-    } finally { setSaving(false); }
-  };
-
-  const title = module ? `New ${module.singular_label}` : 'New record';
-
+  const parentApi = typeof parentModule === 'string' ? parentModule : (parentModule && parentModule.api_name);
+  // The link to the parent is set for the person and its fields are not shown,
+  // so a record can never be created for the wrong parent. A polymorphic link is
+  // two fields (`related_module` is TEXT: it needs the api_name string, and
+  // callers may hand over either the module object or its api_name).
+  let hidden;
+  let link;
+  if (target.polymorphic) {
+    hidden = ['related_module', 'related_record_id'];
+    link = { related_module: parentApi, related_record_id: parentId };
+  } else {
+    hidden = []; link = {};
+    Object.entries((PARENT_LINKS[parentApi] || {})[relationKey] || {}).forEach(([field, from]) => {
+      const v = from === 'id' ? parentId : (parentRecord ? parentRecord[from] : null);
+      if (v !== null && v !== undefined && v !== '') { link[field] = v; hidden.push(field); }
+    });
+  }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <form onSubmit={submit} className="card relative w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-line shrink-0">
-          <div>
-            <h2 className="t-section">{title}</h2>
-            {parentLabel && <p className="t-meta">Will be linked to {parentLabel}</p>}
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close"
-            className="text-[var(--color-faint)] hover:text-ink p-1 rounded-lg hover:bg-[var(--color-canvas)]">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="px-5 py-4 overflow-y-auto">
-          {error && (
-            <div className="text-xs rounded-lg px-3 py-2 mb-3"
-              style={{ background: 'var(--color-danger-soft)', color: 'var(--color-danger)' }}>{error}</div>
-          )}
-          {loading && <p className="t-meta">Loading form…</p>}
-          {!loading && fields.length === 0 && !error && (
-            <p className="t-meta">This module has no fields configured for creation.</p>
-          )}
-          {!loading && fields.length > 0 && (
-            <div className="grid sm:grid-cols-2 gap-3">
-              {fields.map((f) => (
-                <div key={f.id} className={f.field_type === 'textarea' ? 'sm:col-span-2' : ''}>
-                  <label className="t-meta font-medium block mb-1">
-                    {f.label}{f.required ? ' *' : ''}
-                  </label>
-                  <FieldInput field={f} value={form[f.api_name] ?? ''}
-                    onChange={(v) => setForm((p) => ({ ...p, [f.api_name]: v }))}
-                    values={form} isNew onSet={(k, v) => setForm((p) => ({ ...p, [k]: v }))} />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-line shrink-0">
-          <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button type="submit" disabled={saving || loading || fields.length === 0}
-            className="btn btn-primary disabled:opacity-50">
-            {saving ? 'Saving…' : 'Create'}
-          </button>
-        </div>
-      </form>
-    </div>
+    <UniversalCreateModal
+      moduleApiName={target.module}
+      hidden={hidden}
+      link={link}
+      note={parentLabel ? `Will be linked to ${parentLabel}` : ''}
+      onClose={onClose}
+      onCreated={() => onCreated()} />
   );
 }

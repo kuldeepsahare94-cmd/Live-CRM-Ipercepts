@@ -469,12 +469,13 @@ export default function SettingsExpenses() {
           <p className="t-meta mt-0.5 mb-3">"Read the bill" fills in the amount, date, GSTIN, bill number and shop from the photo. People check it before saving; nothing is saved by itself.</p>
           <div className="space-y-2" role="radiogroup" aria-label="How a bill is read" data-testid="bill-reading">
             {[
+              ['auto', 'Automatic (recommended)', s.ai_available ? 'The CRM assistant reads the bill; if it cannot, the photo is read on the phone or computer. Fills the form as soon as a bill is added.' : 'The photo is read on the phone or computer (the assistant has no key on this server).'],
               ['device', 'On the phone or computer (free)', 'The photo is read in the browser or the app; only its text comes to the CRM. Clear, printed bills read well.'],
               ['ai', 'By the CRM assistant', s.ai_available ? 'Better with crumpled or hand-written bills and PDFs. Each bill read costs a little on your AI account.' : 'Not available: the assistant has no key on this server (ANTHROPIC_API_KEY).'],
               ['off', 'Off', 'People type every detail.'],
             ].map(([v, label, hint]) => (
               <label key={v} className="flex items-start gap-2 rounded-lg px-3 py-2 text-sm" style={{ border: '1px solid var(--color-line)', opacity: v === 'ai' && !s.ai_available ? 0.55 : 1 }}>
-                <input type="radio" name="bill_reading" className="mt-1" checked={s.bill_reading === v} disabled={!editable || (v === 'ai' && !s.ai_available)} onChange={() => set('bill_reading', v)} />
+                <input type="radio" name="bill_reading" className="mt-1" checked={(s.bill_reading_choice || s.bill_reading) === v} disabled={!editable || (v === 'ai' && !s.ai_available)} onChange={() => set('bill_reading', v)} />
                 <span><span className="font-medium text-ink">{label}</span><span className="block t-meta">{hint}</span></span>
               </label>
             ))}

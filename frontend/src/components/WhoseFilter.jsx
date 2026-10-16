@@ -65,7 +65,7 @@ export default function WhoseFilter({ whose, testid = 'whose' }) {
   return (
     <label className="relative inline-flex items-center" title="Whose records to show">
       <Users size={15} className="absolute left-2.5 text-slate-400 pointer-events-none" />
-      <select value={value} onChange={(e) => setValue(e.target.value)} className="input w-auto min-w-[170px] pl-8" aria-label="Whose records" data-testid={testid}>
+      <select value={value} onChange={(e) => setValue(e.target.value)} style={{ paddingLeft: 32 }} className="input w-auto min-w-[170px] pl-8" aria-label="Whose records" data-testid={testid}>
         <option value="">{opts.sees_all ? 'Everyone' : 'Me and my team'}</option>
         <option value="me">Only mine</option>
         {(opts.teams || []).length > 0 && (

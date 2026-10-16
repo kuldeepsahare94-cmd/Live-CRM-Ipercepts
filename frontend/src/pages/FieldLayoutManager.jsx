@@ -455,7 +455,7 @@ export default function FieldLayoutManager() {
           style={{ background: `radial-gradient(circle, ${accent.solid}38, transparent 70%)` }} />
       </div>
 
-      <div className="relative z-10">
+      <div className="relative">{/* (v1.8) no z-index: it made a stacking context that kept every pop-up under the top bar */}
         <button onClick={() => navigate('/settings/modules')}
           className="text-slate-500 hover:text-ink text-sm inline-flex items-center gap-1 mb-3">
           <ArrowLeft className="w-4 h-4" /> Modules &amp; Fields

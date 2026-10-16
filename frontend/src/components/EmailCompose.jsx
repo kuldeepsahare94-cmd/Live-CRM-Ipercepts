@@ -111,6 +111,17 @@ function ComposeModal({ initial, onClose }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
   const [sent, setSent] = useState(null);
+  // (v1.8) the record's other email addresses: pick one to send to as well
+  const [known, setKnown] = useState([]);
+  useEffect(() => {
+    if (!initial.module || !initial.recordId) return undefined;
+    let off = false;
+    api.recordEmails(initial.module, initial.recordId).then((r) => { if (!off && Array.isArray(r)) setKnown(r); }).catch(() => {});
+    return () => { off = true; };
+  }, [initial.module, initial.recordId]);
+  const typed = to.toLowerCase().split(/[,;\s]+/).filter(Boolean);
+  const offers = known.filter((x) => !x.opted_out && !x.invalid && !typed.includes(String(x.email).toLowerCase()));
+  const blocked = known.filter((x) => (x.opted_out || x.invalid) && typed.includes(String(x.email).toLowerCase()));
   const fileInput = useRef(null);
   const toInput = useRef(null);
   const subjectInput = useRef(null);
@@ -285,6 +296,20 @@ function ComposeModal({ initial, onClose }) {
                   placeholder="name@company.com — separate several with commas"
                   style={{ outline: 'none', boxShadow: 'none' }} className="w-full bg-transparent border-0 outline-none text-sm text-ink py-1" />
               </Field>
+              {(offers.length > 0 || blocked.length > 0) && (
+                <div className="px-5 py-1.5 border-b border-line flex flex-wrap items-center gap-1.5 text-xs" data-testid="compose-more-emails">
+                  {offers.length > 0 && <span className="text-[var(--color-muted)]">Also send to:</span>}
+                  {offers.map((x) => (
+                    <button key={x.email} type="button" onClick={() => setTo((v) => (String(v).trim() ? `${String(v).trim().replace(/[,;]$/, '')}, ${x.email}` : x.email))}
+                      className="px-2 py-0.5 rounded-full border border-line hover:bg-[var(--color-canvas)] text-[var(--color-brand)]">+ {x.email}</button>
+                  ))}
+                  {blocked.map((x) => (
+                    <span key={x.email} className="px-2 py-0.5 rounded-full" style={{ background: 'var(--color-warning-soft)', color: 'var(--color-warning-strong)' }}>
+                      {x.email} is marked {x.invalid ? 'invalid' : 'opted out'}
+                    </span>
+                  ))}
+                </div>
+              )}
               {showCc && (
                 <>
                   <Field label="Cc">

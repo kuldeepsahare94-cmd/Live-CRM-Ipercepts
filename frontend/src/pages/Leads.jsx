@@ -1,3 +1,4 @@
+import { checkFormat } from '../formChecks';
 import { GeoInput } from '../components/geo/GeoField';
 import AddressInput from '../components/geo/AddressInput';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -28,6 +29,7 @@ import {
   friendlyError,
 } from '../components/ui';
 import WhoseFilter, { useWhose } from '../components/WhoseFilter';
+import { EmailsField, extraEmailProblem, cleanExtras } from '../components/EmailsField';
 
 // Lead statuses, sources, qualifications, ratings and genders come from
 // Settings → Dropdown Options (Leads module). These are only the fallback if
@@ -382,10 +384,19 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
   const [followUp, setFollowUp] = useState({ date: '', time: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [errs, setErrs] = useState({});                // (v1.7) a message under each field that is wrong
+  const [extraMails, setExtraMails] = useState([]);   // (v1.8) more email addresses
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!form.student_name.trim()) return setError('Name is required.');
+    const bad = {};
+    if (!form.student_name.trim()) bad.student_name = 'Name is required.';
+    const mob = checkFormat('phone', form.mobile); if (mob) bad.mobile = mob;
+    const alt = checkFormat('phone', form.alternate_mobile); if (alt) bad.alternate_mobile = alt;
+    const em = checkFormat('email', form.email); if (em) bad.email = em;
+    const exBad = extraEmailProblem(extraMails, form.email); if (exBad) bad.email = exBad;
+    setErrs(bad);
+    if (Object.keys(bad).length) return setError('Please correct the fields marked in red.');
     let dueAt = null;
     if (followUp.date || followUp.time) {
       if (!followUp.date || !followUp.time) return setError('Pick both the follow-up date and time, or leave both empty.');
@@ -395,7 +406,8 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
     setSaving(true); setError('');
     try {
       const { follow_up_date: _unused, ...body } = form;
-      const created = await api.createLead(body);
+      const more = cleanExtras(extraMails);
+      const created = await api.createLead(more.length ? { ...body, _extra_emails: more } : body);
       if (dueAt && created?.id) {
         await api.scheduleFollowUp({ module: 'leads', record_id: created.id, due_at: dueAt, has_time: true, time_zone: browserTimeZone() });
       }
@@ -417,14 +429,18 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
   const field = (label, key, props = {}) => (
     <div>
       <label className="t-meta font-medium block mb-1">{label}{props.required && ' *'}</label>
-      <input className="input" value={form[key] || ''} onChange={(e) => setForm({ ...form, [key]: e.target.value })} {...props} />
+      <input className="input" value={form[key] || ''} aria-invalid={errs[key] ? 'true' : undefined}
+        style={errs[key] ? { borderColor: 'var(--color-danger)' } : undefined}
+        onChange={(e) => { setForm({ ...form, [key]: e.target.value }); if (errs[key]) setErrs((x) => ({ ...x, [key]: '' })); }}
+        {...props} required={false} />
+      {errs[key] && <p className="text-[11px] mt-1" role="alert" data-testid={`err-${key}`} style={{ color: 'var(--color-danger)' }}>{errs[key]}</p>}
     </div>
   );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Add lead">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <form onSubmit={submit} className="card relative w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl">
+      <form onSubmit={submit} noValidate className="card relative w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-line shrink-0">
           <h2 className="t-section">Add Lead</h2>
           <button type="button" onClick={onClose} aria-label="Close"
@@ -462,12 +478,16 @@ function AddLeadModal({ initialStatus, statuses, sources, ratings, onClose, onSa
           <section>
             <h3 className="t-meta font-semibold uppercase tracking-wide mb-2">Contact</h3>
             <div className="grid sm:grid-cols-2 gap-3">
-              {field('Mobile', 'mobile', { type: 'tel' })}
-              {field('Email', 'email', { type: 'email' })}
+              {field('Mobile', 'mobile', { type: 'tel', placeholder: '10-digit mobile, e.g. 98765 43210' })}
+              <div>
+                <label className="t-meta font-medium block mb-1">Email</label>
+                <EmailsField field={{ label: 'Email' }} value={form.email || ''} onChange={(v) => { setKey('email', v); if (errs.email) setErrs((x) => ({ ...x, email: '' })); }}
+                  extras={extraMails} onExtras={setExtraMails} inputClass="input" error={errs.email} />
+              </div>
             </div>
             {/* Same mobile or email as a lead that is already here: shown
                 straight away, before the rest of the form is filled in. */}
-            <DuplicateHint module="leads" what="lead" values={{ mobile: form.mobile, email: form.email }} />
+            <DuplicateHint module="leads" what="lead" values={{ mobile: form.mobile, email: form.email, extra_emails: cleanExtras(extraMails).map((x) => x.email) }} />
           </section>
 
           <section>
@@ -570,6 +590,9 @@ function Pager({ page, pages, total, from, to, pageSize, onPage, onPageSize, bus
   );
 }
 
+const ACTIVE_LEADS = '__active__';   // the server's name for "every lead that is not Converted, Dropped, Lost or Not Interested"
+const ALL_LEADS = '__all__';         // only a choice in the status filter, never sent
+
 export default function Leads() {
   const can = usePermissions();
   const leadOpts = useModuleOptions('leads');
@@ -579,6 +602,9 @@ export default function Leads() {
   const sourceLabel = (v) => labelFor(leadOpts?.source, v);
   const [view, setView] = useState(() => localStorage.getItem('leads_view') || 'list');
   const [statusFilter, setStatusFilter] = useState('');
+  // (v1.7) the list opens on ACTIVE leads: Converted, Dropped, Lost and Not Interested are hidden until asked for
+  const [scope, setScope] = useState('active');           // active | all
+  const [followupFilter, setFollowupFilter] = useState(''); // '' | none | overdue | today | upcoming
   const [sourceFilter, setSourceFilter] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
   const [q, setQ] = useState('');
@@ -666,7 +692,7 @@ export default function Leads() {
   // card's number is always the number of leads it shows when clicked.
   const question = useMemo(() => {
     const out = {
-      q: search.trim(), source: sourceFilter, owner: ownerFilter, view: whose.value || undefined, match, today: localToday(),
+      q: search.trim(), source: sourceFilter, owner: ownerFilter, followup: followupFilter || undefined, view: whose.value || undefined, match, today: localToday(),
       conditions: conditions.filter(isComplete).map((c) => {
         const f = fields.find((x) => x.api_name === c.field);
         return f ? { field: c.field, op: c.op, value: c.value, value2: c.value2, quick: !!c.quick, kind: kindOf(f) } : null;
@@ -676,12 +702,14 @@ export default function Leads() {
     // figure's own query (its leads are not sent there and back as ids).
     if (drill.active) out.drill = { metric: drill.metric, ...drillParams };
     return out;
-  }, [search, sourceFilter, ownerFilter, whose.value, conditions, match, fields, drill.active, drill.metric, drillKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [search, sourceFilter, ownerFilter, followupFilter, whose.value, conditions, match, fields, drill.active, drill.metric, drillKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const questionKey = JSON.stringify(question);
-  const plain = !search.trim() && !sourceFilter && !ownerFilter && !whose.value && !statusFilter && !question.conditions.length && !drill.active;
+  // A search, a dashboard figure and the board look through ALL leads; otherwise the default is the active ones.
+  const effStatus = statusFilter || (scope === 'active' && !search.trim() && !drill.active && view !== 'kanban' ? ACTIVE_LEADS : '');
+  const plain = !search.trim() && !sourceFilter && !ownerFilter && !whose.value && !statusFilter && !followupFilter && scope === 'active' && view === 'list' && !question.conditions.length && !drill.active;
 
   // The page belongs to one question: a new search or filter starts at page 1.
-  const pageKey = `${questionKey}|${statusFilter}|${pageSize}`;
+  const pageKey = `${questionKey}|${effStatus}|${pageSize}`;
   const [pageAt, setPageAt] = useState({ key: pageKey, n: 1 });
   const page = pageAt.key === pageKey ? pageAt.n : 1;
   const setPage = (n) => setPageAt({ key: pageKey, n: Math.max(1, n) });
@@ -689,7 +717,7 @@ export default function Leads() {
   // Opened from a dashboard figure: waiting for it, ready, failed — or not at all.
   const drillState = !drill.active ? 'off' : drill.data ? 'ready' : drill.error ? 'error' : 'wait';
   const drillNow = drill.active ? JSON.stringify(question.drill || {}) : '';
-  const sigOf = (p) => [questionKey, statusFilter, p, pageSize, view, drillState].join('|');
+  const sigOf = (p) => [questionKey, effStatus, p, pageSize, view, drillState].join('|');
   const answeredSig = useRef('');            // the answer on screen already covers this (see load)
 
   const seq = useRef(0);
@@ -704,7 +732,7 @@ export default function Leads() {
     const wantMeta = metaStale.current;
     setBusy(true); setError(null);
     try {
-      const body = { ...question, status: statusFilter, ...(wantMeta ? { with_owners: true, with_facets: true } : {}) };
+      const body = { ...question, status: effStatus, ...(wantMeta ? { with_owners: true, with_facets: true } : {}) };
       const res = view === 'kanban'
         ? await api.queryLeads({ ...body, board: { per_status: boardPer.current } })
         : await api.queryLeads({ ...body, page, page_size: pageSize });
@@ -750,7 +778,7 @@ export default function Leads() {
   }, [sig]);
 
   // A different question: what was ticked may no longer be in it.
-  const selectionKey = `${questionKey}|${statusFilter}`;
+  const selectionKey = `${questionKey}|${effStatus}`;
   const firstSelectionKey = useRef(selectionKey);
   useEffect(() => {
     if (firstSelectionKey.current === selectionKey) return;
@@ -770,6 +798,8 @@ export default function Leads() {
     [counted, statuses, statusFilter],
   );
   const baseTotal = counted?.base_total || 0;
+  const activeTotal = counted?.active_total ?? baseTotal;
+  const showingActive = effStatus === ACTIVE_LEADS;
   const total = counted?.total || 0;                 // matching everything, the status included
 
   const stale = answeredDrill !== drillNow;         // what is held was asked for another dashboard figure (or none)
@@ -837,7 +867,7 @@ export default function Leads() {
   const selectAllMatching = async () => {
     const asked = selectionKey;
     try {
-      const res = await api.queryLeads({ ...question, status: statusFilter, ids_only: true });
+      const res = await api.queryLeads({ ...question, status: effStatus, ids_only: true });
       if (asked !== selectionKeyRef.current) return;  // the search or a filter changed meanwhile
       selection.replace(res.ids || []);
       setCapped(res.capped ? (res.ids || []).length : 0);
@@ -852,7 +882,7 @@ export default function Leads() {
     if (!ids.length) return;
     const asked = selectionKeyRef.current;
     try {
-      const res = await api.queryLeads({ ...question, status: statusFilter, ids_only: true });
+      const res = await api.queryLeads({ ...question, status: effStatus, ids_only: true });
       if (res.capped || asked !== selectionKeyRef.current) return;
       const still = new Set((res.ids || []).map(Number));
       selection.replace(ids.filter((id) => still.has(Number(id))));
@@ -865,7 +895,7 @@ export default function Leads() {
       const all = [];
       let p = 1; let pages = 1;
       do {
-        const res = await api.queryLeads({ ...question, status: statusFilter, page: p, page_size: 1000 });
+        const res = await api.queryLeads({ ...question, status: effStatus, page: p, page_size: 1000 });
         all.push(...(res.rows || []));
         pages = res.pages || 1;
         p += 1;
@@ -918,7 +948,7 @@ export default function Leads() {
           and board); click it again, or click Total Leads, to see all. */}
       {loading ? <SkeletonCards count={5} /> : (
         <StatusCards
-          total={{ label: 'Total Leads', value: baseTotal, icon: UsersIcon, from: '#E879F9', to: '#A21CAF' }}
+          total={{ label: showingActive ? 'Active Leads' : 'Total Leads', value: showingActive ? activeTotal : baseTotal, icon: UsersIcon, from: '#E879F9', to: '#A21CAF' }}
           items={statusCards} selected={statusFilter} onSelect={setStatusFilter} />
       )}
 
@@ -932,10 +962,20 @@ export default function Leads() {
           <input value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 36 }} className="input w-full pl-9"
             placeholder="Search by name, email or phone…" aria-label="Search leads" />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-          className="input w-auto min-w-[130px]" aria-label="Filter by status">
-          <option value="">All Statuses</option>
+        <select value={statusFilter || (scope === 'all' ? ALL_LEADS : '')}
+          onChange={(e) => { const v = e.target.value; if (v === ALL_LEADS) { setScope('all'); setStatusFilter(''); } else { setScope('active'); setStatusFilter(v); } }}
+          className="input w-auto min-w-[130px]" aria-label="Filter by status" data-testid="lead-status-filter">
+          <option value="">Active leads</option>
+          <option value={ALL_LEADS}>All leads (incl. closed)</option>
           {statusCards.map((s) => <option key={s.value} value={s.value}>{s.inactive ? `${s.label} (inactive)` : s.label}</option>)}
+        </select>
+        <select value={followupFilter} onChange={(e) => setFollowupFilter(e.target.value)}
+          className="input w-auto min-w-[130px]" aria-label="Filter by follow-up" data-testid="lead-followup-filter">
+          <option value="">Any follow-up</option>
+          <option value="none">No follow-up planned</option>
+          <option value="overdue">Overdue</option>
+          <option value="today">Today</option>
+          <option value="upcoming">Upcoming</option>
         </select>
         <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}
           className="input w-auto min-w-[130px]" aria-label="Filter by source">
@@ -953,13 +993,17 @@ export default function Leads() {
         <FilterButton count={conditions.filter(isComplete).length} open={showFilters} onClick={() => setShowFilters((v) => !v)} />
         <SavedFiltersMenu module="leads" refreshKey={savedRefresh} activeId={activeSaved?.id}
           onSelect={(f) => { setActiveSaved(f); setConditions(f ? f.filters : []); setMatch(f ? f.match : 'all'); setShowFilters(false); }} />
-        {(q || statusFilter || sourceFilter || ownerFilter) && (
-          <button onClick={() => { setQ(''); setSearch(''); setStatusFilter(''); setSourceFilter(''); setOwnerFilter(''); }}
+        {(q || statusFilter || sourceFilter || ownerFilter || followupFilter || scope === 'all') && (
+          <button onClick={() => { setQ(''); setSearch(''); setStatusFilter(''); setScope('active'); setFollowupFilter(''); setSourceFilter(''); setOwnerFilter(''); }}
             className="text-xs font-medium px-3 py-2 rounded-lg border border-line text-slate-500 hover:text-ink hover:bg-[var(--color-canvas)]">
             Clear
           </button>
         )}
       </div>
+
+      {scope === 'active' && !statusFilter && search.trim() && !drill.active && (
+        <p className="t-meta -mt-2 mb-3" data-testid="lead-search-all">Searching all leads, including Converted, Dropped, Lost and Not Interested.</p>
+      )}
 
       {showFilters && (
         <div className="mb-3">
@@ -1011,8 +1055,9 @@ export default function Leads() {
         <EmptyState icon={UsersIcon} title={drill.data ? 'No leads match these dashboard filters' : 'No leads found'}
           description={drill.data
             ? 'Nothing currently meets the criteria above — the dashboard figure is genuinely zero.'
-            : q || statusFilter || sourceFilter || ownerFilter || question.conditions.length
+            : q || statusFilter || sourceFilter || ownerFilter || followupFilter || question.conditions.length
               ? 'No leads match your current filters. Try clearing them.'
+              : scope === 'active' ? 'No active leads. Choose "All leads (incl. closed)" in the status filter to see Converted, Dropped, Lost and Not Interested.'
               : 'Leads you add or capture will appear here.'}>
           {can('leads', 'create') && (
             <button onClick={() => setAddFor('New')} className="btn btn-primary mx-auto">

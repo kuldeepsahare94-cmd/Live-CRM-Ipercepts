@@ -12,6 +12,7 @@ import { api } from '../api';
 import { usePermissions } from '../context/usePermissions';
 import StatusBadge from '../components/StatusBadge';
 import { openCompose, EmailLink } from '../components/EmailCompose';
+import { ExtraEmails, useRecordEmails } from '../components/EmailsField';
 import RecordEmails from '../components/RecordEmails';
 import { EnquiryHistory, SimilarBanner, RepeatBadge, localWhen } from '../components/DuplicateDialog';
 import OutcomeModal from '../components/followup/OutcomeModal';
@@ -358,6 +359,7 @@ export default function LeadDetail() {
   // The lead could not be opened: it is someone else's (the role sees only
   // its own / its team's leads), it is gone, or the request failed.
   const [loadError, setLoadError] = useState(null);
+  const moreEmails = useRecordEmails('leads', Number(id), lead);   // (v1.8) other email addresses of this lead
   const idRef = useRef(id);
   idRef.current = id;
   const load = () => {
@@ -555,6 +557,7 @@ export default function LeadDetail() {
                       className="truncate hover:text-[var(--color-brand)] hover:underline" />
                     <a href={`mailto:${lead.email}`} data-name={lead.student_name} data-module="leads" data-record-id={lead.id}
                       aria-label="Write an email" title="Write an email" className="text-[var(--color-brand)] hover:opacity-70 shrink-0"><Mail className="w-3.5 h-3.5" /></a>
+                    {moreEmails.length > 0 && <span className="text-[11px] font-medium shrink-0 px-1.5 rounded-full bg-[var(--color-canvas)]" title={moreEmails.map((x) => x.email).join(', ')} data-testid="more-emails-chip">+{moreEmails.length}</span>}
                   </span>
                 )}
                 {lead.city && <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {lead.city}</span>}
@@ -669,8 +672,7 @@ export default function LeadDetail() {
         <FollowUpCard module="leads" recordId={Number(id)} recordName={lead.student_name} phone={lead.mobile}
           status={lead.status} ownerName={lead.assigned_counselor}
           canEdit={can('leads', 'edit')}
-          canLogOutcome={can('calls', 'create') && !lead.converted_contact_id}
-          onLogOutcome={() => setLoggingOutcome(true)}
+          canLogOutcome={false}  /* (v1.7) the red Dispose button is in the header; one is enough */
           refreshKey={followUpVersion} onChanged={load} />
       </div>
 
@@ -735,7 +737,7 @@ export default function LeadDetail() {
                   <Row label="Company" value={lead.account_name} />
                   <Row label="Mobile" value={lead.mobile} />
                   <Row label="Alternate Mobile" value={lead.alternate_mobile} />
-                  <Row label="Email" value={lead.email && <EmailLink email={lead.email} name={lead.student_name} module="leads" recordId={lead.id} />} />
+                  <Row label="Email" value={lead.email && <><EmailLink email={lead.email} name={lead.student_name} module="leads" recordId={lead.id} /><ExtraEmails list={moreEmails} /></>} />
                   <Row label="City" value={lead.city} />
                   <Row label="Address" value={lead.address} />
                   <Row label="Source" value={labelFor(leadOptions?.source, lead.source)} />

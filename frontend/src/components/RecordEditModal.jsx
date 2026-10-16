@@ -30,11 +30,14 @@
  *                            always group the same way
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Pencil, AlertCircle, Loader2 } from 'lucide-react';
+import { X, Pencil, Plus, AlertCircle, Loader2 } from 'lucide-react';
+import { geoSeed } from './geo/GeoField';
 import { api } from '../api';
 import { FieldInput, getFieldValue, recordTitle } from '../pages/universal/fieldUtils';
+import { EmailsField, extraEmailProblem, cleanExtras } from './EmailsField';
 import { accentFor } from '../theme/moduleAccents';
 import { friendlyError } from './ui';
+import { checkFormat, kindOfType } from '../formChecks';
 
 // ---------------------------------------------------------------------------
 // Grouping
@@ -90,12 +93,27 @@ export function EditRecordModal({
   title, recordName, accent = 'var(--color-brand)',
   sections, initial, loading = false, loadError = '',
   focusSection, onSubmit, onClose,
+  // (v1.8) the same popup also CREATES a record (the "+ Add" of a list or of a
+  // sub-panel): mode 'create' changes the icon, the button and the footer;
+  // `extra` is more form (line items, a photo…) shown after the fields;
+  // `beforeSubmit(values)` may return a message to stop the save.
+  mode = 'edit', submitLabel, extra = null, extraAfter = null, beforeSubmit = null,
+  // (v1.8) more than one email address: `initialExtras` is the record's extra
+  // addresses (null = this module has no email field, or they are still loading)
+  initialExtras = null,
 }) {
+  const creating = mode === 'create';
   const [values, setValues] = useState(initial || {});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [missing, setMissing] = useState([]);
+  const [shapeErrors, setShapeErrors] = useState({});
   const [active, setActive] = useState(0);
+  const [extras, setExtras] = useState(initialExtras || []);
+  const extrasSeeded = useRef(Boolean(initialExtras));
+  useEffect(() => {
+    if (initialExtras && !extrasSeeded.current) { extrasSeeded.current = true; setExtras(initialExtras); }
+  }, [initialExtras]);
   const body = useRef(null);
   const sectionRefs = useRef([]);
   // While the popup is scrolling itself (to a section someone chose), the
@@ -115,7 +133,11 @@ export function EditRecordModal({
     () => allFields.filter((f) => norm(values[f.api_name]) !== norm(initial?.[f.api_name])).map((f) => f.api_name),
     [allFields, values, initial],
   );
-  const dirty = changed.length > 0;
+  // the field that gets the "+" for more addresses: the module's first email field
+  const emailField = useMemo(() => allFields.find((f) => f.api_name === 'email' && f.field_type === 'email') || allFields.find((f) => f.field_type === 'email') || null, [allFields]);
+  const extrasKey = (l) => JSON.stringify(cleanExtras(l));
+  const extrasChanged = !!emailField && extrasKey(extras) !== extrasKey(initialExtras || []);
+  const dirty = changed.length > 0 || extrasChanged;
 
   // Closing a popup with edits in it asks first. Losing ten fields of typing
   // to a stray click on the backdrop is the classic way this kind of form
@@ -168,11 +190,23 @@ export function EditRecordModal({
   const set = (k, v) => {
     setValues((prev) => ({ ...prev, [k]: v }));
     if (missing.includes(k)) setMissing((m) => m.filter((x) => x !== k));
+    setShapeErrors((e) => (e[k] ? { ...e, [k]: '' } : e));
   };
 
   const submit = async (e) => {
     e.preventDefault();
     const blank = allFields.filter((f) => f.required && norm(values[f.api_name]) === '').map((f) => f.api_name);
+    // (v1.7) a typed value must have the right shape (phone, email, link, number)
+    const shape = {};
+    allFields.forEach((f) => { if (blank.includes(f.api_name)) return; const m = checkFormat(kindOfType(f.field_type), values[f.api_name]); if (m) shape[f.api_name] = m; });
+    setShapeErrors(shape);
+    if (Object.keys(shape).length && !blank.length) {
+      const first = Object.keys(shape)[0];
+      setError('Please correct the fields marked in red.');
+      const i = sections.findIndex((s2) => s2.fields.some((f) => f.api_name === first));
+      if (i >= 0) jumpTo(i);
+      return;
+    }
     if (blank.length) {
       setMissing(blank);
       setError(`Fill in the required field${blank.length === 1 ? '' : 's'} marked in red.`);
@@ -181,12 +215,17 @@ export function EditRecordModal({
       if (i >= 0) jumpTo(i);
       return;
     }
-    if (!dirty) { onClose(); return; }
+    if (!creating && !dirty) { onClose(); return; }
+    if (emailField) {
+      const bad = extraEmailProblem(extras, values[emailField.api_name]);
+      if (bad) { setError(bad); const i = sections.findIndex((s2) => s2.fields.some((f) => f.api_name === emailField.api_name)); if (i >= 0) jumpTo(i); return; }
+    }
+    if (beforeSubmit) { const msg = beforeSubmit(values); if (msg) { setError(msg); return; } }
     setSaving(true); setError('');
     try {
-      await onSubmit(values, changed);
+      await onSubmit(values, changed, emailField ? { extras: cleanExtras(extras), changed: extrasChanged, primary: values[emailField.api_name] } : null);
     } catch (err) {
-      setError(friendlyError(err, 'Could not save your changes.').message || 'Could not save your changes.');
+      if (!err.cancelled) setError(friendlyError(err, creating ? 'Could not create the record.' : 'Could not save your changes.').message || 'Could not save your changes.');
       setSaving(false);
     }
   };
@@ -203,7 +242,7 @@ export function EditRecordModal({
           <div className="flex items-start gap-3">
             <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white shadow-sm"
               style={{ background: accent }}>
-              <Pencil className="w-4 h-4" />
+              {creating ? <Plus className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
             </span>
             <div className="min-w-0 flex-1">
               <h2 className="text-[16px] font-semibold leading-tight" style={{ color: 'var(--color-ink)' }}>{title}</h2>
@@ -244,7 +283,7 @@ export function EditRecordModal({
             <div className="py-10 text-center text-[13px]" style={{ color: 'var(--color-danger)' }}>{loadError}</div>
           ) : allFields.length === 0 ? (
             <div className="py-10 text-center text-[13px]" style={{ color: 'var(--color-muted)' }}>
-              No fields on this record are set up as editable. An admin can change that in Settings → Modules.
+              {creating ? 'No fields are set up for creating this record. An admin can change that in Settings → Modules.' : 'No fields on this record are set up as editable. An admin can change that in Settings → Modules.'}
             </div>
           ) : (
             <div className="space-y-5">
@@ -268,7 +307,9 @@ export function EditRecordModal({
                             {f.required ? <span style={{ color: 'var(--color-danger)' }}> *</span> : null}
                           </label>
                           <div className={bad ? 'rounded-lg ring-2 ring-[var(--color-danger)]' : ''}>
-                            <FieldInput field={f} value={values[f.api_name]} onChange={(v) => set(f.api_name, v)} values={values} onSet={set} />
+                            {emailField && f.api_name === emailField.api_name
+                              ? <EmailsField field={f} value={values[f.api_name]} onChange={(v) => set(f.api_name, v)} extras={extras} onExtras={setExtras} inputClass="input w-full" />
+                              : <FieldInput field={f} value={values[f.api_name]} onChange={(v) => set(f.api_name, v)} values={values} onSet={set} />}
                           </div>
                           {f.help_text && !bad && (
                             <p className="text-[11px] mt-1" style={{ color: 'var(--color-faint)' }}>{f.help_text}</p>
@@ -276,12 +317,17 @@ export function EditRecordModal({
                           {bad && (
                             <p className="text-[11px] mt-1" style={{ color: 'var(--color-danger)' }}>{f.label} is required.</p>
                           )}
+                          {!bad && shapeErrors[f.api_name] && (
+                            <p className="text-[11px] mt-1" role="alert" data-testid={`err-${f.api_name}`} style={{ color: 'var(--color-danger)' }}>{shapeErrors[f.api_name]}</p>
+                          )}
                         </div>
                       );
                     })}
                   </div>
+                  {extra && extraAfter === si && <div className="mt-4">{extra}</div>}
                 </section>
               ))}
+              {extra && extraAfter === null && extra}
             </div>
           )}
         </div>
@@ -294,6 +340,8 @@ export function EditRecordModal({
               <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--color-danger)' }}>
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
               </span>
+            ) : creating ? (
+              <span style={{ color: 'var(--color-faint)' }}><span style={{ color: 'var(--color-danger)' }}>*</span> required</span>
             ) : dirty ? (
               <span style={{ color: 'var(--color-muted)' }}>
                 {changed.length} unsaved change{changed.length === 1 ? '' : 's'}
@@ -303,9 +351,9 @@ export function EditRecordModal({
             )}
           </div>
           <button type="button" onClick={requestClose} className="btn btn-secondary">Cancel</button>
-          <button type="submit" disabled={saving || loading || !!loadError || !dirty}
-            className="btn btn-primary disabled:opacity-50">
-            {saving ? 'Saving…' : 'Save changes'}
+          <button type="submit" disabled={saving || loading || !!loadError || (!creating && !dirty)}
+            className="btn btn-primary disabled:opacity-50" data-testid="record-modal-save">
+            {saving ? 'Saving…' : (submitLabel || (creating ? 'Create' : 'Save changes'))}
           </button>
         </div>
       </form>
@@ -332,6 +380,7 @@ export function UniversalRecordEditModal({
   const [record, setRecord] = useState(recordIn || null);
   const [layout, setLayout] = useState(layoutIn === undefined ? null : layoutIn);
   const [loadError, setLoadError] = useState('');
+  const [recExtras, setRecExtras] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -352,6 +401,9 @@ export function UniversalRecordEditModal({
           ? layoutIn
           : await api.getModuleLayout(mod.id, 'detail').then((r) => r.layout_json || { sections: [] }).catch(() => ({ sections: [] }));
         if (cancelled) return;
+        const ex = await api.recordEmails(mod.api_name, recordId).catch(() => []);
+        if (cancelled) return;
+        setRecExtras(Array.isArray(ex) ? ex : []);
         setModule(mod); setFields(f); setRecord({ ...rec, ...custom }); setLayout(lay);
       } catch (e) {
         if (!cancelled) setLoadError(friendlyError(e, 'Could not load this record.').message);
@@ -398,7 +450,7 @@ export function UniversalRecordEditModal({
 
   const loading = !loadError && (!module || !fields || !record || layout === null);
 
-  const save = async (values) => {
+  const save = async (values, _changed, em) => {
     // System fields (real columns) go through the module's own update route;
     // custom fields on a table-backed module go through the custom-field
     // store. A custom (JSON) module has no system columns, so it is one call.
@@ -412,6 +464,8 @@ export function UniversalRecordEditModal({
     if (Object.keys(systemPayload).length) calls.push(api.universalUpdate(module, recordId, systemPayload));
     if (Object.keys(customPayload).length) calls.push(api.saveCustomFieldValues(module.api_name, recordId, customPayload));
     await Promise.all(calls);
+    // (v1.8) the extra email addresses — after the record, so they are checked against its main address
+    if (em && em.changed) await api.saveRecordEmails(module.api_name, recordId, em.extras, em.primary);
     onSaved?.();
   };
 
@@ -424,9 +478,119 @@ export function UniversalRecordEditModal({
       accent={accent}
       sections={sections}
       initial={initial}
+      initialExtras={recExtras}
       loading={loading}
       loadError={loadError}
       focusSection={focusSection}
+      onSubmit={save}
+      onClose={onClose} />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Creating a record — the same popup, the same sections
+// ---------------------------------------------------------------------------
+// What a record starts with: each field's configured default (and the geography
+// seed). Used by every "+ Add" so a new record starts the same way everywhere.
+export function createDefaults(fields) {
+  const out = geoSeed(fields);
+  fields.forEach((f) => {
+    if (f.default_value === null || f.default_value === undefined || f.default_value === '') return;
+    out[f.api_name] = f.field_type === 'checkbox'
+      ? ['1', 'true', 'yes'].includes(String(f.default_value).toLowerCase())
+      : f.default_value;
+  });
+  return out;
+}
+// Fields that only mean something once a record has lived a while: never asked
+// for while creating it.
+const NOT_WHEN_CREATING = /^(closure_reason|resolution|resolved_at|closed_at|closed_by|first_response_at|sla_.*|csat.*)$/i;
+// the fields that are really "attach a file": a plain box would only hold a name
+const FILE_NAMED = /^attachments?$/i;
+
+export function createSections(fields, layout) {
+  const usable = fields.filter((f) => f.show_in_create && !NOT_WHEN_CREATING.test(f.api_name) && !FILE_NAMED.test(f.api_name));
+  const byName = new Map(usable.map((f) => [f.api_name, f]));
+  const placed = new Set();
+  const out = [];
+  (layout?.sections || []).forEach((sec, i) => {
+    const fs = (sec.fields || []).flat().map((n) => byName.get(n)).filter(Boolean);
+    fs.forEach((f) => placed.add(f.api_name));
+    if (fs.length) out.push({ key: `layout-${i}`, title: sec.title || 'Details', fields: fs });
+  });
+  const rest = usable.filter((f) => !placed.has(f.api_name));
+  if (rest.length) groupFields(rest, out.length ? 'Other details' : 'Details').forEach((g) => out.push({ key: g.title, title: g.title, fields: g.fields }));
+  // what must be filled in comes first inside each card; the rest keeps its order
+  out.forEach((sec) => { sec.fields = [...sec.fields.filter((f) => f.required), ...sec.fields.filter((f) => !f.required)]; });
+  // …and the card with the required fields comes first
+  out.sort((a, b) => Number(b.fields.some((f) => f.required)) - Number(a.fields.some((f) => f.required)));
+  return out;
+}
+
+/**
+ * "+ Add" for any metadata-driven module: from its list, or from a sub-panel of
+ * another record (then `hidden` holds the link fields and `link` fills them in).
+ * @param moduleApiName  e.g. 'contacts'
+ * @param module / fields  when the caller already has them (saves a fetch)
+ * @param hidden  api_names that are set for the person, never shown
+ * @param link    values merged into what is saved (the parent record)
+ * @param note    one line under the title: "Will be linked to …"
+ * @param toBody  (values) => body   last-moment changes to what is sent
+ * @param extra   more form (quotation items, a photo…), at the end — or inside the card number `extraAfter` (0 = the first)
+ * @param beforeSubmit (values) => message | null
+ * @param onCreated (created record, body)
+ */
+export function UniversalCreateModal({
+  moduleApiName, module: moduleIn, fields: fieldsIn, hidden = [], link = {}, note = '', toBody, extra = null, extraAfter = null, beforeSubmit = null, onClose, onCreated,
+}) {
+  const [module, setModule] = useState(moduleIn || null);
+  const [fields, setFields] = useState(fieldsIn || null);
+  const [layout, setLayout] = useState(undefined);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const mod = moduleIn || await api.getModuleMeta(moduleApiName);
+        const f = fieldsIn || await api.listModuleFields(mod.id);
+        const lay = await api.getModuleLayout(mod.id, 'detail').then((r) => r.layout_json || { sections: [] }).catch(() => ({ sections: [] }));
+        if (cancelled) return;
+        setModule(mod); setFields(f); setLayout(lay);
+      } catch (e) {
+        if (!cancelled) setLoadError(friendlyError(e, 'Could not load the form.').message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [moduleApiName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const shown = useMemo(() => (fields || []).filter((f) => !hidden.includes(f.api_name)), [fields, hidden.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sections = useMemo(() => (layout === undefined ? [] : createSections(shown, layout)), [shown, layout]);
+  const initial = useMemo(() => createDefaults(shown.filter((f) => f.show_in_create)), [shown]);
+  const loading = !loadError && (!module || !fields || layout === undefined);
+
+  const save = async (values, _changed, em) => {
+    const body = { ...values, ...link };
+    const sent = toBody ? toBody(body) : body;
+    if (em && em.extras.length) sent._extra_emails = em.extras;
+    const created = await api.universalCreate(module, sent);
+    onCreated?.(created, body);
+  };
+  const accent = module ? accentFor(module.api_name).solid : undefined;
+  return (
+    <EditRecordModal
+      mode="create"
+      title={module ? `New ${module.singular_label}` : 'New record'}
+      recordName={note}
+      accent={accent}
+      sections={sections}
+      initial={initial}
+      initialExtras={[]}
+      loading={loading}
+      loadError={loadError}
+      extra={extra}
+      extraAfter={extraAfter}
+      beforeSubmit={beforeSubmit}
       onSubmit={save}
       onClose={onClose} />
   );

@@ -52,6 +52,8 @@ const LiveCalls = lazy(() => import('./pages/LiveCalls'));
 const Expenses = lazy(() => import('./pages/expenses/Expenses'));
 const ExpenseClaim = lazy(() => import('./pages/expenses/ClaimDetail'));
 const SettingsExpenses = lazy(() => import('./pages/SettingsExpenses'));
+const Placement = lazy(() => import('./pages/placement/Placement'));
+const SettingsPlacement = lazy(() => import('./pages/placement/SettingsPlacement'));
 const FieldTeam = lazy(() => import('./pages/field/FieldTeam'));
 const SettingsField = lazy(() => import('./pages/SettingsField'));
 const Inbox = lazy(() => import('./pages/Inbox'));
@@ -193,6 +195,8 @@ export default function App() {
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/expenses/claims/:id" element={<ExpenseClaim />} />
               <Route path="/settings/expenses" element={<SettingsExpenses />} />
+              <Route path="/placement/*" element={<Placement />} />
+              <Route path="/settings/placement" element={<SettingsPlacement />} />
               <Route path="/field" element={<FieldTeam />} />
               <Route path="/settings/field" element={<SettingsField />} />
               <Route path="/inbox" element={<Inbox />} />

@@ -75,7 +75,7 @@ export function renderFieldValue(record, field) {
   if (field.field_type === 'email' && value && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value).trim())) {
     return (
       <a href={`mailto:${String(value).trim()}`} title={`Write an email to ${value}`}
-        className="text-[var(--color-brand)] hover:underline break-all">{value}</a>
+        title={String(value)} className="inline-block max-w-[260px] truncate align-bottom text-[var(--color-brand)] hover:underline">{value}</a>
     );
   }
   return formatFieldValue(value, field);
