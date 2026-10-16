@@ -981,6 +981,11 @@ export const api = {
   geocodeFieldPlace: (module, id) => req('POST', `/sfa/places/${module}/${id}/geocode`, {}),
   fieldSettings: () => req('GET', '/sfa/settings'),
   saveFieldSettings: (body) => req('PUT', '/sfa/settings', body),
+  // (v1.4) whose data a list shows (a person, a team, a role); phone alerts (the Firebase key)
+  viewingOptions: () => req('GET', '/sfa/m/viewing'),
+  pushSettings: () => req('GET', '/sfa/push/settings'),
+  savePushKey: (key) => req('PUT', '/sfa/push/settings', { key }),
+  testPush: () => req('POST', '/sfa/push/test', {}),
   callRecording: (callId) => req('GET', `/sfa/calls/${callId}/recording`),
   transcribeCall: (callId) => req('POST', `/sfa/calls/${callId}/transcribe`, {}),
   // (v1.3) visit plans, leave, meeting recordings

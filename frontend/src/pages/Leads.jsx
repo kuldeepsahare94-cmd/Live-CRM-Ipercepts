@@ -27,6 +27,7 @@ import {
   PageHeader, KpiCard, Badge, Avatar, SkeletonRows, SkeletonCards, ErrorState, EmptyState, toneFor,
   friendlyError,
 } from '../components/ui';
+import WhoseFilter, { useWhose } from '../components/WhoseFilter';
 
 // Lead statuses, sources, qualifications, ratings and genders come from
 // Settings → Dropdown Options (Leads module). These are only the fallback if
@@ -602,6 +603,8 @@ export default function Leads() {
   const [bulk, setBulk] = useState(null);
   const tel = useTelephony();        // is this person an agent who can call (MCube IVR)?
   const selection = useSelection('leads');
+  // (v1.4) whose leads: one person, a team, a role (for a manager or an administrator)
+  const whose = useWhose('leads');
 
   // ---- What is on screen ----------------------------------------------------
   // The server searches, filters and counts; only one page of leads (or the
@@ -663,7 +666,7 @@ export default function Leads() {
   // card's number is always the number of leads it shows when clicked.
   const question = useMemo(() => {
     const out = {
-      q: search.trim(), source: sourceFilter, owner: ownerFilter, match, today: localToday(),
+      q: search.trim(), source: sourceFilter, owner: ownerFilter, view: whose.value || undefined, match, today: localToday(),
       conditions: conditions.filter(isComplete).map((c) => {
         const f = fields.find((x) => x.api_name === c.field);
         return f ? { field: c.field, op: c.op, value: c.value, value2: c.value2, quick: !!c.quick, kind: kindOf(f) } : null;
@@ -673,9 +676,9 @@ export default function Leads() {
     // figure's own query (its leads are not sent there and back as ids).
     if (drill.active) out.drill = { metric: drill.metric, ...drillParams };
     return out;
-  }, [search, sourceFilter, ownerFilter, conditions, match, fields, drill.active, drill.metric, drillKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [search, sourceFilter, ownerFilter, whose.value, conditions, match, fields, drill.active, drill.metric, drillKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const questionKey = JSON.stringify(question);
-  const plain = !search.trim() && !sourceFilter && !ownerFilter && !statusFilter && !question.conditions.length && !drill.active;
+  const plain = !search.trim() && !sourceFilter && !ownerFilter && !whose.value && !statusFilter && !question.conditions.length && !drill.active;
 
   // The page belongs to one question: a new search or filter starts at page 1.
   const pageKey = `${questionKey}|${statusFilter}|${pageSize}`;
@@ -946,6 +949,7 @@ export default function Leads() {
             {[...new Set([...owners, ...(ownerFilter ? [ownerFilter] : [])])].map((o) => <option key={o}>{o}</option>)}
           </select>
         )}
+        <WhoseFilter whose={whose} />
         <FilterButton count={conditions.filter(isComplete).length} open={showFilters} onClick={() => setShowFilters((v) => !v)} />
         <SavedFiltersMenu module="leads" refreshKey={savedRefresh} activeId={activeSaved?.id}
           onSelect={(f) => { setActiveSaved(f); setConditions(f ? f.filters : []); setMatch(f ? f.match : 'all'); setShowFilters(false); }} />

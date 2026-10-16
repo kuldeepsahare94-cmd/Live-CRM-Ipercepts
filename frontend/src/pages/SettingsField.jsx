@@ -12,6 +12,7 @@
  *   Plans & leave   (v1.3) visit plans and their approval, the route's speed, leave and its kinds
  *   Reminders       (v1.3) the phone's reminders, punch out / check out by themselves
  *   Meeting recording (v1.3) recording a meeting at a visit, and how the customer agrees
+ *   Phone alerts      (v1.4) notifications on the phone with the app closed (Firebase key)
  *
  * Who may use it: Roles & Permissions → "Field force" (view = use the app; export = the CSV).
  */
@@ -22,7 +23,60 @@ import { api, absoluteApiBase } from '../api';
 import { PageHeader } from '../components/ui';
 import { fieldSettingsChanged } from '../components/field/field';
 
-const TABS = [['general', 'General'], ['attendance', 'Attendance'], ['tracking', 'Tracking & km'], ['visits', 'Visits'], ['plans', 'Plans & leave'], ['reminders', 'Reminders'], ['meetings', 'Meeting recording'], ['calls', 'Calls & app'], ['expense', 'Km expense'], ['map', 'Map']];
+const TABS = [['general', 'General'], ['attendance', 'Attendance'], ['tracking', 'Tracking & km'], ['visits', 'Visits'], ['plans', 'Plans & leave'], ['reminders', 'Reminders'], ['meetings', 'Meeting recording'], ['calls', 'Calls & app'], ['expense', 'Km expense'], ['map', 'Map'], ['alerts', 'Phone alerts']];
+
+/*
+ * Phone alerts (v1.4): the app shows a notification even when it is closed — a
+ * chat message, a follow-up that is due, a lead or task given to someone, a
+ * meeting invite, a plan or leave to approve. Android sends them through the
+ * company's own Firebase project; its key is pasted here once, kept encrypted,
+ * and never shown again.
+ */
+function PhoneAlerts() {
+  const [st, setSt] = useState(null);
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState(null);
+  const load = () => api.pushSettings().then(setSt).catch((e) => setMsg({ bad: true, text: e.message }));
+  useEffect(() => { load(); }, []);
+  const run = async (what, fn, ok) => {
+    setBusy(what); setMsg(null);
+    try { const out = await fn(); if (out && out.ready !== undefined) setSt(out); setMsg({ text: typeof ok === 'function' ? ok(out) : ok }); setKey(''); }
+    catch (e) { setMsg({ bad: true, text: e.message }); } finally { setBusy(''); }
+  };
+  const fromFile = (e) => { const f = e.target.files && e.target.files[0]; if (!f) return; f.text().then(setKey); e.target.value = ''; };
+  if (!st) return <div className="py-4">{msg ? <p className="text-sm" style={{ color: 'var(--color-danger)' }}>{msg.text}</p> : <Loader2 className="w-5 h-5 animate-spin" />}</div>;
+  return (
+    <div className="py-4 flex flex-col gap-4" data-testid="push-settings">
+      <p className="text-sm text-muted">A notification on the phone even when the iCRM app is closed: chat messages, follow-ups that are due, a lead, task or deal given to someone, meeting invites, plans and leave to approve. Each person can switch kinds off in the app (Settings).</p>
+      <div className="rounded-xl px-4 py-3 text-sm" style={{ background: st.ready ? 'var(--color-success-soft)' : 'var(--color-warning-soft, #FEF3C7)', color: st.ready ? 'var(--color-success)' : 'var(--color-warning, #92400E)' }} data-testid="push-status">
+        {st.ready ? <>On — Firebase project <b>{st.project_id}</b>. {st.people} {st.people === 1 ? 'person' : 'people'} on {st.devices} {st.devices === 1 ? 'phone' : 'phones'}.</> : 'Off — the Firebase key is not saved yet.'}
+      </div>
+      {!st.encryption_ready && <p className="text-sm" style={{ color: 'var(--color-danger)' }}>The server cannot keep keys encrypted yet: set CRM_ENCRYPTION_KEY on the server first.</p>}
+      <div>
+        <p className="text-sm font-semibold text-ink mb-1">Firebase key (service account file)</p>
+        <textarea className="input font-mono text-xs" rows={5} style={{ width: '100%', maxWidth: 560 }} value={key} onChange={(e) => setKey(e.target.value)}
+          placeholder={st.ready ? 'A key is saved. Paste a new file here to change it.' : 'Paste the whole file here: { "type": "service_account", … }'} data-testid="push-key" />
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          <label className="btn btn-secondary cursor-pointer">Choose the file<input type="file" accept=".json,application/json" className="hidden" onChange={fromFile} /></label>
+          <button type="button" className="btn btn-primary" disabled={!key.trim() || !!busy} onClick={() => run('save', () => api.savePushKey(key), 'Saved. Phone alerts are on.')} data-testid="push-save">{busy === 'save' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Save the key</button>
+          {st.ready && <button type="button" className="btn btn-secondary" disabled={!!busy} onClick={() => run('test', api.testPush, (o) => `Sent to ${o.sent} ${o.sent === 1 ? 'phone' : 'phones'} of yours.`)} data-testid="push-test">{busy === 'test' ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Send a test to my phone</button>}
+          {st.ready && <button type="button" className="btn btn-ghost" disabled={!!busy} onClick={() => { if (window.confirm('Remove the Firebase key? Phone alerts stop.')) run('remove', () => api.savePushKey('-'), 'Removed. Phone alerts are off.'); }} data-testid="push-remove">Remove</button>}
+        </div>
+        {msg && <p className="text-sm mt-2" style={{ color: msg.bad ? 'var(--color-danger)' : 'var(--color-success)' }} data-testid="push-msg">{msg.text}</p>}
+      </div>
+      <div className="text-sm text-muted">
+        <p className="font-semibold text-ink mb-1">Set up once (about 10 minutes, free)</p>
+        <ol className="list-decimal pl-5 flex flex-col gap-1">
+          <li>console.firebase.google.com → Add project (any name, e.g. "iCRM alerts").</li>
+          <li>In the project: Add app → Android → package name <b>com.ipercepts.icrm</b> → Register → download <b>google-services.json</b>. Put this file in GitHub as the secret <b>ICRM_GOOGLE_SERVICES_JSON</b> and build the app again — the new app can get alerts.</li>
+          <li>Project settings → Service accounts → <b>Generate new private key</b> → a .json file. Choose it here (or paste it) and Save. It is kept encrypted and never shown again.</li>
+          <li>Install the new app, sign in, allow notifications, then "Send a test to my phone".</li>
+        </ol>
+      </div>
+    </div>
+  );
+}
 
 function Toggle({ on, onChange, label, testid }) {
   return (
@@ -347,6 +401,7 @@ export default function SettingsField() {
           </>
         )}
 
+        {tab === 'alerts' && <PhoneAlerts />}
         {tab === 'map' && (
           <>
             <Row title="Map pictures" hint="Empty = OpenStreetMap (free, fine for a team). For many users or heavy use, take a map service (MapTiler, Mapbox, Stadia…) and paste its tile address with {z}, {x}, {y} and your key.">

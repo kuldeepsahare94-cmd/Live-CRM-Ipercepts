@@ -28,6 +28,7 @@ import {
   useSelection, RowCheckbox, BulkBar, BulkUpdateModal, BulkAssignModal, BulkDeleteModal, runBulk,
 } from '../../components/ListTools';
 import { USER_TYPES } from './fieldUtils';
+import WhoseFilter, { useWhose, ownerFieldOf, applyWhose } from '../../components/WhoseFilter';
 
 const STATUS_TYPES = new Set(['status', 'contact_status', 'priority']);
 
@@ -95,6 +96,8 @@ export default function UniversalList() {
   const [savedRefresh, setSavedRefresh] = useState(0);
   const [bulk, setBulk] = useState(null);   // 'update' | 'assign' | 'delete'
   const selection = useSelection(moduleApiName);
+  // (v1.4) whose records: one person, a team, a role (for a manager or an administrator)
+  const whose = useWhose(moduleApiName);
   useEffect(() => { setConditions([]); setActiveSaved(null); setShowFilters(false); }, [moduleApiName]);
 
   useEffect(() => {
@@ -203,6 +206,7 @@ export default function UniversalList() {
   // Every configured field, plus columns the records carry that are not
   // configured fields (a pipeline's Stage, for one).
   const filterFields = useMemo(() => [...fields, ...extraRecordFields(records, fields, module)], [fields, records, module]);
+  const ownerField = useMemo(() => ownerFieldOf(fields), [fields]);
   // Opportunities: Stage is set through the pipeline, so mass update offers it
   // as its own field, listing the pipeline's stages.
   const [stages, setStages] = useState([]);
@@ -235,8 +239,9 @@ export default function UniversalList() {
     if (statusField && statusFilter && !cardIsDropdown) {
       rows = rows.filter((r) => matchesStatus(getFieldValue(r, statusField), statusFilter));
     }
+    rows = applyWhose(rows, whose.people, ownerField, getFieldValue);
     return applyFilters(rows, conditions, match, filterFields, getFieldValue, me);
-  }, [records, statusField, statusFilter, cardIsDropdown, drill.idSet, drill.active, conditions, match, filterFields, me]);
+  }, [records, statusField, statusFilter, cardIsDropdown, drill.idSet, drill.active, conditions, match, filterFields, me, whose.people, ownerField]);
 
   const inCard = useMemo(
     () => (cardField && cardValue ? (r) => matchesStatus(getFieldValue(r, cardField), cardValue) : null),
@@ -558,6 +563,7 @@ export default function UniversalList() {
               : statusOptions.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
         )}
+        {ownerField && <WhoseFilter whose={whose} />}
         <FilterButton count={conditions.filter(isComplete).length} open={showFilters} onClick={() => setShowFilters((v) => !v)} />
         <SavedFiltersMenu module={module.api_name} refreshKey={savedRefresh} activeId={activeSaved?.id}
           onSelect={(f) => { setActiveSaved(f); setConditions(f ? f.filters : []); setMatch(f ? f.match : 'all'); setShowFilters(false); }} />
