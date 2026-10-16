@@ -166,6 +166,12 @@ function baseWhere(user, body, ctx) {
   }
   if (!blank(body.source)) add({ sql: 'l.source = ?', params: [String(body.source)] });
   if (!blank(body.owner)) add({ sql: 'l.assigned_counselor = ?', params: [String(body.owner)] });
+  // (v1.4) whose leads: one person, a team, a role — within what this person may see
+  if (!blank(body.view) && body.view !== 'all') {
+    const viewing = require('./sfa/viewing');
+    const ow = viewing.ownerWhere('leads', 'l', viewing.resolve(user, String(body.view)));
+    if (ow.sql) add({ sql: ow.sql.replace(/^\s*AND\s*/i, ''), params: ow.params });
+  }
 
   // a dashboard drill-down: exactly these leads
   if (Array.isArray(body.ids)) {

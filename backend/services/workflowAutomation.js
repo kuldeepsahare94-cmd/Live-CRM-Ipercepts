@@ -84,6 +84,9 @@ function fireWorkflows(moduleApiName, eventType, record, previousRecord, userId,
   // would run those workflows twice.
   if (eventType === 'field_changed') return;
 
+  // (v1.4) "this is yours now" on the person's phone — never in the way of the save
+  try { require('./push/assign').maybe(moduleApiName, eventType, record, previousRecord, userId); } catch { /* ignore */ }
+
   try {
     require('./workflows/engine').fire(moduleApiName, eventType, record, previousRecord, userId, opts || {});
   } catch (e) {

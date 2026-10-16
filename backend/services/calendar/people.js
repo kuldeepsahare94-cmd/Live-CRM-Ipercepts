@@ -53,12 +53,15 @@ function search({ q, modules, limit = 20, user = null }) {
   if (want.has('users')) {
     // Only active users: inviting somebody who cannot sign in is never what
     // was meant.
-    const rows = db.prepare(`
-      SELECT id, full_name, username FROM users
+    const userSql = (cols) => `
+      SELECT ${cols} FROM users
       WHERE COALESCE(active, 1) = 1
         AND (@all = 1 OR LOWER(COALESCE(full_name,'')) LIKE @q OR LOWER(COALESCE(username,'')) LIKE @q)
       ORDER BY full_name LIMIT @per
-    `).all({ q: needle, per, all: hasQuery ? 0 : 1 });
+    `;
+    let rows;
+    // (v1.4) with the user's own email when the CRM has that column
+    try { rows = db.prepare(userSql('id, full_name, username, email')).all({ q: needle, per, all: hasQuery ? 0 : 1 }); } catch { rows = db.prepare(userSql('id, full_name, username')).all({ q: needle, per, all: hasQuery ? 0 : 1 }); }
     rows.forEach((r) => out.push({
       kind: 'user',
       type_label: 'CRM User',
@@ -67,7 +70,7 @@ function search({ q, modules, limit = 20, user = null }) {
       name: r.full_name || r.username,
       // Usernames in this CRM are email addresses; anything else is not a
       // usable invite address and is reported as missing rather than guessed.
-      email: validEmail(r.username) ? r.username : null,
+      email: validEmail(r.email) ? r.email : validEmail(r.username) ? r.username : null,
       secondary: r.username,
     }));
   }
@@ -235,8 +238,10 @@ function resolveAttendees(input, user = null) {
 function lookupRecord(module, id) {
   const m = String(module).toLowerCase();
   if (m === 'users') {
-    const r = db.prepare('SELECT full_name, username FROM users WHERE id=?').get(id);
-    return r ? { name: r.full_name || r.username, email: validEmail(r.username) ? r.username : null } : null;
+    // (v1.4) the user's own email when it is filled in; else a username that is an email
+    let r;
+    try { r = db.prepare('SELECT full_name, username, email FROM users WHERE id=?').get(id); } catch { r = db.prepare('SELECT full_name, username FROM users WHERE id=?').get(id); }
+    return r ? { name: r.full_name || r.username, email: validEmail(r.email) ? r.email : validEmail(r.username) ? r.username : null } : null;
   }
   if (m === 'contacts') {
     const r = db.prepare('SELECT first_name, last_name, email FROM contacts WHERE id=?').get(id);

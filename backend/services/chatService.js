@@ -352,7 +352,28 @@ function sendMessage(conversationId, userId, { body, replyToId, attachments = []
   const row = db.prepare(`
     SELECT m.*, u.full_name, u.username FROM chat_messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?
   `).get(id);
+  alertPhones(conversationId, userId, row, attachments.length, ref);
   return hydrate(row, conversationId, userId);
+}
+
+// (v1.4) the others in the chat get it on their phone, even with the app closed —
+// not the ones who muted the chat. In the background: sending never waits for it.
+function alertPhones(conversationId, senderId, row, files, ref) {
+  try {
+    const phone = require('./push/phone');
+    if (!phone.ready()) return;
+    const to = db.prepare('SELECT user_id FROM chat_participants WHERE conversation_id = ? AND user_id != ? AND left_at IS NULL AND COALESCE(muted, 0) = 0')
+      .all(conversationId, senderId).map((r) => Number(r.user_id));
+    if (!to.length) return;
+    const conv = db.prepare('SELECT type, name FROM chat_conversations WHERE id = ?').get(conversationId) || {};
+    const who = row.full_name || row.username || 'Someone';
+    const text = row.body || (files ? `📎 ${files === 1 ? 'A file' : `${files} files`}` : ref ? `Shared: ${ref.label || ref.module}` : '');
+    phone.notify(to, {
+      kind: 'chat', tag: `chat-${conversationId}`, route: `/chat/${conversationId}`, data: { conversation_id: conversationId },
+      title: conv.type === 'group' ? (conv.name || 'Group') : who,
+      body: conv.type === 'group' ? `${who}: ${text}` : text,
+    }).catch(() => {});
+  } catch { /* an alert never stops a message */ }
 }
 
 // One message into each recipient's own direct chat — see the note at the

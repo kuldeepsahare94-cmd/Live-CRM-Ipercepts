@@ -108,7 +108,11 @@ router.post('/:id/snooze', (req, res) => {
 // Claims what is due so another tab or device does not show it again.
 router.post('/reminders/pull', (req, res) => {
   push.notePoll(req.user.id);
-  return send(res, () => svc.pullReminders(req.user.id));
+  return send(res, () => {
+    const out = svc.pullReminders(req.user.id);
+    push.alsoToPhone(req.user.id, out.reminders);      // (v1.4) and on the phone
+    return out;
+  });
 });
 
 // ---- Preferences -------------------------------------------------------------

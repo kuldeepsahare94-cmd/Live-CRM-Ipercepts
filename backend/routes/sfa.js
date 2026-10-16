@@ -29,7 +29,12 @@
 //   Leave:  GET /leaves/mine   POST /leaves   POST /leaves/:id/cancel   POST /leaves/:id/decide   GET /leaves/team?status=
 //   Meeting recordings:  GET /visits/:id/recording-info   POST /visits/:id/consent/send { phone }   POST /visits/:id/consent/check { code }
 //          POST /visits/:id/recording { data, consent, duration, client_ref }   GET /visits/:id/recording   POST /visits/:id/recording/transcribe
-//   (no sign-in: GET /api/app/info — mounted in server.js)
+//   (v1.4) GET /m/filters/:module   GET /m/viewing   GET /m/follow-ups?range=&from=&to=&view=   POST /m/files
+//          chat: GET /m/chat/conversations  GET /m/chat/unread  POST /m/chat/poll  POST /m/chat/broadcast
+//                GET /m/chat/:id/messages  POST /m/chat/:id/send
+//          phone alerts: POST /m/push/register  GET /m/push/device  PUT /m/push/prefs  POST /m/push/unregister  POST /m/push/test
+//                GET|PUT /push/settings (the Firebase key)  POST /push/test
+//   (no sign-in: GET /api/app/info, GET /api/m-file/:kind/:id — mounted in server.js)
 // ============================================================================
 
 const express = require('express');
@@ -132,6 +137,30 @@ router.post('/m/renew', run((req) => {
   const { JWT_SECRET } = require('../middleware/auth');
   return { token: jwt.sign({ id: req.user.id }, JWT_SECRET, { expiresIn: '7d' }), expires_in_days: 7 };
 }));
+
+// --- (v1.4) the app: filters, whose data, follow-ups, files, chat, phone alerts ---
+const viewing = require('../services/sfa/viewing');
+router.get('/m/filters/:module', run((req) => mobile.filterSpec(req.user, req.params.module)));
+router.get('/m/viewing', run((req) => viewing.options(req.user)));
+router.get('/m/follow-ups', run((req) => require('../services/sfa/followdash').list(req.user, req.query)));
+router.post('/m/files', run((req) => require('../services/sfa/mfiles').addToRecord(req.user, req.body || {}), 201));
+const mchat = () => require('../services/sfa/mchat');
+router.get('/m/chat/conversations', run((req) => mchat().conversations(req.user)));
+router.get('/m/chat/unread', run((req) => mchat().unread(req.user)));
+router.post('/m/chat/poll', run((req) => mchat().poll(req.user, req.body || {})));
+router.post('/m/chat/broadcast', run((req) => mchat().broadcast(req.user, req.body || {}), 201));
+router.get('/m/chat/:id/messages', run((req) => mchat().messages(req.user, req.params.id, req.query)));
+router.post('/m/chat/:id/send', run((req) => mchat().send(req.user, req.params.id, req.body || {}), 201));
+const phone = () => require('../services/push/phone');
+router.post('/m/push/register', run((req) => phone().register(req.user, req.body || {})));
+router.get('/m/push/device', run((req) => phone().device(req.user, req.query.token)));
+router.put('/m/push/prefs', run((req) => phone().setPrefs(req.user, (req.body || {}).token, (req.body || {}).prefs)));
+router.post('/m/push/unregister', run((req) => phone().unregister(req.user, (req.body || {}).token)));
+router.post('/m/push/test', run((req) => phone().test(req.user)));
+// the Firebase key (web: Settings → Field force → Phone alerts) — never sent back
+router.get('/push/settings', requirePermission('settings', 'view'), run(() => phone().status()));
+router.put('/push/settings', requirePermission('settings', 'edit'), run((req) => phone().saveKey((req.body || {}).key)));
+router.post('/push/test', requirePermission('settings', 'view'), run((req) => phone().test(req.user)));
 
 // --- my day ------------------------------------------------------------------
 router.get('/me/today', run((req) => field.myDay(req.user)));

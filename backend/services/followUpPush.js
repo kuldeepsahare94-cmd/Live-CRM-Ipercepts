@@ -131,19 +131,39 @@ function notePoll(userId) { lastSeen.set(Number(userId), Date.now()); }
 const pageIsOpen = (userId) => Date.now() - (lastSeen.get(Number(userId)) || 0) < 75000;
 
 let running = false;
+// (v1.4) the same reminder on the phone (the iCRM app), when phone alerts are set up
+function phoneOf() {
+  try { const phone = require('./push/phone'); return phone.ready() ? phone : null; } catch { return null; }
+}
+function toPhone(phone, userId, r) {
+  if (!phone || !r) return Promise.resolve(0);
+  return phone.notify([userId], {
+    kind: 'followup', title: r.title || 'Follow-up', body: r.body || '', tag: r.tag || `followup-${r.id}`,
+    route: r.related_module && r.related_record_id ? `/m/${r.related_module}/${r.related_record_id}` : '/',
+  }).catch(() => 0);
+}
 async function sweep() {
   if (running) return;
   running = true;
   try {
-    const withSubs = new Set(db.prepare('SELECT DISTINCT user_id FROM push_subscriptions').all().map((r) => Number(r.user_id)));
-    if (!withSubs.size || !vapidKeys()) return;
+    const webOk = !!vapidKeys();
+    const withSubs = webOk ? new Set(db.prepare('SELECT DISTINCT user_id FROM push_subscriptions').all().map((r) => Number(r.user_id))) : new Set();
+    const phone = phoneOf();
+    let withPhone = new Set();
+    if (phone) { phone.ensureSchema(); withPhone = new Set(db.prepare('SELECT DISTINCT user_id FROM push_devices').all().map((r) => Number(r.user_id))); }
+    if (!withSubs.size && !withPhone.size) return;
     for (const userId of followUps.usersWithPendingReminders()) {
-      if (!withSubs.has(Number(userId)) || pageIsOpen(userId)) continue;
+      const web = withSubs.has(Number(userId));
+      const ph = withPhone.has(Number(userId));
+      if ((!web && !ph) || pageIsOpen(userId)) continue;
       const prefs = followUps.getPrefs(userId);
-      if (!prefs.followup_enabled || !prefs.browser_enabled) continue;
+      if (!prefs.followup_enabled) continue;
+      const webWanted = web && prefs.browser_enabled;
+      if (!webWanted && !ph) continue;
       const { reminders } = followUps.pullReminders(userId);
       for (const r of reminders) {
-        await sendToUser(userId, { type: 'followup-reminder', reminder: r, sound: prefs.sound_enabled });
+        if (webWanted) await sendToUser(userId, { type: 'followup-reminder', reminder: r, sound: prefs.sound_enabled });
+        if (ph) await toPhone(phone, userId, r);
       }
     }
   } catch (e) {
@@ -151,6 +171,12 @@ async function sweep() {
   } finally {
     running = false;
   }
+}
+/** reminders an open CRM page collected: the phone rings too (v1.4) */
+function alsoToPhone(userId, reminders) {
+  const phone = phoneOf();
+  if (!phone || !reminders || !reminders.length) return;
+  for (const r of reminders) toPhone(phone, userId, r);
 }
 
 function start() {
@@ -179,4 +205,4 @@ function start() {
   if (!webpush) console.warn('[push] web-push is not installed — reminders work while the CRM is open, not while it is closed');
 }
 
-module.exports = { publicKey, subscribe, unsubscribe, sendToUser, subscriptionsFor, notePoll, sweep, start };
+module.exports = { publicKey, subscribe, unsubscribe, sendToUser, subscriptionsFor, notePoll, sweep, start, alsoToPhone };

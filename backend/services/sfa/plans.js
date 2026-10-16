@@ -52,6 +52,13 @@ function notify(userId, title, message, link) {
     db.prepare('INSERT INTO crm_workflow_notifications (workflow_id, user_id, title, message, link) VALUES (NULL,?,?,?,?)')
       .run(userId, String(title).slice(0, 160), String(message || '').slice(0, 400), link || '/field');
   } catch (e) { console.warn('[sfa] notification:', e.message); }
+  // (v1.4) and on the phone: a manager goes to Approvals, the person to their plans / leave
+  try {
+    const l = String(link || '');
+    const toApprove = /to approve/i.test(String(title));
+    const route = toApprove ? '/approvals' : /tab=leave/.test(l) ? '/leave' : /tab=plans/.test(l) ? '/plans' : '/';
+    require('../push/phone').notify([userId], { kind: 'approval', title: String(title), body: String(message || ''), route, tag: l.slice(0, 60) }).catch(() => {});
+  } catch { /* an alert never stops the work */ }
 }
 const userName = (id) => { const u = field.userRow(id); return u ? (u.full_name || u.username) : ''; };
 const niceDay = (d) => { try { return new Date(`${d}T12:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }); } catch { return d; } };

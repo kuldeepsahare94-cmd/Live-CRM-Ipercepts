@@ -129,6 +129,8 @@ app.get('/api/geo', (req, res) => {
 });
 // a call recording: the link carries its own secret (an <audio> player cannot send the sign-in)
 app.get('/api/call-recordings/:file', require('./routes/sfa').serveRecording);
+// (v1.4) a record's file or a chat file opened from the app: the signed link is the permission
+app.get('/api/m-file/:kind/:id', (req, res) => require('./services/sfa/mfiles').serve(req, res));
 
 // Expense management — field expenses with bill photos, claims, approvals,
 // advances and payment (also what the mobile app talks to). A bill photo

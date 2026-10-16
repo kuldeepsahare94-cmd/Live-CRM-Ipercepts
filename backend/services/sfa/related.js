@@ -17,6 +17,10 @@ const store = require('./store');
 
 const { bad, idOf } = store;
 const MODULES = ['leads', 'contacts', 'accounts', 'opportunities'];
+// (v1.4) every module of the app has a record page with notes, files and (for most) activities
+const ALL = [...MODULES, 'quotations', 'subscriptions', 'meetings', 'calls', 'tasks', 'products'];
+const ACTIVITY = new Set(['meetings', 'calls', 'tasks']);
+const TABLE = { leads: 'leads', contacts: 'contacts', accounts: 'accounts', opportunities: 'opportunities', quotations: 'quotations', subscriptions: 'subscriptions', meetings: 'meetings', calls: 'calls', tasks: 'tasks', products: 'products' };
 const LIMIT = 20;
 
 const isSuper = (user) => access.isSuper(user);
@@ -40,11 +44,11 @@ function section(user, module, { from, where, params, select, order, activity, r
 }
 
 function related(user, module, idIn) {
-  if (!MODULES.includes(module)) throw bad('Not here.', 404);
+  if (!ALL.includes(module)) throw bad('Not here.', 404);
   const id = idOf(idIn);
   if (!id) throw bad('Not found', 404);
   if (!can(user, module)) throw bad(`Your role cannot open ${module}.`, 403);
-  const table = module;
+  const table = TABLE[module];
   const rec = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
   if (!rec) throw bad('Not found', 404);
   if (!access.canOpen(user, module, id)) throw bad('This record belongs to someone else.', 403);
@@ -55,20 +59,32 @@ function related(user, module, idIn) {
     if (s) out[key] = s;
   };
   // --- what was done with it ---------------------------------------------------
-  act('calls', 'calls', `t.id, t.call_subject, t.direction, t.connected, t.status, t.duration_seconds, COALESCE(t.start_time, t.created_at) AS at, t.call_outcome,
+  const own = !ACTIVITY.has(module) && module !== 'products';    // a call or a task has no calls of its own
+  if (own) act('calls', 'calls', `t.id, t.call_subject, t.direction, t.connected, t.status, t.duration_seconds, COALESCE(t.start_time, t.created_at) AS at, t.call_outcome,
     t.notes, t.call_recording_url, t.recording_id, t.call_source, t.phone_number`, 't.id DESC');
-  act('meetings', 'meetings', 't.id, t.meeting_title, t.start_datetime AS at, t.status, t.outcome', 't.start_datetime DESC');
-  act('tasks', 'tasks', 't.id, t.task_title, t.due_date AS at, t.status', "CASE WHEN t.status = 'Completed' THEN 1 ELSE 0 END, t.due_date");
+  if (own) act('meetings', 'meetings', 't.id, t.meeting_title, t.start_datetime AS at, t.status, t.outcome, t.video_link', 't.start_datetime DESC');
+  if (own) act('tasks', 'tasks', 't.id, t.task_title, t.due_date AS at, t.status', "CASE WHEN t.status = 'Completed' THEN 1 ELSE 0 END, t.due_date");
   act('notes', 'notes', 't.id, t.title, t.body, t.created_at AS at', 't.id DESC');
+  // files on the record (v1.4): each with a link the app can open
+  {
+    const s = section(user, 'documents', { from: 'documents t', where: 't.related_module = ? AND t.related_record_id = ?', params: [module, id],
+      select: 't.id, t.title, t.file_name, t.mime_type, t.size_bytes, t.external_url, t.stored_name, t.created_at AS at, t.uploaded_by', order: 't.id DESC', activity: true, relMod: module, relId: id });
+    if (s) {
+      const files = require('./mfiles');
+      s.rows = s.rows.map((r) => ({ id: r.id, title: r.title, file_name: r.file_name, mime_type: r.mime_type, size_bytes: r.size_bytes, at: r.at,
+        url: r.stored_name ? files.signedUrl('doc', r.id) : (r.external_url || null), external: !r.stored_name }));
+      out.files = s;
+    }
+  }
   // follow-ups: as the record (anyone who may open it)
-  try {
+  if (module !== 'products') try {
     const rows = db.prepare(`SELECT id, subject, notes, status, COALESCE(due_at, due_date) AS at, has_time FROM follow_ups WHERE related_module = ? AND related_record_id = ? ORDER BY COALESCE(due_at, due_date) DESC LIMIT ${LIMIT}`).all(module, id);
     const total = Number(db.prepare('SELECT COUNT(*) AS n FROM follow_ups WHERE related_module = ? AND related_record_id = ?').get(module, id).n) || 0;
     out.follow_ups = { total, rows };
   } catch { /* no follow-ups table */ }
   // visits (Field force)
   try {
-    if (store.getSettings().enabled) {
+    if (own && store.getSettings().enabled) {
       const v = require('./field').listVisits(user, { related_module: module, related_record_id: id }).rows;
       out.visits = {
         total: v.length,
@@ -83,7 +99,8 @@ function related(user, module, idIn) {
     contacts: { opp: 't.primary_contact_id', quote: 't.contact_id', doc: 't.contact_id', pay: 't.contact_id', ticket: 't.contact_id', sub: 't.contact_id' },
     opportunities: { quote: 't.opportunity_id', doc: 't.opportunity_id', pay: 't.opportunity_id', sub: 't.opportunity_id' },
     leads: {},
-  }[module];
+    subscriptions: { pay: 't.subscription_id' },
+  }[module] || {};
   let key = id;
   // a converted lead: what was made from it
   if (module === 'leads') {
@@ -153,6 +170,16 @@ function related(user, module, idIn) {
   if (out.opportunities) figures.pipeline_value = sum(out.opportunities, 'amount');
   if (out.invoices) { figures.invoiced = sum(out.invoices, 'grand_total'); figures.balance_due = sum(out.invoices, 'balance_due'); }
   if (out.payments) figures.paid = out.payments.rows.filter((p) => /paid|received|success/i.test(p.status || '')).reduce((a, p) => a + (Number(p.amount) || 0), 0);
+  // the last time someone spoke to or met them (v1.4)
+  {
+    const t2 = (v) => { const x = String(v || ''); return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(x) || x.length <= 10 ? x : `${x.replace(' ', 'T')}Z`) || 0; };
+    const seen = [];
+    if (out.calls) out.calls.rows.filter((r) => Number(r.connected) === 1 || !('connected' in r)).forEach((r) => seen.push(r.at));
+    if (out.visits) out.visits.rows.forEach((r) => seen.push(r.at));
+    if (out.meetings) out.meetings.rows.filter((r) => /complet|held|done/i.test(r.status || '') || t2(r.at) < Date.now()).forEach((r) => seen.push(r.at));
+    const best = seen.filter(Boolean).sort((a, b) => t2(b) - t2(a))[0];
+    if (out.calls || out.visits || out.meetings) figures.last_contact = best || null;
+  }
   if (out.follow_ups) {
     const next = out.follow_ups.rows.filter((f) => !/complete|cancel|done/i.test(f.status || '')).sort((a, b) => String(a.at).localeCompare(String(b.at)))[0];
     figures.next_follow_up = next ? next.at : null;

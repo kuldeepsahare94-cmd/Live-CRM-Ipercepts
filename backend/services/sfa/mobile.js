@@ -136,9 +136,24 @@ function bootstrap(user) {
   let currency = { code: 'INR', symbol: '₹' };
   try { const c = db.prepare('SELECT code, symbol FROM currencies WHERE is_base = 1 LIMIT 1').get(); if (c) currency = { code: c.code, symbol: c.symbol || c.code }; } catch { /* keep INR */ }
   const sfaOn = s.enabled && can(user, 'sfa', 'view');
+  // (v1.4) can this person look at others' data (a manager, an administrator)
+  let viewOthers = false;
+  try { viewOthers = require('./viewing').options(user).can; } catch { viewOthers = false; }
+  let pushReady = false;
+  try { pushReady = require('../push/phone').ready(); } catch { pushReady = false; }
   return {
     ...appInfo(),
-    me: { id: Number(user.id), username: user.username, name: user.full_name || user.username, role: user.role_name || '', is_manager: sfaOn ? field.isManager(user) : false, sees_all: sfaOn ? field.seesAll(user) : false },
+    me: {
+      id: Number(user.id), username: user.username, name: user.full_name || user.username, role: user.role_name || '', is_manager: sfaOn ? field.isManager(user) : false, sees_all: sfaOn ? field.seesAll(user) : false,
+      view_others: viewOthers,
+    },
+    // (v1.4) team chat, online meetings, notes and files on a record, phone alerts
+    chat: { view: can(user, 'chat', 'view'), create: can(user, 'chat', 'create') },
+    calendar: { view: can(user, 'calendar', 'view'), create: can(user, 'calendar', 'create'), edit: can(user, 'calendar', 'edit') },
+    notes: { view: can(user, 'notes', 'view'), create: can(user, 'notes', 'create') },
+    documents: { view: can(user, 'documents', 'view'), create: can(user, 'documents', 'create') },
+    follow_ups: true,
+    push: { ready: pushReady },
     currency,
     modules,
     sfa: sfaOn ? {
@@ -161,9 +176,110 @@ function bootstrap(user) {
   };
 }
 
+// --- filters of a list (v1.4) ---------------------------------------------------
+// The date each list can be filtered on besides "created" (the one shown on its rows).
+const DATE_LABEL = {
+  leads: 'Follow-up date', opportunities: 'Close date', quotations: 'Quote date', subscriptions: 'Renewal date',
+  meetings: 'Meeting date', calls: 'Call date', tasks: 'Due date',
+};
+const STATUS_COLUMN = { leads: 'status', contacts: 'contact_status', accounts: 'status', quotations: 'status', subscriptions: 'status', meetings: 'status', calls: 'status', tasks: 'status' };
+const CHOICE_TYPES = new Set(['dropdown', 'radio', 'multiselect', 'checkbox']);
+const tableCols = new Map();
+function columnsOf(table) {
+  if (!tableCols.has(table)) {
+    let cols = [];
+    try { cols = db.prepare(`PRAGMA table_info(${table})`).all().map((x) => x.name); } catch { cols = []; }
+    tableCols.set(table, cols);
+  }
+  return tableCols.get(table);
+}
+function moduleIdOf(module) { const r = db.prepare('SELECT id FROM modules WHERE api_name = ?').get(module); return r ? Number(r.id) : null; }
+
+/** the pick-list fields of a module a list can be filtered on: [{ api_name, label, type, options, field_id, system }] */
+function choiceFields(module) {
+  const c = LIST[module];
+  const mid = moduleIdOf(module);
+  if (!c || !mid) return [];
+  const cols = columnsOf(c.table);
+  const statusCol = STATUS_COLUMN[module];
+  const rows = db.prepare(`SELECT id, api_name, label, field_type, is_system, options_json FROM module_fields WHERE module_id = ? ORDER BY position, id`).all(mid);
+  return rows.filter((f) => CHOICE_TYPES.has(f.field_type) && f.api_name !== statusCol && (!Number(f.is_system) || cols.includes(f.api_name)))
+    .map((f) => ({ api_name: f.api_name, label: f.label, type: f.field_type, field_id: Number(f.id), system: !!Number(f.is_system), options: f.field_type === 'checkbox' ? [{ value: '1', label: 'Yes' }, { value: '0', label: 'No' }] : cleanOptions(f.options_json) }))
+    .filter((f) => f.options.length);
+}
+
+/** What the filter panel of a list offers (statuses, pick-lists, dates, whose). */
+function filterSpec(user, module) {
+  const c = LIST[module];
+  if (!c) throw bad('This list is not in the app.', 404);
+  if (!can(user, module, 'view')) throw bad(`Your role cannot open ${module}.`, 403);
+  let statuses = [];
+  if (c.status && !c.status.startsWith('CASE')) {
+    const scope = c.activity ? access.whereActivity(user, module, 't', null, null) : access.where(user, module, 't');
+    try {
+      statuses = db.prepare(`SELECT DISTINCT ${c.status} AS v FROM ${c.table} t ${c.join || ''} WHERE ${c.status} IS NOT NULL AND ${c.status} <> ''${scope.sql} ORDER BY 1 LIMIT 60`).all(...scope.params).map((r) => String(r.v));
+    } catch { statuses = []; }
+    const col = STATUS_COLUMN[module];
+    const mid = moduleIdOf(module);
+    if (col && mid) {
+      const f = db.prepare('SELECT options_json FROM module_fields WHERE module_id = ? AND api_name = ?').get(mid, col);
+      const opts = f ? cleanOptions(f.options_json).map((o) => o.value) : [];
+      statuses = [...new Set([...opts, ...statuses])];
+    }
+  }
+  const viewing = require('./viewing');
+  return {
+    module,
+    status_label: module === 'opportunities' ? 'Stage' : 'Status',
+    statuses,
+    fields: choiceFields(module).map(({ field_id, ...f }) => f),
+    date_label: c.date ? (DATE_LABEL[module] || 'Date') : null,
+    has_created: columnsOf(c.table).includes('created_at'),
+    view: module === 'products' ? { can: false } : viewing.options(user),
+  };
+}
+
+const listOf = (v) => (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : [v]).map((x) => String(x).slice(0, 120)).slice(0, 50);
+const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+/** the filters of the panel, as more WHERE conditions */
+function applyFilters(module, c, raw, where, params) {
+  let f = raw;
+  if (typeof f === 'string') { try { f = JSON.parse(f); } catch { throw bad('The filters could not be read.'); } }
+  if (!f || typeof f !== 'object') return;
+  const st = listOf(f.status);
+  if (st.length && c.status && !c.status.startsWith('CASE')) { where.push(`${c.status} IN (${st.map(() => '?').join(',')})`); params.push(...st); }
+  const byField = f.fields && typeof f.fields === 'object' ? f.fields : {};
+  const known = choiceFields(module);
+  const mid = moduleIdOf(module);
+  for (const [api, vals] of Object.entries(byField)) {
+    const field = known.find((x) => x.api_name === api);
+    const v = listOf(vals);
+    if (!field || !v.length) continue;
+    if (field.type === 'multiselect') {
+      // a multi-select keeps its choices as a list in one value: any of the chosen ones in it
+      const col = field.system ? `CAST(t.${api} AS TEXT)` : `(SELECT CAST(v9.value_text AS TEXT) FROM custom_field_values v9 WHERE v9.module_id = ${mid} AND v9.record_id = t.id AND v9.field_id = ${field.field_id})`;
+      where.push(`(${v.map(() => `${col} LIKE ?`).join(' OR ')})`); params.push(...v.map((x) => `%"${x.replace(/[%_"]/g, '')}"%`));
+    } else if (field.system) {
+      where.push(`CAST(t.${api} AS TEXT) IN (${v.map(() => '?').join(',')})`); params.push(...v);
+    } else {
+      where.push(`EXISTS (SELECT 1 FROM custom_field_values v9 WHERE v9.module_id = ? AND v9.record_id = t.id AND v9.field_id = ? AND CAST(COALESCE(v9.value_text, CAST(v9.value_number AS TEXT)) AS TEXT) IN (${v.map(() => '?').join(',')}))`);
+      params.push(mid, field.field_id, ...v);
+    }
+  }
+  const range = (col, r) => {
+    if (!r || typeof r !== 'object') return;
+    const a = day(r.from); const b = day(r.to);
+    if (a) { where.push(`SUBSTR(CAST(${col} AS TEXT), 1, 10) >= ?`); params.push(a); }
+    if (b) { where.push(`SUBSTR(CAST(${col} AS TEXT), 1, 10) <= ?`); params.push(b); }
+  };
+  if (columnsOf(c.table).includes('created_at')) range('t.created_at', f.created);
+  if (c.date) range(c.date, f.date);
+}
+
 /**
  * A page of a list.
- * @param q { q (search), page, page_size (≤ 100), mine ('1': only mine), status, related_module, related_record_id, account_id }
+ * @param q { q (search), page, page_size (≤ 100), mine ('1': only mine), view ('me' | 'all' | 'user:5' | 'team:2' | 'role:3'),
+ *            f (the filter panel, JSON), status, related_module, related_record_id, account_id }
  */
 function list(user, module, q = {}) {
   const c = LIST[module];
@@ -183,6 +299,14 @@ function list(user, module, q = {}) {
     if (c.owner) { where.push(`${c.owner} = ?`); params.push(user.id); }
     else if (c.ownerName) { where.push(`${c.ownerName} = ?`); params.push(access.displayName(user)); }   // (a lead is "mine" by the name in it)
   }
+  // (v1.4) whose records: one person, a team, a role — within what this person may see
+  if (q.view && q.view !== 'all' && module !== 'products') {
+    const viewing = require('./viewing');
+    const ids = viewing.resolve(user, q.view);
+    const ow = viewing.ownerWhere(module, 't', ids);
+    if (ow.sql) { where.push(ow.sql.replace(/^\s*AND\s*/i, '')); params.push(...ow.params); }
+  }
+  if (q.f) applyFilters(module, c, q.f, where, params);
   if (relId) { where.push('t.related_module = ? AND t.related_record_id = ?'); params.push(relMod, relId); }
   if (!c.activity && idOf(q.account_id) && ['contacts', 'opportunities', 'quotations', 'subscriptions'].includes(module)) { where.push('t.account_id = ?'); params.push(idOf(q.account_id)); }
   if (module === 'products' && q.all !== '1') where.push('t.active = 1');
@@ -218,4 +342,4 @@ function list(user, module, q = {}) {
   };
 }
 
-module.exports = { appInfo, bootstrap, list, APP_MODULES, LIST, API_LEVEL };
+module.exports = { appInfo, bootstrap, list, filterSpec, APP_MODULES, LIST, API_LEVEL };
