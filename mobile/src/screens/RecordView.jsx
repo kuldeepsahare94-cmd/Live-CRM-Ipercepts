@@ -20,7 +20,13 @@ import { getRecord, titleOf, phoneOf, show, PHONE_FIELDS } from '../lib/records'
 import { here, navigateTo, openOutside } from '../lib/location';
 import { money, niceDate, niceTime, phoneFor } from '../lib/format';
 import { TopBar, StatusBars, Loading, Empty, StatusTag, BottomNav, Avatar, Sheet, VoiceArea, Field } from '../components/ui';
-import { Timeline, List, ago } from '../components/Record360';
+import { List, ago } from '../components/Record360';
+import Timeline2 from '../components/Timeline2';
+import { Initials, Badge, Facts, LinkCard, dueState, whenText, DuePill } from '../components/kit';
+import { iconOf, colorOf } from '../components/icons';
+import {
+  CalendarDays, CalendarClock, UserPlus, Tag, Hash, Briefcase, Percent, Wallet, Timer, ArrowDownLeft, ArrowUpRight, Flame, Star, Layers, Receipt,
+} from 'lucide-react';
 import RecordingPicker from '../components/RecordingPicker';
 import { canReadPhone, digits10, queueRecordingFile } from '../lib/calls';
 import { openWhatsApp } from '../lib/whatsapp';
@@ -33,7 +39,7 @@ import { ExtraList, useExtraEmails } from '../components/MoreEmails';
 const ORDER_FROM = { accounts: 'account_id', contacts: 'account_id', opportunities: 'account_id' };
 const HIDDEN = new Set(['id', 'related_module', 'related_record_id', 'attendees_json', 'online_meeting_id', 'online_status', 'online_error', 'online_provider', 'online_dial_in']);
 const EMAILS = new Set(['email', 'secondary_email', 'email_address']);
-const ACTIVITY_OWN = new Set(['meetings', 'calls', 'tasks', 'products']);   // no calls / meetings of their own
+const ACTIVITY_OWN = new Set(['meetings', 'calls', 'tasks', 'products', 'invoices', 'payments']);   // no calls / meetings of their own
 const toIso = (v) => { const s = String(v || ''); if (!s) return ''; return /[zZ]|[+-]\d\d:?\d\d$/.test(s) || s.length <= 10 ? s : `${s.replace(' ', 'T')}Z`; };
 
 function copyText(text, say) {
@@ -42,9 +48,9 @@ function copyText(text, say) {
   else say(String(text), 'info');
 }
 
-function Action({ icon: Icon, label, onClick, to, color = 'var(--brand)', testid }) {
-  const inner = <><span className="ic" style={{ background: `color-mix(in srgb, ${color} 13%, transparent)`, color }}><Icon size={22} /></span><span className="act-label">{label}</span></>;
-  return to ? <Link to={to} className="tile act" data-testid={testid}>{inner}</Link> : <button type="button" className="tile act" onClick={onClick} data-testid={testid}>{inner}</button>;
+function Action({ icon: Icon, label, onClick, to, color = 'var(--brand)', testid, soft = false }) {
+  const inner = <><span className={`act2-ic${soft ? ' soft' : ''}`} style={{ '--c': color }}><Icon size={22} /></span><span>{label}</span></>;
+  return to ? <Link to={to} className="act2" data-testid={testid}>{inner}</Link> : <button type="button" className="act2" onClick={onClick} data-testid={testid}>{inner}</button>;
 }
 
 /** a call: who it was with (v1.3.1) — the customer's name, status and number, tap to open */
@@ -247,16 +253,20 @@ function NoteSheet({ module, id, onClose, onDone }) {
 const fileIcon = (m) => (/^image\//.test(m || '') ? '🖼️' : /pdf/.test(m || '') ? '📄' : /sheet|excel|csv/.test(m || '') ? '📊' : /word|document/.test(m || '') ? '📝' : /audio/.test(m || '') ? '🎵' : '📎');
 const size = (n) => (!n ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-const TABS = [['details', 'Details', ListTree], ['related', 'Related', Network], ['timeline', 'Timeline', Clock], ['activities', 'Activities', Activity], ['notes', 'Notes', StickyNote], ['files', 'Files', Paperclip]];
+const TABS = [['timeline', 'Timeline', Clock], ['details', 'Details', ListTree], ['related', 'Related', Network], ['activities', 'Activities', Activity], ['notes', 'Notes', StickyNote], ['files', 'Files', Paperclip]];
 const REL = {
   leads: ['visits', 'opportunities', 'quotations'],
   contacts: ['opportunities', 'quotations', 'invoices', 'proformas', 'payments', 'tickets', 'subscriptions', 'visits'],
-  accounts: ['contacts', 'opportunities', 'quotations', 'invoices', 'proformas', 'payments', 'tickets', 'subscriptions', 'visits'],
-  opportunities: ['quotations', 'invoices', 'proformas', 'payments', 'subscriptions', 'visits'],
+  accounts: ['contacts', 'leads', 'opportunities', 'quotations', 'invoices', 'proformas', 'payments', 'tickets', 'subscriptions', 'visits'],
+  opportunities: ['contacts', 'quotations', 'invoices', 'proformas', 'payments', 'subscriptions', 'visits'],
   subscriptions: ['payments'],
+  // (v1.10)
+  quotations: ['invoices', 'proformas'],
+  invoices: ['payments'],
+  products: ['quotations'],
 };
-const REL_LABEL = { visits: ['Visits', MapPin, '#2563EB'], opportunities: ['Deals', Network, '#C026D3'], quotations: ['Orders / quotations', ShoppingCart, '#0D9488'], contacts: ['Contacts', User, '#0D9488'], invoices: ['Invoices', ListTree, '#4F46E5'], proformas: ['Proformas', ListTree, '#6366F1'], payments: ['Payments', Check, '#059669'], tickets: ['Tickets', Info, '#E11D48'], subscriptions: ['Subscriptions', Clock, '#059669'] };
-const ACT = [['calls', 'Calls', PhoneCall, '#16A34A'], ['meetings', 'Meetings', CalendarPlus, '#7C3AED'], ['tasks', 'Tasks', CheckSquare, '#0891B2'], ['visits', 'Visits', MapPin, '#2563EB'], ['follow_ups', 'Follow-ups', BellRing, '#EA580C']];
+const REL_LABEL = { visits: ['Visits', MapPin, '#2563EB'], opportunities: ['Deals', Network, '#C026D3'], quotations: ['Orders / quotations', ShoppingCart, '#0D9488'], contacts: ['Contacts', User, '#0D9488'], invoices: ['Invoices', ListTree, '#4F46E5'], proformas: ['Proformas', ListTree, '#6366F1'], payments: ['Payments', Check, '#059669'], tickets: ['Tickets', Info, '#E11D48'], subscriptions: ['Subscriptions', Clock, '#059669'], leads: ['Leads converted into it', UserPlus, '#C026D3'] };
+const ACT = [['calls', 'Calls', PhoneCall, '#16A34A'], ['meetings', 'Meetings', CalendarPlus, '#7C3AED'], ['tasks', 'Tasks', CheckSquare, '#0891B2'], ['visits', 'Visits', MapPin, '#2563EB'], ['follow_ups', 'Follow-ups', BellRing, '#EA580C'], ['emails', 'Emails', Mail, '#0284C7']];
 
 export default function RecordView() {
   const { module, id } = useParams();
@@ -277,7 +287,10 @@ export default function RecordView() {
   const [sheet, setSheet] = useState('');
   const [actTab, setActTab] = useState('calls');
   // (v1.7) a lead that has history opens on its Timeline (what happened last), else on its Details
-  const tab = params.get('tab') || (module === 'leads' && rel && Array.isArray(rel.timeline) && rel.timeline.length ? 'timeline' : 'details');
+  // (v1.10) a record with history opens on its Timeline (what happened last), else on its Details
+  const tab = params.get('tab') || (!['products', 'invoices', 'payments'].includes(module) && rel && Array.isArray(rel.timeline) && rel.timeline.length ? 'timeline' : 'details');
+  const [folded, setFolded] = useState(() => { try { return localStorage.getItem('icrm_sum_folded') === '1'; } catch { return false; } });
+  const fold = () => { const v = !folded; setFolded(v); try { localStorage.setItem('icrm_sum_folded', v ? '1' : '0'); } catch { /* fine */ } };
   const setTab = (t) => setParams((p) => { const n = new URLSearchParams(p); n.set('tab', t); return n; }, { replace: true });
   const sfa = boot.sfa.enabled;
   const visitable = sfa && VISIT_MODULES.includes(module);
@@ -298,13 +311,13 @@ export default function RecordView() {
   const row = data ? data.row : null;
   const title = row ? titleOf(module, row) : '';
   const tabs = useMemo(() => TABS.filter(([k]) => {
-    if (k === 'related') return !!REL[module];
+    if (k === 'related') return !!REL[module] || !!(rel && rel.links && rel.links.length);
     if (k === 'activities') return !ACTIVITY_OWN.has(module);
     if (k === 'notes') return boot.notes ? boot.notes.view : true;
     if (k === 'files') return boot.documents ? boot.documents.view : true;
     if (k === 'timeline') return module !== 'products';
     return true;
-  }), [module, boot]);
+  }), [module, boot, rel]);
 
   if (!mod) return <div className="screen"><TopBar title="Not in the app" /><Empty title="Your role cannot open this." /></div>;
   if (error) return <div className="screen"><TopBar title={mod.singular} /><div className="body"><div className="note bad">{error}</div></div><BottomNav /></div>;
@@ -358,25 +371,28 @@ export default function RecordView() {
   // the actions: the first five show, the rest are under "More"
   const all = [
     phone && { icon: Phone, label: 'Call', color: '#16A34A', onClick: call, testid: 'act-call' },
-    phone && { icon: MessageCircle, label: 'WhatsApp', color: '#16A34A', onClick: () => openWhatsApp(phone, ''), testid: 'act-wa' },
-    (visitable || (module === 'meetings' && sfa)) && { icon: MapPin, label: 'Check In', color: '#2563EB', onClick: checkIn, testid: 'act-checkin' },
+    phone && { icon: MessageCircle, label: 'WhatsApp', color: '#22C55E', onClick: () => openWhatsApp(phone, ''), testid: 'act-wa' },
     module === 'meetings' && row.video_link && { icon: Video, label: 'Join', color: '#7C3AED', onClick: () => openOutside(row.video_link), testid: 'act-join' },
-    module === 'tasks' && row.status !== 'Completed' && mod.can.edit && { icon: busy === 'done' ? Loader2 : Check, label: busy === 'done' ? 'Saving…' : 'Mark done', color: '#16A34A', onClick: markDone, testid: 'act-done' },
-    !ACTIVITY_OWN.has(module) && can('tasks') && { icon: CheckSquare, label: 'Task', color: '#7C3AED', to: `/m/tasks/new?${relQs}`, testid: 'act-task' },
-    !ACTIVITY_OWN.has(module) && can('meetings') && { icon: CalendarPlus, label: 'Meeting', color: '#E11D48', to: meetingNew, testid: 'act-meeting' },
-    email && { icon: Mail, label: 'E-mail', color: '#0284C7', onClick: () => openOutside(`mailto:${email}`), testid: 'act-mail' },
+    module === 'tasks' && row.status !== 'Completed' && mod.can.edit && { icon: busy === 'done' ? Loader2 : Check, label: busy === 'done' ? 'Saving…' : 'Done', color: '#16A34A', onClick: markDone, testid: 'act-done' },
+    !ACTIVITY_OWN.has(module) && can('tasks') && { icon: CheckSquare, label: 'Task', color: '#8B5CF6', to: `/m/tasks/new?${relQs}`, testid: 'act-task' },
+    !ACTIVITY_OWN.has(module) && can('meetings') && { icon: CalendarPlus, label: 'Meeting', color: '#F43F5E', to: meetingNew, testid: 'act-meeting' },
+    email && { icon: Mail, label: 'Email', color: '#3B82F6', onClick: () => openOutside(`mailto:${email}`), testid: 'act-mail' },
+    (visitable || (module === 'meetings' && sfa)) && { icon: MapPin, label: 'Check In', color: '#8B5CF6', onClick: checkIn, testid: 'act-checkin' },
     place && { icon: Navigation, label: 'Go there', color: '#2563EB', onClick: () => navigateTo(place.lat, place.lng), testid: 'act-nav' },
-    canOrder && { icon: ShoppingCart, label: 'New order', color: '#0891B2', to: `/order/new?account=${orderAccount}${module === 'contacts' ? `&contact=${row.id}` : ''}${module === 'opportunities' ? `&opportunity=${row.id}` : ''}`, testid: 'act-order' },
+    canOrder && { icon: ShoppingCart, label: 'Order', color: '#0891B2', to: `/order/new?account=${orderAccount}${module === 'contacts' ? `&contact=${row.id}` : ''}${module === 'opportunities' ? `&opportunity=${row.id}` : ''}`, testid: 'act-order' },
     VISIT_MODULES.includes(module) && can('calls') && { icon: PhoneCall, label: 'Log call', color: '#EA580C', to: `/call/${module}/${id}`, testid: 'act-log' },
     !ACTIVITY_OWN.has(module) && { icon: BellRing, label: 'Follow-up', color: '#EA580C', onClick: () => { setMore(false); setSheet('fu'); }, testid: 'act-followup' },
     canNote && { icon: StickyNote, label: 'Note', color: '#CA8A04', onClick: () => { setMore(false); setSheet('note'); }, testid: 'act-note' },
     canFile && { icon: Paperclip, label: busy === 'file' ? 'Adding…' : 'File', color: '#475569', onClick: () => addFile(false), testid: 'act-file' },
     visitable && PLACE_MODULES.includes(module) && mod.can.edit && !place && { icon: busy === 'place' ? Loader2 : Crosshair, label: 'Customer is here', color: '#2563EB', onClick: setHere, testid: 'act-place' },
-    boot.chat && boot.chat.create && { icon: MessagesSquare, label: 'Send in chat', color: '#7C3AED', onClick: () => { setMore(false); setSheet('chat'); }, testid: 'act-chat' },
+    boot.chat && boot.chat.create && { icon: MessagesSquare, label: 'Chat', color: '#7C3AED', onClick: () => { setMore(false); setSheet('chat'); }, testid: 'act-chat' },
+    !ACTIVITY_OWN.has(module) && !mod.can.read_only && { icon: Zap, label: 'Quick edit', color: '#6D28D9', onClick: () => { setMore(false); setSheet('quick'); }, testid: 'head-quick' },
     { icon: Share2, label: 'Share', color: '#475569', onClick: share, testid: 'act-share' },
   ].filter(Boolean);
-  const first = all.length > 6 ? all.slice(0, 5) : all;
-  const rest = all.length > 6 ? all.slice(5) : [];
+  const first = all.length > 7 ? all.slice(0, 6) : all;
+  const rest = all.length > 7 ? all.slice(6) : [];
+  // (v1.10) what "+ Add activity" on the timeline offers
+  const addables = all.filter((a) => ['act-log', 'act-task', 'act-meeting', 'act-note', 'act-followup', 'act-file', 'act-checkin'].includes(a.testid));
 
   // a call: its recording (the phone's file can be chosen by hand when it was not found)
   const callStart = module === 'calls' ? Date.parse(String(row.start_time || row.created_at || '').replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(String(row.start_time || '')) ? '' : 'Z')) : 0;
@@ -397,6 +413,58 @@ export default function RecordView() {
     f.paid !== undefined && { k: 'paid', label: 'Received', value: money(f.paid), icon: Check, c: '#059669', go: goRel, small: true },
     f.next_follow_up && { k: 'next', label: 'Next follow-up', value: niceDate(toIso(f.next_follow_up)), icon: BellRing, c: '#EA580C', go: () => { setActTab('follow_ups'); setTab('activities'); }, small: true },
   ].filter(Boolean);
+  // (v1.10) the figures under the actions: how often we spoke to them, and the next follow-up
+  const metsAll = [
+    f.calls !== undefined && { k: 'calls', label: 'Calls', value: f.calls, icon: PhoneCall, c: '#7C3AED', go: () => { setActTab('calls'); setTab('activities'); } },
+    f.visits !== undefined && { k: 'visits', label: 'Visits', value: f.visits, icon: MapPin, c: '#2563EB', go: () => { setActTab('visits'); setTab('activities'); } },
+    f.emails !== undefined && { k: 'emails', label: 'Emails', value: f.emails, icon: Mail, c: '#0284C7', go: () => { setActTab('emails'); setTab('activities'); } },
+    f.last_contact !== undefined && f.visits === undefined && { k: 'last', label: 'Last contact', value: f.last_contact ? ago(f.last_contact).replace(' ago', '') : '-', icon: Clock, c: '#7C3AED', go: () => setTab('timeline') },
+  ].filter(Boolean);
+  const mets = metsAll.filter((x) => x.k !== 'last' || ACTIVITY_OWN.has(module) || mod.can.read_only).slice(0, 3);
+  const nfuAt = f.next_follow_up || null;
+  const nfuState = dueState(toIso(nfuAt));
+  const nfuBox = !ACTIVITY_OWN.has(module) && !mod.can.read_only ? (
+    <button type="button" className={`nfu is-${nfuState}`} onClick={() => (nfuAt ? (setActTab('follow_ups'), setTab('activities')) : setSheet('fu'))} data-testid="stat-next">
+      <span className="nfu-ic"><CalendarClock size={20} /></span>
+      <span className="grow" style={{ minWidth: 0 }}>
+        <span className="nfu-l" style={{ display: 'block' }}>Next follow-up</span>
+        <span className="nfu-v" style={{ display: 'block' }}>{nfuAt ? whenText(toIso(nfuAt)) : 'Not planned'}</span>
+        <span className="nfu-s" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{nfuAt && <DuePill state={nfuState} always />}{nfuAt ? ago(nfuAt) : 'Tap to plan one'}</span>
+      </span>
+    </button>
+  ) : null;
+  const money2 = [
+    f.pipeline_value !== undefined && { k: 'deals', label: `Deals · ${counts.opportunities || 0}`, value: money(f.pipeline_value), go: goRel },
+    f.orders_value !== undefined && { k: 'orders', label: `Quotations · ${counts.quotations || 0}`, value: money(f.orders_value), go: goRel },
+    f.invoiced !== undefined && { k: 'invoiced', label: f.balance_due ? `Invoiced · ${money(f.balance_due)} due` : 'Invoiced', value: money(f.invoiced), go: goRel },
+    f.paid !== undefined && { k: 'paid', label: 'Received', value: money(f.paid), go: goRel },
+  ].filter(Boolean);
+  // (v1.10) the line under the name, the amount, and the key facts of each module
+  const loc = [row.city, row.state].filter(Boolean).join(', ');
+  const owner = (rel && rel.owner) || row.owner_name || row.assigned_counselor || '';
+  const created = row.created_at ? whenText(toIso(row.created_at), { time: false }) : '';
+  const subLine = module === 'leads' ? (row.account_name || [row.city].filter(Boolean).join(''))
+    : module === 'contacts' ? [row.job_title, row.account_name].filter(Boolean).join(' · ')
+      : module === 'accounts' ? [row.account_type, row.industry].filter(Boolean).join(' · ')
+        : ['meetings', 'calls', 'tasks', 'tickets'].includes(module) ? (rel && rel.links && rel.links[0] ? `${rel.links[0].label} ${rel.links[0].title}` : (row.account_name || ''))
+          : row.account_name || row.contact_name || company || '';
+  const heroAmount = module === 'opportunities' ? row.amount : ['quotations', 'invoices'].includes(module) ? row.grand_total : module === 'payments' ? row.amount : module === 'subscriptions' ? row.recurring_amount : module === 'products' ? row.selling_price : null;
+  const F = (icon, label, value) => ({ icon, label, value: value === null || value === undefined ? '' : String(value) });
+  const facts = {
+    leads: [F(Tag, 'Source', row.source), F(User, 'Assigned to', owner), F(CalendarDays, 'Created on', created), F(MapPin, 'Location', loc), F(Briefcase, 'Interested in', row.product_interest || row.service_interest)],
+    contacts: [F(Briefcase, 'Job title', row.job_title), F(User, 'Owner', owner), F(CalendarDays, 'Created on', created), F(MapPin, 'Location', loc)],
+    accounts: [F(Building2, 'Industry', row.industry), F(User, 'Owner', owner), F(CalendarDays, 'Customer since', row.customer_since ? whenText(row.customer_since, { time: false }) : created), F(MapPin, 'Location', loc)],
+    opportunities: [F(Layers, 'Stage', row.stage_name), F(CalendarDays, 'Close date', row.expected_close_date ? whenText(row.expected_close_date, { time: false }) : ''), F(Percent, 'Probability', row.probability !== null && row.probability !== undefined ? `${row.probability}%` : ''), F(User, 'Owner', owner)],
+    quotations: [F(CalendarDays, 'Quote date', row.quote_date ? whenText(toIso(row.quote_date), { time: false }) : ''), F(Timer, 'Valid until', row.valid_until ? whenText(row.valid_until, { time: false }) : ''), F(User, 'Salesperson', owner), F(Hash, 'Items', Array.isArray(row.items) ? row.items.length : '')],
+    subscriptions: [F(Layers, 'Plan', row.plan), F(Clock, 'Billing', row.billing_cycle), F(CalendarClock, 'Renewal', row.renewal_date ? whenText(row.renewal_date, { time: false }) : ''), F(User, 'Owner', owner)],
+    meetings: [F(CalendarDays, 'When', row.start_datetime ? whenText(toIso(row.start_datetime)) : ''), F(Video, 'Type', row.meeting_type), F(MapPin, 'Where', row.location), F(User, 'With', owner)],
+    calls: [F(String(row.direction || '').toLowerCase() === 'inbound' ? ArrowDownLeft : ArrowUpRight, 'Direction', row.direction), F(Timer, 'Length', row.duration_seconds ? `${Math.floor(row.duration_seconds / 60)}m ${row.duration_seconds % 60}s` : ''), F(Tag, 'Outcome', row.call_outcome), F(User, 'By', owner)],
+    tasks: [F(CalendarClock, 'Due', row.due_date ? whenText(row.due_date, { time: false }) : 'No date'), F(Star, 'Priority', row.priority), F(User, 'Assigned to', owner), F(CalendarDays, 'Created on', created)],
+    products: [F(Hash, 'SKU', row.sku), F(Layers, 'Category', row.category), F(Percent, 'Tax', row.tax_percent !== null && row.tax_percent !== undefined ? `${row.tax_percent}%` : ''), F(Tag, 'Unit', row.unit)],
+    tickets: [F(Hash, 'Ticket', row.ticket_number), F(Tag, 'Category', row.category), F(CalendarClock, 'Resolution due', row.resolution_due_at ? whenText(toIso(row.resolution_due_at)) : ''), F(User, 'Agent', owner)],
+    invoices: [F(CalendarDays, 'Invoice date', row.doc_date ? whenText(toIso(row.doc_date), { time: false }) : ''), F(CalendarClock, 'Due date', row.due_date ? whenText(row.due_date, { time: false }) : ''), F(Wallet, 'Balance due', money(row.balance_due)), F(User, 'Salesperson', owner)],
+    payments: [F(CalendarDays, 'Date', row.payment_date ? whenText(toIso(row.payment_date), { time: false }) : ''), F(Wallet, 'Mode', row.payment_mode), F(Hash, 'Reference', row.transaction_number), F(Receipt, 'Installment', row.installment_number)],
+  }[module] || [F(CalendarDays, 'Created on', created), F(User, 'Owner', owner)];
 
   // what can be added from the Related tab
   const relAdd = (k) => {
@@ -427,54 +495,83 @@ export default function RecordView() {
       </>} />
       <StatusBars />
       <div className="body">
-        <div className="card hero-card rec-head" data-testid="record-head">
-          <div className="flex" style={{ alignItems: 'flex-start', gap: 14 }}>
-            <Avatar name={title} big />
+        {/* (v1.10) the summary: who / what, status, how to reach them, and the key facts (folds away) */}
+        <div className="sum" data-testid="record-head">
+          <div className="sum-top">
+            {module === 'products' && row.thumb_url ? <Initials name={title} img={absolute(row.thumb_url)} size={64} />
+              : ['leads', 'contacts', 'accounts'].includes(module) ? <Initials name={title} size={folded ? 48 : 64} solid />
+                : <span className="ini" style={{ width: folded ? 48 : 60, height: folded ? 48 : 60, color: colorOf(module), background: `color-mix(in srgb, ${colorOf(module)} 13%, #fff)` }}>{(() => { const I = iconOf(module); return <I size={folded ? 22 : 26} />; })()}</span>}
             <div className="grow" style={{ minWidth: 0 }}>
-              <div className="rec-title" data-testid="record-title">{title}</div>
-              {(company || row.city || row.state) && <div className="muted rec-sub">{[company, !company && row.city, !company && row.state].filter(Boolean).join(' · ')}</div>}
-              {(phone || email) && (
-                <div className="rec-contacts">
-                  {phone && <button type="button" className="rec-contact" onClick={call} data-testid="head-phone"><Phone size={15} /> {phone}</button>}
-                  {email && <button type="button" className="rec-contact" onClick={() => openOutside(`mailto:${email}`)} data-testid="head-email"><Mail size={15} /> <span className="ellipsis">{email}</span>{extraMails.length > 0 && <span className="tiny strong" style={{ flex: 'none', color: 'var(--brand)' }} data-testid="more-emails-chip">+{extraMails.length}</span>}</button>}
-                </div>
-              )}
+              <div className="sum-name" data-testid="record-title">{title}</div>
+              {subLine && <div className="sum-sub ellipsis">{subLine}</div>}
+              <div className="sum-badges">
+                {status && <Badge value={status} testid="sum-status" />}
+                {row.lead_rating && <Badge value={/hot/i.test(row.lead_rating) ? 'Hot Lead' : row.lead_rating} tone={/hot/i.test(row.lead_rating) ? 'red' : /warm/i.test(row.lead_rating) ? 'orange' : 'blue'} icon={/hot/i.test(row.lead_rating) ? Flame : undefined} />}
+                {row.priority && module !== 'tasks' && module !== 'tickets' ? null : row.priority && <Badge value={row.priority} icon={/high|critical|urgent/i.test(row.priority) ? Star : undefined} />}
+                {mod.can.read_only && <Badge value="View only" tone="grey" />}
+              </div>
             </div>
-            {status && <span className="rec-status"><StatusTag value={status} /></span>}
+            {row.lead_score !== undefined && row.lead_score !== null && (
+              <div className="sum-score" data-testid="sum-score">Score <b>{Number(row.lead_score) >= 70 && <Flame size={13} />}{row.lead_score}</b></div>
+            )}
+            {money(heroAmount) && <div className="rc-amount" style={{ fontSize: 17 }}>{money(heroAmount)}</div>}
           </div>
-          {row.grand_total !== undefined && row.grand_total !== null && <div className="strong grad-text" style={{ fontSize: 22 }}>{money(row.grand_total)}</div>}
-          {row.amount !== undefined && row.amount !== null && module === 'opportunities' && <div className="strong grad-text" style={{ fontSize: 22 }}>{money(row.amount)}</div>}
-          {module === 'meetings' && row.start_datetime && <div className="small muted flex"><Clock size={14} /> {niceDate(row.start_datetime)} · {niceTime(row.start_datetime)}{row.end_datetime ? `–${niceTime(row.end_datetime)}` : ''}</div>}
-          {place && <div className="tiny faint flex"><MapPin size={12} /> Place saved{place.source === 'visit' ? ' from a visit' : ''}</div>}
-          {!ACTIVITY_OWN.has(module) && (
-            <button type="button" className="btn outline small quick-btn" onClick={() => setSheet('quick')} data-testid="head-quick"><Zap size={15} /> Quick edit · status, follow-up, note</button>
+          {(phone || email) && (
+            <div className="sum-contacts">
+              {phone && <><button type="button" className="sum-contact" onClick={call} data-testid="head-phone"><Phone size={16} /> {phone}</button><button type="button" className="rc-copy" aria-label="Copy the number" onClick={() => copyText(phone, say)}><Copy size={15} /></button></>}
+              {phone && email && <span className="faint">|</span>}
+              {email && <><button type="button" className="sum-contact" onClick={() => openOutside(`mailto:${email}`)} data-testid="head-email"><Mail size={16} /> <span className="ellipsis">{email}</span>{extraMails.length > 0 && <span className="tiny strong" style={{ flex: 'none', color: 'var(--brand)' }} data-testid="more-emails-chip">+{extraMails.length}</span>}</button><button type="button" className="rc-copy" aria-label="Copy the email" onClick={() => copyText(email, say)}><Copy size={15} /></button></>}
+            </div>
           )}
+          {!folded && (
+            <>
+              <Facts items={facts} />
+              {module === 'meetings' && row.start_datetime && <div className="small muted flex"><Clock size={14} /> {niceDate(row.start_datetime)} · {niceTime(row.start_datetime)}{row.end_datetime ? `–${niceTime(row.end_datetime)}` : ''}</div>}
+              {place && <div className="tiny faint flex"><MapPin size={12} /> Place saved{place.source === 'visit' ? ' from a visit' : ''}</div>}
+            </>
+          )}
+          <button type="button" className="sum-toggle" onClick={fold} data-testid="sum-toggle">{folded ? <>More <ChevronDown size={14} /></> : <>Less <ChevronUp size={14} /></>}</button>
         </div>
 
         {first.length > 0 && (
-          <div className="act-row" data-testid="actions">
+          <div className="acts" style={{ '--n': Math.min(7, first.length + (rest.length ? 1 : 0)) }} data-testid="actions">
             {first.map((a) => <Action key={a.testid} {...a} />)}
-            {rest.length > 0 && <Action icon={MoreHorizontal} label="More" color="#4F46E5" onClick={() => setMore(true)} testid="act-more" />}
+            {rest.length > 0 && <Action icon={MoreHorizontal} label="More" color="#6D28D9" soft onClick={() => setMore(true)} testid="act-more" />}
           </div>
         )}
 
-        {stats.length > 0 && (
-          <div className="stat-row" data-testid="r360-kpis">
-            {stats.map((x) => (
-              <button key={x.k} type="button" className="stat" onClick={x.go} data-testid={`stat-${x.k}`}>
-                <span className="stat-ic" style={{ '--c': x.c }}><x.icon size={20} /></span>
-                <span className="grow" style={{ minWidth: 0 }}><span className={`stat-v${x.small ? ' small' : ''}`}>{x.value}</span><span className="stat-l">{x.label}</span></span>
+        {(mets.length > 0 || nfuBox) && (
+          <div className={`mets${mets.length && nfuBox ? '' : ' one'}`} data-testid="r360-kpis">
+            {mets.length > 0 && (
+              <div className="met-box">
+                {mets.map((x) => (
+                  <button key={x.k} type="button" className="met" onClick={x.go} data-testid={`stat-${x.k}`}>
+                    <span className="met-top"><span className="met-ic" style={{ '--c': x.c }}><x.icon size={16} /></span><span className="met-v">{x.value}</span></span>
+                    <span className="met-l">{x.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {nfuBox}
+          </div>
+        )}
+        {money2.length > 0 && (
+          <div className="met-box met-grid" data-testid="r360-money">
+            {money2.map((x) => (
+              <button key={x.k} type="button" className="met" onClick={x.go} data-testid={`stat-${x.k}`}>
+                <span className="met-l">{x.label}</span>
+                <span className="met-v" style={{ fontSize: 15 }}>{x.value}</span>
               </button>
             ))}
           </div>
         )}
 
-        <div className="seg rec-tabs" role="tablist" data-testid="r360-tabs">
+        <div className="tabs2" role="tablist" data-testid="r360-tabs">
           {tabs.map(([k, label, Icon]) => {
-            const n = k === 'notes' ? counts.notes : k === 'files' ? counts.files : k === 'activities' ? ['calls', 'meetings', 'tasks', 'follow_ups'].reduce((a, x) => a + (counts[x] || 0), 0) : k === 'related' ? (REL[module] || []).reduce((a, x) => a + (counts[x] || 0), 0) : 0;
+            const n = k === 'notes' ? counts.notes : k === 'files' ? counts.files : k === 'activities' ? ['calls', 'meetings', 'tasks', 'follow_ups', 'emails'].reduce((a, x) => a + (counts[x] || 0), 0) : k === 'related' ? (REL[module] || []).reduce((a, x) => a + (counts[x] || 0), 0) + ((rel && rel.links) || []).length : 0;
             return (
-              <button key={k} type="button" role="tab" aria-selected={tab === k} className={`seg-b${tab === k ? ' on' : ''}`} onClick={() => setTab(k)} data-testid={`r360-tab-${k}`}>
-                <Icon size={15} /> {label}{n > 0 && <span className="seg-n">{n}</span>}
+              <button key={k} type="button" role="tab" aria-selected={tab === k} className={`tab2${tab === k ? ' on' : ''}`} onClick={() => setTab(k)} data-testid={`r360-tab-${k}`}>
+                <Icon size={16} /> {label}{n > 0 && <span className="seg-n">{n}</span>}
               </button>
             );
           })}
@@ -509,14 +606,21 @@ export default function RecordView() {
                 )}
               </div>
             )}
-            {module === 'tasks' && row.related_module && row.related_record_id && modOf(row.related_module) && (
-              <Link to={`/m/${row.related_module}/${row.related_record_id}`} className="card flex" style={{ color: 'inherit' }} data-testid="task-for"><Link2 size={18} color="var(--brand)" /><span className="grow small">For: {row.related_name || `${modOf(row.related_module).singular} #${row.related_record_id}`}</span><ExternalLink size={16} className="faint" /></Link>
+            {['tasks', 'meetings', 'tickets', 'payments', 'invoices', 'quotations', 'contacts', 'opportunities'].includes(module) && rel && (rel.links || []).length > 0 && (
+              <div className="lcs" data-testid="detail-links">
+                {rel.links.map((l) => <LinkCard key={`${l.module}-${l.id}-${l.label}`} to={linkable(l.module) ? `/m/${l.module}/${l.id}` : null} label={l.label} title={l.title} icon={iconOf(l.module)} color={colorOf(l.module)} />)}
+              </div>
             )}
             <Sections module={module} id={id} mod={mod} row={row} values={values} canEdit={mod.can.edit} extraMails={extraMails} />
           </>
         )}
 
-        {tab === 'related' && (!rel ? <Loading /> : (
+        {tab === 'related' && rel && (rel.links || []).length > 0 && (
+          <div className="lcs" data-testid="r360-links">
+            {rel.links.map((l) => <LinkCard key={`${l.module}-${l.id}-${l.label}`} to={linkable(l.module) ? `/m/${l.module}/${l.id}` : null} label={l.label} title={l.title} icon={iconOf(l.module)} color={colorOf(l.module)} sub={modOf(l.module) ? modOf(l.module).singular : ''} />)}
+          </div>
+        )}
+        {tab === 'related' && (!rel ? <Loading /> : (REL[module] || []).some((k) => counts[k] > 0 || relAdd(k)) && (
           <div className="card col" style={{ gap: 14 }} data-testid="r360-related">
             {(REL[module] || []).filter((k) => counts[k] > 0 || relAdd(k)).map((k) => {
               const [label, Icon, c] = REL_LABEL[k];
@@ -534,7 +638,7 @@ export default function RecordView() {
           </div>
         ))}
 
-        {tab === 'timeline' && (!rel ? <Loading /> : <Timeline items={rel.timeline || []} linkable={linkable} />)}
+        {tab === 'timeline' && (!rel ? <Loading /> : <Timeline2 items={rel.timeline || []} linkable={linkable} onAdd={addables.length ? () => setSheet('add') : null} />)}
 
         {tab === 'activities' && (!rel ? <Loading /> : (
           <div className="col" style={{ gap: 10 }} data-testid="r360-activities">
@@ -586,6 +690,11 @@ export default function RecordView() {
       {more && (
         <Sheet title={title} onClose={() => setMore(false)}>
           <div className="tiles" data-testid="more-actions">{all.map((a) => <Action key={a.testid} {...a} onClick={a.onClick ? () => { setMore(false); a.onClick(); } : undefined} />)}</div>
+        </Sheet>
+      )}
+      {sheet === 'add' && (
+        <Sheet title="Add activity" onClose={() => setSheet('')}>
+          <div className="tiles" data-testid="add-activity">{addables.map((a) => <Action key={a.testid} {...a} onClick={a.onClick ? () => { setSheet(''); a.onClick(); } : undefined} />)}</div>
         </Sheet>
       )}
       {sheet === 'fu' && <FollowUpSheet module={module} id={id} title={title} onClose={() => setSheet('')} onDone={() => { setSheet(''); loadRel(); }} />}

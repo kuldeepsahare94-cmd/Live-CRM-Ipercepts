@@ -95,10 +95,12 @@ export function List({ tab, rows, linkable }) {
       case 'tasks': return { to: 'tasks', title: r.task_title, line: r.status, when: r.at };
       case 'notes': return { title: r.title || 'Note', line: String(r.body || '').replace(/<[^>]+>/g, ' ').trim().slice(0, 200), when: r.at };
       case 'follow_ups': return { title: r.subject || 'Follow-up', line: [r.status, r.notes].filter(Boolean).join(' · '), when: r.at };
+      case 'leads': return { to: 'leads', title: r.name, line: [r.status, r.mobile].filter(Boolean).join(' · '), when: r.converted_at || r.at };
+      case 'emails': return { title: r.subject || '(no subject)', line: [String(r.direction || '').toLowerCase() === 'inbound' ? `From ${r.from_address || ''}` : `To ${r.to_address || ''}`, r.status].filter(Boolean).join(' · '), when: r.at };
       case 'contacts': return { to: 'contacts', title: r.name, line: [r.job_title, r.mobile].filter(Boolean).join(' · ') };
-      case 'invoices': case 'proformas': return { title: r.doc_number, line: [r.payment_status || r.status, r.balance_due ? `due ${money(r.balance_due)}` : ''].filter(Boolean).join(' · '), amount: r.grand_total, when: r.doc_date || r.at };
-      case 'payments': return { title: r.payment_number, line: r.status, amount: r.amount, when: r.payment_date || r.at };
-      case 'tickets': return { title: r.subject || r.ticket_number, line: [r.ticket_number, r.status].filter(Boolean).join(' · '), when: r.at };
+      case 'invoices': case 'proformas': return { to: tab === 'invoices' ? 'invoices' : null, title: r.doc_number, line: [r.payment_status || r.status, r.balance_due ? `due ${money(r.balance_due)}` : ''].filter(Boolean).join(' · '), amount: r.grand_total, when: r.doc_date || r.at };
+      case 'payments': return { to: 'payments', title: r.payment_number, line: r.status, amount: r.amount, when: r.payment_date || r.at };
+      case 'tickets': return { to: 'tickets', title: r.subject || r.ticket_number, line: [r.ticket_number, r.status].filter(Boolean).join(' · '), when: r.at };
       case 'subscriptions': return { to: 'subscriptions', title: [r.subscription_number, r.plan].filter(Boolean).join(' · '), line: [r.status, r.renewal_date ? `renews ${niceDate(r.renewal_date)}` : ''].filter(Boolean).join(' · '), amount: r.recurring_amount };
       default: return { title: `#${r.id}` };
     }

@@ -86,12 +86,14 @@ function Range({ label, value, onChange, testid }) {
 }
 
 /** the panel: choose, then "Show N" (or "Clear") */
-export function FilterSheet({ spec, value, onApply, onClose }) {
+export function FilterSheet({ spec, value, onApply, onClose, top = null }) {
   const [v, setV] = useState(() => ({ ...EMPTY, ...value, fields: { ...(value.fields || {}) }, created: { ...(value.created || {}) }, date: { ...(value.date || {}) } }));
   return (
     <Sheet title="Filter" onClose={onClose}>
       {!spec ? <Loading /> : (
         <div className="col" style={{ gap: 16 }} data-testid="filter-sheet">
+          {/* (v1.10) whose records and which leads, at the top of the same panel */}
+          {top}
           {spec.statuses.length > 0 && (
             <div className="col" style={{ gap: 6 }}>
               <div className="card-title" style={{ margin: 0 }}>{spec.status_label}</div>

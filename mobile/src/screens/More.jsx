@@ -52,7 +52,7 @@ export default function More() {
             <div className="tiles">
               <Link to="/follow-ups" className="tile" data-testid="more-followups"><span className="ic" style={{ background: '#4F46E51A', color: '#4F46E5' }}><BellRing size={20} /></span>Follow-ups</Link>
               {boot.modules.map((m) => { const Ic = iconOf(m.api_name); return (
-                <Link key={m.api_name} to={`/m/${m.api_name}`} className="tile" data-testid={`more-mod-${m.api_name}`}><span className="ic" style={{ background: `${colorOf(m.api_name)}1A`, color: colorOf(m.api_name) }}><Ic size={20} /></span>{m.plural || m.api_name}</Link>
+                <Link key={m.api_name} to={`/m/${m.api_name}`} className="tile" data-testid={`more-mod-${m.api_name}`}><span className="ic" style={{ background: `${colorOf(m.api_name)}1A`, color: colorOf(m.api_name) }}><Ic size={20} /></span>{(m.plural || m.api_name).replace(/ & Services$/, '').replace(/ \/ AMC$/, '')}</Link>
               ); })}
             </div>
           </div>

@@ -8,6 +8,7 @@ import { LocateFixed, Loader2, MapPin } from 'lucide-react';
 import { GET, qs } from '../lib/api';
 import { here } from '../lib/location';
 import { VoiceArea } from './ui';
+import { deviceArea } from '../lib/deviceArea';
 
 const PIN_KEYS = ['postal_code', 'pincode', 'pin_code', 'pin', 'zip', 'zip_code', 'zipcode', 'postcode'];
 const AREA_KEYS = ['area', 'locality'];
@@ -58,7 +59,14 @@ export default function AddressPick({ value, onChange, values = {}, onSet, prefi
     try {
       const fix = await here({ timeout: 15000, good: 50 });
       near.current = { lat: fix.lat, lng: fix.lng };
-      const x = await GET(`/address/reverse${qs({ lat: fix.lat, lng: fix.lng })}`);
+      let x = null;
+      try { x = await GET(`/address/reverse${qs({ lat: fix.lat, lng: fix.lng })}`); } catch (e) {
+        // (v1.10) the map service busy: the phone asks for the area itself (city, state, PIN code)
+        const area = e.offline ? null : await deviceArea(fix.lat, fix.lng);
+        if (!area) throw e;
+        choose(area); setNote((n) => `${n ? `${n} ` : ''}Only the area was found: add the street.`);
+        return;
+      }
       if (x.result) choose(x.result); else setNote('No address was found for this place. Type it.');
     } catch (e) {
       setNote(e.offline ? 'No internet: type the address.' : e.message || 'Where you are could not be found. Type the address.');

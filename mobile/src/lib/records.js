@@ -10,6 +10,8 @@ export const TITLE = {
   leads: (r) => r.student_name, contacts: (r) => [r.first_name, r.last_name].filter(Boolean).join(' '), accounts: (r) => r.account_name,
   opportunities: (r) => r.opportunity_name, quotations: (r) => r.quote_number, subscriptions: (r) => r.subscription_number || r.plan,
   meetings: (r) => r.meeting_title, calls: (r) => r.call_subject, tasks: (r) => r.task_title, products: (r) => r.product_name,
+  // (v1.10) read in the app
+  tickets: (r) => r.subject || r.ticket_number, invoices: (r) => r.doc_number, payments: (r) => r.payment_number,
 };
 export const titleOf = (module, row) => (row && (TITLE[module] ? TITLE[module](row) : row.name)) || (row ? `#${row.id}` : '');
 export const PHONE_FIELDS = ['mobile', 'phone', 'phone_number', 'alternate_mobile', 'whatsapp'];
@@ -65,6 +67,17 @@ export async function saveRecord(module, id, values, fields, { duplicate = 'ask'
 export function show(field, value, row) {
   if (value === null || value === undefined || value === '') return '';
   if (field.type === 'checkbox') return Number(value) ? 'Yes' : 'No';
+  // (v1.10) a date or a moment the way a person reads it ("4 Sep 2026", "4 Sep 2026, 15:00")
+  if ((field.type === 'date' || field.type === 'datetime') && /^\d{4}-\d{2}-\d{2}/.test(String(value))) {
+    const v = String(value);
+    const zoned = /[zZ]|[+-]\d\d:?\d\d$/.test(v);
+    const d = zoned ? new Date(v) : null;
+    const day = d && !Number.isNaN(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : v.slice(0, 10);
+    const [y, m, dd] = day.split('-').map(Number);
+    const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1];
+    const time = field.type === 'datetime' ? (d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : v.slice(11, 16)) : '';
+    return `${dd} ${M} ${y}${time && time !== '00:00' ? `, ${time}` : ''}`;
+  }
   if (['dropdown', 'radio'].includes(field.type)) return (field.options.find((o) => o.value === String(value)) || {}).label || String(value);
   if (field.type === 'multiselect') {
     let list = value;
