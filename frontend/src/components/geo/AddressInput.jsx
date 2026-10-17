@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LocateFixed, Loader2, MapPin } from 'lucide-react';
 import { api } from '../../api';
+import { deviceArea } from '../../deviceArea';
 
 export const ADDRESS_RE = /^(?:(billing|shipping|mailing|permanent|current|office|home|other|registered|delivery)_)?(address|address_line|address_line_1|address1|street|street_address)$/;
 const PIN_KEYS = ['postal_code', 'pincode', 'pin_code', 'pin', 'zip', 'zip_code', 'zipcode', 'postcode'];
@@ -81,7 +82,12 @@ export default function AddressInput({ value, onChange, values = {}, onSet, pref
       try {
         const x = await api.addressReverse(p.coords.latitude, p.coords.longitude);
         if (x.result) choose(x.result); else setNote('No address was found for this place. Type it.');
-      } catch (e) { setNote(e.message || 'The address could not be found. Type it.'); } finally { setBusy(''); }
+      } catch (e) {
+        // (v1.10) the map service busy: this browser asks for the area itself (city, state, PIN code)
+        const area = await deviceArea(p.coords.latitude, p.coords.longitude);
+        if (area) { choose(area); setNote((n) => `${n ? `${n} ` : ''}Only the area was found: add the street.`); }
+        else setNote(e.message || 'The address could not be found. Type it.');
+      } finally { setBusy(''); }
     }, (err) => { setBusy(''); setNote(err && err.code === 1 ? 'Allow the location for this site (the lock icon next to the address bar), or type the address.' : 'Where you are could not be found. Type the address.'); },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   };
