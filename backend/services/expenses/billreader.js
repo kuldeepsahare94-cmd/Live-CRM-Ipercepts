@@ -159,6 +159,20 @@ function repairGstin(t) {
     else if (want[i] === 'Z') out += (ch === '2' || ch === '7') ? 'Z' : ch;
     else out += ch;
   }
+  // (v1.9) the 13th place (how many registrations the PAN has in that state) is nearly always a digit,
+  // and a photo turns "1" into "I": try the digit there, and the look-alikes of the check letter,
+  // and keep the first one whose check letter fits
+  if (GSTIN.test(out) && !gstinChecks(out)) {
+    const twins = (ch) => [ch, TO_DIGIT[ch], TO_LETTER[ch]].filter((x, i, a) => x && a.indexOf(x) === i);
+    const ent = twins(out[12]).filter((x) => /[1-9A-Z]/.test(x)).sort((x, y) => (/\d/.test(y) ? 1 : 0) - (/\d/.test(x) ? 1 : 0));
+    for (const e of ent) {
+      for (const c of twins(out[14])) {
+        const t = out.slice(0, 12) + e + 'Z' + c;
+        if (GSTIN.test(t) && gstinChecks(t)) return t;
+      }
+    }
+    if (TO_DIGIT[out[12]] && /[1-9]/.test(TO_DIGIT[out[12]])) out = out.slice(0, 12) + TO_DIGIT[out[12]] + out.slice(13);
+  }
   // the last letter is a check letter worked out from the first 14: when only it is doubtful, it is worked out again
   if (GSTIN.test(out) && !gstinChecks(out)) {
     let sum = 0;
@@ -171,7 +185,8 @@ function repairGstin(t) {
 function findGstin(lines) {
   let weak = null;
   for (const line of lines) {
-    const up = line.toUpperCase();
+    // (v1.9) a photo reads a thin "I" as "|" or "!"
+    const up = line.toUpperCase().replace(/[|!]/g, 'I');
     // (after a label the number may be broken by spaces: "27 AACCT 6552 B 1 ZI")
     const spaced = /GST\w*\s*(?:NO\.?|NUMBER|IN)?\s*[:#-]?\s*((?:[0-9A-Z][\s-]?){15,19})/.exec(up);
     const cands = [...(up.match(/[0-9A-Z]{15}/g) || [])];
@@ -180,8 +195,8 @@ function findGstin(lines) {
       if (GSTIN.test(t) && gstinChecks(t)) return { value: t, sure: 'high' };
       const fixed = repairGstin(t);
       if (fixed && gstinChecks(fixed)) return { value: fixed, sure: 'medium' };
-      if (!weak && GSTIN.test(t)) weak = t;
       if (!weak && fixed) weak = fixed;
+      if (!weak && GSTIN.test(t)) weak = t;
     }
   }
   // (it has the shape of a GSTIN but the check letter does not fit: offered, marked as unsure)
