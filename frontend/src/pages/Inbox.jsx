@@ -354,7 +354,7 @@ export default function Inbox() {
         })}
         <div className="relative flex-1 min-w-[200px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-faint)]" />
-          <input className="input pl-9" style={{ paddingLeft: 36 }} value={q} onChange={(e) => setQ(e.target.value)}
+          <input className="input pl-9" style={{ paddingLeft: '2.25rem' }} value={q} onChange={(e) => setQ(e.target.value)}
             placeholder="Search subject, sender or body…" aria-label="Search email" />
         </div>
       </div>

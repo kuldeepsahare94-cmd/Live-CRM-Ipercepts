@@ -41,7 +41,7 @@ export default function SupportShell({ children }) {
   return (
     <div className="sd-canvas -m-4 sm:-m-6 p-4 sm:p-6 min-h-full">
       <div className="w-full flex flex-col lg:flex-row gap-5">
-        <aside className="lg:w-[214px] shrink-0" aria-label="Support navigation">
+        <aside className="lg:w-[13.5rem] shrink-0" aria-label="Support navigation">
           <div className="lg:sticky lg:top-4">
             <div className="hidden lg:flex items-center gap-2 px-3 pb-3">
               <span className="w-8 h-8 rounded-xl flex items-center justify-center text-white" style={{ background: 'linear-gradient(135deg,#3B82F6,#6C4FF7)' }}>

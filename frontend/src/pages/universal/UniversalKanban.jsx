@@ -212,7 +212,7 @@ export default function UniversalKanban() {
                   outline: isTarget ? `2px dashed ${col.color}` : 'none',
                   outlineOffset: '3px',
                   transform: isTarget ? 'translateY(-2px)' : 'none',
-                  maxHeight: 'calc(100vh - 380px)',
+                  maxHeight: 'calc(100vh - 23.75rem)',
                 }}>
                 {/* Stage colour as a solid top band, so columns are
                     distinguishable at a glance rather than by a small dot. */}

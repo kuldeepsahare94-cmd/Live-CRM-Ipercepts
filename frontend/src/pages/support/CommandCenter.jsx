@@ -56,7 +56,7 @@ function SupportSearch() {
     <div className="relative flex-1 min-w-[220px] max-w-[460px]" ref={ref}>
       <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} />
       <input value={q} onChange={(e) => setQ(e.target.value)} onFocus={() => res && setOpen(true)}
-        className="input w-full" style={{ paddingLeft: 36 }} placeholder="Search tickets, customers, contacts, ticket number…" aria-label="Search support" />
+        className="input w-full" style={{ paddingLeft: '2.25rem' }} placeholder="Search tickets, customers, contacts, ticket number…" aria-label="Search support" />
       {open && res && (
         <div className="absolute z-40 mt-1 w-full bg-white border border-line rounded-xl shadow-xl py-1 max-h-96 overflow-y-auto">
           {!any && <p className="px-3 py-2 text-xs" style={{ color: 'var(--color-muted)' }}>No matches.</p>}

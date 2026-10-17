@@ -72,7 +72,7 @@ function CustomerPick({ value, onChange, disabled }) {
       </select>
       <div className="relative flex-1 min-w-0">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} />
-        <input className="input" style={{ paddingLeft: 34 }} value={q} placeholder="Search by name…" onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+        <input className="input" style={{ paddingLeft: '2.125rem' }} value={q} placeholder="Search by name…" onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
           onKeyDown={(e) => { if (e.key === 'Escape' && open) { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); setOpen(false); } }}
           aria-label="Search the customer" data-testid="customer-search" />
         {open && (

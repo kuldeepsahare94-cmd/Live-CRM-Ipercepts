@@ -32,7 +32,7 @@ function LeaveRow({ l, onChanged, mine = false }) {
       <td className="px-3 py-2 text-right">
         {l.can_decide && (no ? (
           <span className="inline-flex gap-1.5 items-center">
-            <input className="input" style={{ width: 200 }} autoFocus placeholder="Why not?" value={note} onChange={(e) => setNote(e.target.value)} data-testid="leave-why" />
+            <input className="input" style={{ width: '12.5rem' }} autoFocus placeholder="Why not?" value={note} onChange={(e) => setNote(e.target.value)} data-testid="leave-why" />
             <button type="button" className="btn btn-ghost" onClick={() => setNo(false)}>Back</button>
             <button type="button" className="btn btn-danger" disabled={busy || !note.trim()} onClick={() => act(() => api.decideFieldLeave(l.id, { approve: false, note: note.trim() }))} data-testid="leave-reject-send">Send</button>
           </span>

@@ -394,10 +394,10 @@ function PreviewModal({ t, onClose, onUse, busy, can }) {
               {pdfError ? (
                 <div className="card p-6 text-center text-sm" style={{ color: 'var(--color-muted)' }}>{pdfError}</div>
               ) : !pdfUrl ? (
-                <div className="skeleton rounded-xl" style={{ height: 560 }} />
+                <div className="skeleton rounded-xl" style={{ height: '35rem' }} />
               ) : (
                 <iframe title="Template PDF preview" src={pdfUrl}
-                  className="w-full rounded-xl bg-white" style={{ height: 560, border: '1px solid var(--color-line)' }} />
+                  className="w-full rounded-xl bg-white" style={{ height: '35rem', border: '1px solid var(--color-line)' }} />
               )}
             </div>
           </div>

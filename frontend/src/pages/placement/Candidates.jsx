@@ -33,7 +33,7 @@ export default function Candidates() {
         <select className="input w-auto" value={f.source} onChange={(e) => set('source', e.target.value)} aria-label="Source"><option value="">Any source</option>{(meta?.sources || []).map((s) => <option key={s}>{s}</option>)}</select>
         <select className="input w-auto" value={f.city} onChange={(e) => set('city', e.target.value)} aria-label="City"><option value="">Any city</option>{(facets?.cities || []).map((c) => <option key={c.value}>{c.value}</option>)}</select>
         <select className="input w-auto" value={f.notice} onChange={(e) => set('notice', e.target.value)} aria-label="Notice period"><option value="">Any notice</option>{(meta?.notice_periods || []).map((s) => <option key={s}>{s}</option>)}</select>
-        <span className="inline-flex items-center gap-1"><input className="input" style={{ width: 70 }} type="number" min="0" placeholder="Yrs from" value={f.exp_min} onChange={(e) => set('exp_min', e.target.value)} aria-label="Experience from" /><input className="input" style={{ width: 70 }} type="number" min="0" placeholder="to" value={f.exp_max} onChange={(e) => set('exp_max', e.target.value)} aria-label="Experience up to" /></span>
+        <span className="inline-flex items-center gap-1"><input className="input" style={{ width: '4.375rem' }} type="number" min="0" placeholder="Yrs from" value={f.exp_min} onChange={(e) => set('exp_min', e.target.value)} aria-label="Experience from" /><input className="input" style={{ width: '4.375rem' }} type="number" min="0" placeholder="to" value={f.exp_max} onChange={(e) => set('exp_max', e.target.value)} aria-label="Experience up to" /></span>
         {['Do not call', 'Blacklisted'].map((s) => <button key={s} type="button" className="text-xs px-2 py-1 rounded-full" onClick={() => set('status', f.status === s ? '' : s)} style={f.status === s ? { background: 'var(--color-danger)', color: '#fff' } : { background: 'var(--color-canvas-alt)', color: 'var(--color-muted)' }}>{s}</button>)}
         <div className="flex-1" />
         {meta?.can?.create && <button type="button" className="btn btn-primary" onClick={() => setForm(true)} data-testid="new-candidate"><Plus className="w-4 h-4" /> Add candidate</button>}
@@ -55,7 +55,7 @@ export default function Candidates() {
                     <td className={td}>{lakh(c.current_ctc)} → <b className="text-ink">{lakh(c.expected_ctc)}</b></td>
                     <td className={td}>{c.notice_period || '—'}</td>
                     <td className={td}>{c.city || '—'}</td>
-                    <td className={td} style={{ maxWidth: 230 }}><Skills text={c.skills} max={3} /></td>
+                    <td className={td} style={{ maxWidth: '14.375rem' }}><Skills text={c.skills} max={3} /></td>
                     <td className={td}>{c.source || '—'}</td>
                     <td className={td}>{c.last_contacted ? niceDate(c.last_contacted) : <span className="t-meta">never</span>}</td>
                     <td className={td}><Badge tone={candTone(c.status)}>{c.status}</Badge>{c.live_jobs > 0 && <div className="t-meta mt-0.5">{c.live_jobs} live</div>}</td>

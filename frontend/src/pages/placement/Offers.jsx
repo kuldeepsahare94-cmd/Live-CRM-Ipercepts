@@ -118,7 +118,7 @@ export default function Offers() {
                     <td className={td}><Badge tone={TONE[o.status]}>{o.status}</Badge>{o.decline_reason ? <div className="t-meta mt-0.5">{o.decline_reason}</div> : null}</td>
                     <td className={td} onClick={(e) => e.stopPropagation()}>
                       {o.invoice_id ? <Link to={`/records/invoices/${o.invoice_id}`} className="underline text-ink">{o.invoice_number}</Link>
-                        : o.status === 'Joined' && o.fee_amount && canCreate ? <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: 12 }} disabled={busy === o.id} onClick={() => invoice(o)} data-testid={`invoice-${o.id}`}><ReceiptText className="w-3.5 h-3.5" /> {busy === o.id ? 'Making…' : 'Make invoice'}</button>
+                        : o.status === 'Joined' && o.fee_amount && canCreate ? <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '0.75rem' }} disabled={busy === o.id} onClick={() => invoice(o)} data-testid={`invoice-${o.id}`}><ReceiptText className="w-3.5 h-3.5" /> {busy === o.id ? 'Making…' : 'Make invoice'}</button>
                           : <span className="t-meta">—</span>}
                       {o.invoice_id && <div className="t-meta">{o.invoice_payment}</div>}
                     </td>

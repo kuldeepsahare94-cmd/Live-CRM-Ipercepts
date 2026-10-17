@@ -40,7 +40,7 @@ export default function Dashboard() {
         <Panel title="Pipeline right now" action={<Link to="/placement/board" className="text-xs font-medium" style={{ color: 'var(--color-brand)' }}>Open the board</Link>} testid="pl-funnel">
           <div className="space-y-2.5">
             {live.map((f) => (
-              <div key={f.stage} className="grid items-center gap-3" style={{ gridTemplateColumns: '112px 1fr 34px' }}>
+              <div key={f.stage} className="grid items-center gap-3" style={{ gridTemplateColumns: '7rem 1fr 2.125rem' }}>
                 <span className="text-[13px] text-ink">{f.stage}</span>
                 <Bar value={f.count} max={funnelMax} color={STAGE_HEX[f.stage]} />
                 <span className="text-sm font-semibold text-ink text-right">{f.count}</span>

@@ -290,7 +290,7 @@ export default function DateTimePicker({
               ))}
             </div>
 
-            <div className="flex" style={{ maxHeight: 300 }}>
+            <div className="flex" style={{ maxHeight: '18.75rem' }}>
               {/* Month grid */}
               <div className="p-3 flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-2">
@@ -357,7 +357,7 @@ export default function DateTimePicker({
               {/* Time list */}
               {!dateOnly && (
               <div className="relative shrink-0 overflow-y-auto thin-scroll py-2"
-                ref={timeList} style={{ width: 104, borderLeft: '1px solid var(--color-line)' }}>
+                ref={timeList} style={{ width: '6.5rem', borderLeft: '1px solid var(--color-line)' }}>
                 <div className="px-2 pb-1 flex items-center gap-1">
                   <Clock className="w-3 h-3" style={{ color: 'var(--color-faint)' }} />
                   <span className="text-[10px] font-semibold" style={{ color: 'var(--color-faint)' }}>TIME</span>

@@ -36,7 +36,7 @@ function LogContactModal({ candidate, onClose, onDone }) {
         <Field label="Remark" className="col-span-2"><textarea className="input" rows={2} value={f.remark} onChange={on('remark')} placeholder="What was said" data-testid="contact-remark" /></Field>
         <Field label="Call again on" className="col-span-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <input className="input" style={{ maxWidth: 220 }} type="datetime-local" value={f.next_follow_up} onChange={on('next_follow_up')} data-testid="contact-next" />
+            <input className="input" style={{ maxWidth: '13.75rem' }} type="datetime-local" value={f.next_follow_up} onChange={on('next_follow_up')} data-testid="contact-next" />
             {[['Tomorrow', 1], ['In 3 days', 3], ['Next week', 7]].map(([t, d]) => <button key={t} type="button" className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--color-canvas-alt)' }} onClick={() => quick(d)}>{t}</button>)}
           </div>
         </Field>
@@ -146,7 +146,7 @@ export default function CandidateDetail() {
                 <thead><tr style={{ background: 'var(--color-surface-soft)', color: 'var(--color-muted)' }}><th className={th}>When</th><th className={th}>Round</th><th className={th}>Opening</th><th className={th}>Result</th><th className={th}>Feedback</th></tr></thead>
                 <tbody>
                   {c.interviews.map((i) => (
-                    <tr key={i.id} style={rowStyle}><td className={td}>{niceWhen(i.scheduled_at)}</td><td className={td}>{i.round} · {i.mode}</td><td className={td}>{i.job_title}<div className="t-meta">{i.client_name}</div></td><td className={td}><Badge status={i.result}>{i.result}</Badge></td><td className={td} style={{ maxWidth: 320 }}>{i.feedback || '—'}</td></tr>
+                    <tr key={i.id} style={rowStyle}><td className={td}>{niceWhen(i.scheduled_at)}</td><td className={td}>{i.round} · {i.mode}</td><td className={td}>{i.job_title}<div className="t-meta">{i.client_name}</div></td><td className={td}><Badge status={i.result}>{i.result}</Badge></td><td className={td} style={{ maxWidth: '20rem' }}>{i.feedback || '—'}</td></tr>
                   ))}
                 </tbody>
               </table>

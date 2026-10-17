@@ -185,7 +185,7 @@ export default function ReportBuilder({ onBack, onSaved }) {
         </div>
       </div>
 
-      <div className="grid gap-5 mt-5" style={{ gridTemplateColumns: 'minmax(0, 340px) minmax(0, 1fr)' }}>
+      <div className="grid gap-5 mt-5" style={{ gridTemplateColumns: 'minmax(0, 21.25rem) minmax(0, 1fr)' }}>
         {/* ---------------- controls ---------------- */}
         <div className="card p-4 space-y-4 h-fit no-print">
           <Field label="Module">

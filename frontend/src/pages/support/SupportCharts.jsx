@@ -7,12 +7,14 @@
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend,
 } from 'recharts';
+import { useUiScale } from '../../uiScale';
 
 const TT = { borderRadius: 8, border: 'none', background: '#17233C', color: '#fff', fontSize: 11, padding: '7px 9px' };
 const key = (fn) => (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } };
 
 // Donut with a clickable centre total.
-export function Donut({ data, total, centerLabel, onSelect, onSelectAll, size = 150 }) {
+export function Donut({ data, total, centerLabel, onSelect, onSelectAll, size: size0 = 150 }) {
+  const size = size0 * useUiScale();   // (v1.9) the same shape on every screen
   const shown = data.filter((d) => d.value > 0);
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
@@ -60,7 +62,8 @@ function TrendDot({ cx, cy, payload, dataKey, stroke, onSelect }) {
   );
 }
 
-export function TrendChart({ points, onSelect, height = 220 }) {
+export function TrendChart({ points, onSelect, height: h0 = 220 }) {
+  const height = h0 * useUiScale();
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={points} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
@@ -78,7 +81,8 @@ export function TrendChart({ points, onSelect, height = 220 }) {
   );
 }
 
-export function ComplianceSpark({ points, onSelect, height = 70 }) {
+export function ComplianceSpark({ points, onSelect, height: h0 = 70 }) {
+  const height = h0 * useUiScale();
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={points} margin={{ top: 6, right: 6, left: 6, bottom: 0 }}>

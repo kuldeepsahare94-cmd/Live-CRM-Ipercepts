@@ -64,16 +64,16 @@ export default function ExpenseList({ meta, summary, show, nonce }) {
       <div className="card">
         <div className="p-3 flex items-center gap-2 flex-wrap" style={{ borderBottom: '1px solid var(--color-line)' }}>
           <ScopeBar meta={meta} scope={scope} setScope={setScope} userId={userId} setUserId={setUserId} />
-          <div className="relative" style={{ width: 200 }}>
+          <div className="relative" style={{ width: '12.5rem' }}>
             <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} />
-            <input className="input" style={{ paddingLeft: 32 }} placeholder="Search…" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Search the expenses" />
+            <input className="input" style={{ paddingLeft: '2rem' }} placeholder="Search…" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Search the expenses" />
           </div>
           <select className="input w-auto" value={unclaimed ? '_unclaimed' : status} onChange={(e) => { if (e.target.value === '_unclaimed') { setUnclaimed(true); setStatus(''); } else { setUnclaimed(false); setStatus(e.target.value); } }} aria-label="Status">
             <option value="">Any status</option>
             <option value="_unclaimed">Not claimed yet</option>
             {Object.entries(EXPENSE_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
           </select>
-          <select className="input w-auto" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category" style={{ maxWidth: 180 }}>
+          <select className="input w-auto" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category" style={{ maxWidth: '11.25rem' }}>
             <option value="">Any category</option>
             {meta.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
@@ -107,7 +107,7 @@ export default function ExpenseList({ meta, summary, show, nonce }) {
                 <table className="w-full text-sm" data-testid="expense-table">
                   <thead>
                     <tr style={{ background: 'var(--color-surface-soft)', color: 'var(--color-muted)' }}>
-                      <th className={tableHead} style={{ width: 36 }}>
+                      <th className={tableHead} style={{ width: '2.25rem' }}>
                         {pickable.length > 0 && <input type="checkbox" checked={allPicked} aria-label="Choose all that can be claimed"
                           onChange={() => setPicked((m) => { const n = new Map(m); pickable.forEach((e) => { if (allPicked) n.delete(e.id); else n.set(e.id, e); }); return n; })} />}
                       </th>
@@ -128,12 +128,12 @@ export default function ExpenseList({ meta, summary, show, nonce }) {
                         </td>
                         <td className={`${tableCell} whitespace-nowrap text-ink`}>{niceDate(e.expense_date)}</td>
                         {showPerson && <td className={`${tableCell} whitespace-nowrap`}>{e.user_name}</td>}
-                        <td className={tableCell} style={{ maxWidth: 320 }}>
+                        <td className={tableCell} style={{ maxWidth: '20rem' }}>
                           {/* (a real button: the row can be opened from the keyboard too) */}
                           <button type="button" className="font-medium text-ink truncate block max-w-full text-left hover:underline" onClick={(ev) => { ev.stopPropagation(); askOpenExpense(e.id); }}>{e.category_name}</button>
                           <div className="t-meta truncate">{expenseLine(e)}</div>
                         </td>
-                        <td className={tableCell} style={{ maxWidth: 180 }} onClick={(ev) => ev.stopPropagation()}>
+                        <td className={tableCell} style={{ maxWidth: '11.25rem' }} onClick={(ev) => ev.stopPropagation()}>
                           {e.related ? <Link to={e.related.link} className="hover:underline truncate block" style={{ color: 'var(--color-brand)' }}>{e.related.name}</Link> : <span className="t-meta">—</span>}
                         </td>
                         <td className={tableCell}>{e.receipt_list && e.receipt_list.length ? <BillStrip bills={e.receipt_list} size={34} max={3} /> : <span className="t-meta">—</span>}</td>

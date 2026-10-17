@@ -123,7 +123,7 @@ function CategoryBox({ category, roles, symbol, tally, onClose, onSaved }) {
               <select className="input" value={f.bill} onChange={(e) => set('bill', e.target.value)} aria-label="When a bill is needed">
                 <option value="never">Never</option><option value="always">Always</option><option value="above">Above an amount</option>
               </select>
-              {f.bill === 'above' && <input type="number" inputMode="decimal" min="0" className="input" style={{ width: 120 }} value={f.receipt_above} onChange={(e) => set('receipt_above', e.target.value)} aria-label="Bill needed above" placeholder={symbol} />}
+              {f.bill === 'above' && <input type="number" inputMode="decimal" min="0" className="input" style={{ width: '7.5rem' }} value={f.receipt_above} onChange={(e) => set('receipt_above', e.target.value)} aria-label="Bill needed above" placeholder={symbol} />}
             </div>
           </Field>
           <div className="flex items-end gap-6 pb-1.5">
@@ -260,7 +260,7 @@ export default function SettingsExpenses() {
     </div>
   ) : null);
   const person = (k, label) => (
-    <select className="input w-auto" style={{ minWidth: 200 }} value={s[k] || ''} onChange={(e) => set(k, e.target.value ? Number(e.target.value) : null)} aria-label={label} disabled={!editable}>
+    <select className="input w-auto" style={{ minWidth: '12.5rem' }} value={s[k] || ''} onChange={(e) => set(k, e.target.value ? Number(e.target.value) : null)} aria-label={label} disabled={!editable}>
       <option value="">Nobody</option>
       {data.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
     </select>
@@ -292,7 +292,7 @@ export default function SettingsExpenses() {
             <Toggle on={s.enabled} onChange={(v) => { if (editable) switchOn(v); }} label="Expense management on" disabled={!editable || busy} />
           </div>
           <Row title="How old an expense may be" hint="An older expense is outside the rules. 0 = no limit.">
-            <span className="flex items-center gap-2"><input type="number" min="0" max="3650" className="input" style={{ width: 90 }} value={s.max_age_days} onChange={(e) => set('max_age_days', e.target.value)} aria-label="Days" disabled={!editable} /><span className="t-meta">days</span></span>
+            <span className="flex items-center gap-2"><input type="number" min="0" max="3650" className="input" style={{ width: '5.625rem' }} value={s.max_age_days} onChange={(e) => set('max_age_days', e.target.value)} aria-label="Days" disabled={!editable} /><span className="t-meta">days</span></span>
           </Row>
           <Row title="When an expense is outside the rules" hint="Over a limit, a bill or a note missing, too old.">
             <select className="input w-auto" value={s.over_limit} onChange={(e) => set('over_limit', e.target.value)} aria-label="When an expense is outside the rules" disabled={!editable}>
@@ -312,12 +312,12 @@ export default function SettingsExpenses() {
             </Row>
           )}
           <Row title="Largest bill photo" hint="Photos are made smaller by the app before they are sent; this is for PDFs and odd cases.">
-            <span className="flex items-center gap-2"><input type="number" min="1" max="5" className="input" style={{ width: 80 }} value={s.max_receipt_mb} onChange={(e) => set('max_receipt_mb', e.target.value)} aria-label="Megabytes" disabled={!editable} /><span className="t-meta">MB</span></span>
+            <span className="flex items-center gap-2"><input type="number" min="1" max="5" className="input" style={{ width: '5rem' }} value={s.max_receipt_mb} onChange={(e) => set('max_receipt_mb', e.target.value)} aria-label="Megabytes" disabled={!editable} /><span className="t-meta">MB</span></span>
           </Row>
           <Row title="Numbers" hint="What a claim number and an advance number start with.">
             <span className="flex items-center gap-2">
-              <input className="input" style={{ width: 90 }} maxLength={10} value={s.claim_prefix} onChange={(e) => set('claim_prefix', e.target.value)} aria-label="Claim number starts with" disabled={!editable} />
-              <input className="input" style={{ width: 90 }} maxLength={10} value={s.advance_prefix} onChange={(e) => set('advance_prefix', e.target.value)} aria-label="Advance number starts with" disabled={!editable} />
+              <input className="input" style={{ width: '5.625rem' }} maxLength={10} value={s.claim_prefix} onChange={(e) => set('claim_prefix', e.target.value)} aria-label="Claim number starts with" disabled={!editable} />
+              <input className="input" style={{ width: '5.625rem' }} maxLength={10} value={s.advance_prefix} onChange={(e) => set('advance_prefix', e.target.value)} aria-label="Advance number starts with" disabled={!editable} />
             </span>
           </Row>
           <p className="t-meta mt-3">Amounts are in {s.currency} ({symbol}), the currency of the CRM (Settings → Taxes &amp; Currencies).</p>
@@ -375,8 +375,8 @@ export default function SettingsExpenses() {
           <div className="space-y-2" data-testid="rate-list">
             {rates.map((r, i) => (
               <div key={r.id || `new-${i}`} className="flex items-center gap-2 flex-wrap">
-                <input className="input" style={{ width: 220 }} maxLength={40} value={r.name} onChange={(e) => setRates((l) => l.map((x, n) => (n === i ? { ...x, name: e.target.value } : x)))} placeholder="Vehicle" aria-label="Vehicle" disabled={!editable} />
-                <span className="flex items-center gap-1"><span className="t-meta">{symbol}</span><input type="number" min="0" step="0.5" className="input" style={{ width: 100 }} value={r.rate_per_km} onChange={(e) => setRates((l) => l.map((x, n) => (n === i ? { ...x, rate_per_km: e.target.value } : x)))} aria-label={`Rate per km for ${r.name || 'this vehicle'}`} disabled={!editable} /><span className="t-meta">per km</span></span>
+                <input className="input" style={{ width: '13.75rem' }} maxLength={40} value={r.name} onChange={(e) => setRates((l) => l.map((x, n) => (n === i ? { ...x, name: e.target.value } : x)))} placeholder="Vehicle" aria-label="Vehicle" disabled={!editable} />
+                <span className="flex items-center gap-1"><span className="t-meta">{symbol}</span><input type="number" min="0" step="0.5" className="input" style={{ width: '6.25rem' }} value={r.rate_per_km} onChange={(e) => setRates((l) => l.map((x, n) => (n === i ? { ...x, rate_per_km: e.target.value } : x)))} aria-label={`Rate per km for ${r.name || 'this vehicle'}`} disabled={!editable} /><span className="t-meta">per km</span></span>
                 <label className="flex items-center gap-1.5 text-sm text-ink"><input type="checkbox" checked={r.active !== false} onChange={(e) => setRates((l) => l.map((x, n) => (n === i ? { ...x, active: e.target.checked } : x)))} disabled={!editable} /> In use</label>
                 {editable && <button type="button" className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setRates((l) => l.filter((_, n) => n !== i))} aria-label={`Remove ${r.name || 'this vehicle'}`}><Trash2 className="w-4 h-4" /></button>}
               </div>
@@ -414,7 +414,7 @@ export default function SettingsExpenses() {
                 </span>
               </Row>
               <Row title="Second approval only above" hint="A smaller claim needs the manager only. 0 = every claim needs both.">
-                <span className="flex items-center gap-1"><span className="t-meta">{symbol}</span><input type="number" min="0" className="input" style={{ width: 130 }} value={s.second_level_above} onChange={(e) => set('second_level_above', e.target.value)} aria-label="Second approval only above" disabled={!editable} /></span>
+                <span className="flex items-center gap-1"><span className="t-meta">{symbol}</span><input type="number" min="0" className="input" style={{ width: '8.125rem' }} value={s.second_level_above} onChange={(e) => set('second_level_above', e.target.value)} aria-label="Second approval only above" disabled={!editable} /></span>
               </Row>
             </>
           )}
@@ -424,11 +424,11 @@ export default function SettingsExpenses() {
             </Row>
           )}
           <Row title="Small claims approve themselves" hint="A claim up to this amount, with every expense inside the rules, needs no approver. 0 = never.">
-            <span className="flex items-center gap-1"><span className="t-meta">{symbol}</span><input type="number" min="0" className="input" style={{ width: 130 }} value={s.auto_approve_below} onChange={(e) => set('auto_approve_below', e.target.value)} aria-label="Small claims approve themselves up to" disabled={!editable} /></span>
+            <span className="flex items-center gap-1"><span className="t-meta">{symbol}</span><input type="number" min="0" className="input" style={{ width: '8.125rem' }} value={s.auto_approve_below} onChange={(e) => set('auto_approve_below', e.target.value)} aria-label="Small claims approve themselves up to" disabled={!editable} /></span>
           </Row>
           {Number(s.auto_approve_below) > 0 && (
             <Row title="…but not more than, per person in a month" hint="Stops many small claims from all approving themselves. Once a person is over this in a month, their claims go to the approver again. 0 = no monthly limit.">
-              <span className="flex items-center gap-1"><span className="t-meta">{symbol}</span><input type="number" min="0" className="input" style={{ width: 130 }} value={s.auto_approve_month_limit} onChange={(e) => set('auto_approve_month_limit', e.target.value)} aria-label="Automatic approval per person in a month" disabled={!editable} /></span>
+              <span className="flex items-center gap-1"><span className="t-meta">{symbol}</span><input type="number" min="0" className="input" style={{ width: '8.125rem' }} value={s.auto_approve_month_limit} onChange={(e) => set('auto_approve_month_limit', e.target.value)} aria-label="Automatic approval per person in a month" disabled={!editable} /></span>
             </Row>
           )}
           <Row title="Also email the approver" hint="The approver always gets a notification in the CRM (the bell). This also sends an email — it needs Email set up in Settings, and the approver's email on the Users page.">
@@ -491,7 +491,7 @@ export default function SettingsExpenses() {
                 </Row>
                 {s.fx_rate_edit && (
                   <Row title="Point out a rate that is far from the CRM rate" hint="Further than this, the expense is outside the rules (the approver is warned). 0 = never.">
-                    <span className="flex items-center gap-2"><input type="number" min="0" max="100" className="input" style={{ width: 80 }} value={s.fx_tolerance} onChange={(e) => set('fx_tolerance', e.target.value)} aria-label="Allowed difference in percent" disabled={!editable} /><span className="t-meta">%</span></span>
+                    <span className="flex items-center gap-2"><input type="number" min="0" max="100" className="input" style={{ width: '5rem' }} value={s.fx_tolerance} onChange={(e) => set('fx_tolerance', e.target.value)} aria-label="Allowed difference in percent" disabled={!editable} /><span className="t-meta">%</span></span>
                   </Row>
                 )}
               </>

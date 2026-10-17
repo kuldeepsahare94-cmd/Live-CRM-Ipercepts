@@ -639,9 +639,9 @@ function PreviewPane({ draft }) {
           style={{ background: 'var(--color-danger-soft)', color: 'var(--color-danger)' }}>{error}</div>
       ) : url ? (
         <iframe title="Template preview" src={url} className="w-full rounded-lg border border-line"
-          style={{ height: 720 }} />
+          style={{ height: '45rem' }} />
       ) : (
-        <div className="skeleton rounded-lg" style={{ height: 720 }} />
+        <div className="skeleton rounded-lg" style={{ height: '45rem' }} />
       )}
       <p className="text-[10px] text-[var(--color-faint)] mt-2">
         Drawn with your most recent document of this type, or sample figures if you have none yet.

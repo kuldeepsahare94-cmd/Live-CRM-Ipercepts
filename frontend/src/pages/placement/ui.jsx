@@ -104,7 +104,7 @@ export function SearchBox({ value, onChange, placeholder = 'Search', width = 260
   return (
     <div className="relative" style={{ width, maxWidth: '100%' }}>
       <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} />
-      <input className="input" style={{ paddingLeft: 34 }} placeholder={placeholder} value={v} aria-label={placeholder}
+      <input className="input" style={{ paddingLeft: '2.125rem' }} placeholder={placeholder} value={v} aria-label={placeholder}
         onChange={(e) => { const x = e.target.value; setV(x); clearTimeout(t.current); t.current = setTimeout(() => onChange(x), 280); }} />
     </div>
   );

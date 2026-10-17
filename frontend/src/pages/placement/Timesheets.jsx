@@ -34,7 +34,7 @@ function Row({ r, month, canEdit, onSaved }) {
       <td className={td}>{r.client_name}</td>
       <td className={td}>
         {locked ? <b className="text-ink">{r.approved_days}</b> : (
-          <input className="input" style={{ width: 70, padding: '4px 8px', borderColor: bad ? 'var(--color-danger)' : undefined }} type="number" min="0" max={wd} step="0.5" value={days} onChange={(e) => setDays(e.target.value)} aria-label={`Approved days for ${r.person_name}`} data-testid={`ts-days-${r.deployed_id}`} />
+          <input className="input" style={{ width: '4.375rem', padding: '4px 8px', borderColor: bad ? 'var(--color-danger)' : undefined }} type="number" min="0" max={wd} step="0.5" value={days} onChange={(e) => setDays(e.target.value)} aria-label={`Approved days for ${r.person_name}`} data-testid={`ts-days-${r.deployed_id}`} />
         )}
         <span className="t-meta ml-1.5">of {wd}</span>
       </td>
@@ -44,9 +44,9 @@ function Row({ r, month, canEdit, onSaved }) {
       <td className={td}><Badge tone={TONE[r.status]} size="xs">{r.status}</Badge></td>
       <td className={`${td} text-right whitespace-nowrap`}>
         {!locked && <>
-          <button type="button" className="btn btn-secondary mr-2" style={{ padding: '4px 10px', fontSize: 12 }} disabled={busy || (!dirty && r.exists)} onClick={() => save(false)} data-testid={`ts-save-${r.deployed_id}`}>Save</button>
-          {r.status !== 'Approved' && <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: 12 }} disabled={busy} onClick={() => save(true)} data-testid={`ts-approve-${r.deployed_id}`}>Approve</button>}
-          {r.status === 'Approved' && dirty && <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: 12 }} disabled={busy} onClick={() => save(true)}>Save & approve</button>}
+          <button type="button" className="btn btn-secondary mr-2" style={{ padding: '4px 10px', fontSize: '0.75rem' }} disabled={busy || (!dirty && r.exists)} onClick={() => save(false)} data-testid={`ts-save-${r.deployed_id}`}>Save</button>
+          {r.status !== 'Approved' && <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '0.75rem' }} disabled={busy} onClick={() => save(true)} data-testid={`ts-approve-${r.deployed_id}`}>Approve</button>}
+          {r.status === 'Approved' && dirty && <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '0.75rem' }} disabled={busy} onClick={() => save(true)}>Save & approve</button>}
         </>}
         {r.invoice_id && <Link to={`/records/invoices/${r.invoice_id}`} className="underline text-ink text-xs">Invoice</Link>}
       </td>

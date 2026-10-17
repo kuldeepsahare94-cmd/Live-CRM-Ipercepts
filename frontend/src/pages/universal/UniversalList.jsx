@@ -37,6 +37,8 @@ const STATUS_TYPES = new Set(['status', 'contact_status', 'priority']);
 const NEWEST_ROWS_ONLY = new Set(['calls', 'meetings', 'tasks', 'notes', 'emails']);
 
 
+const NOWRAP_TYPES = new Set(['number', 'decimal', 'currency', 'percent', 'date', 'datetime', 'time', 'phone', 'autonumber', 'auto_number', 'checkbox']);
+
 export default function UniversalList() {
   const { moduleApiName } = useParams();
   const navigate = useNavigate();
@@ -499,7 +501,7 @@ export default function UniversalList() {
       <div className="flex gap-2 mt-5 flex-wrap">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-faint)]" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 36 }} className="input pl-9"
+          <input value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: '2.25rem' }} className="input pl-9"
             placeholder={`Search ${pluralLabel.toLowerCase()}…`}
             aria-label={`Search ${module.plural_label}`} />
         </div>
@@ -598,7 +600,8 @@ export default function UniversalList() {
                   <RowCheckbox checked={selection.has(r.id)} label={`Select ${recordTitle(r, fields)}`} onChange={() => selection.toggle(r.id)} />
                 </td>
                 {listFields.length > 0 ? listFields.map((f, i) => (
-                  <td key={f.id} className="py-3 px-4">
+                  // (v1.9) short values (numbers, dates, codes, phones, amounts, status) stay on one line
+                  <td key={f.id} className={`py-3 px-4 ${NOWRAP_TYPES.has(f.field_type) || /(_number|_no|_code)$/.test(f.api_name) || f.api_name === statusField?.api_name ? 'whitespace-nowrap' : ''}`}>
                     {i === 0 ? (
                       // An initials chip on the primary column. The first
                       // cell was plain text with nothing to anchor the eye,

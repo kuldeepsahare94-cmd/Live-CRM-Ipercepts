@@ -18,6 +18,7 @@
 import {
   PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
+import { useUiScale } from '../uiScale';
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const inrShort = (v) => {
@@ -65,7 +66,7 @@ export function StageDonut({ stages = [], total = 0, onSelect, onSelectAll }) {
       ) : (
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={data} dataKey="count" nameKey="name" innerRadius={46} outerRadius={72} paddingAngle={2}
+            <Pie data={data} dataKey="count" nameKey="name" innerRadius="62%" outerRadius="97%" paddingAngle={2}
               strokeWidth={0} cornerRadius={4} isAnimationActive={false}
               onClick={(entry) => onSelect?.(entry?.payload || entry)} style={{ cursor: 'pointer', outline: 'none' }}>
               {data.map((s, i) => (
@@ -119,8 +120,9 @@ function PointDot({ cx, cy, payload, onSelect }) {
 
 // Payments received per month (by receipt date), last six months.
 export function CollectionsArea({ points = [], onSelect }) {
+  const ui = useUiScale();   // (v1.9) the same shape on every screen
   return (
-    <ResponsiveContainer width="100%" height={200}>
+    <ResponsiveContainer width="100%" height={200 * ui}>
       <AreaChart data={points} margin={{ top: 18, right: 26, left: -6, bottom: 0 }}>
         <defs>
           <linearGradient id="collectionsFill" x1="0" y1="0" x2="0" y2="1">

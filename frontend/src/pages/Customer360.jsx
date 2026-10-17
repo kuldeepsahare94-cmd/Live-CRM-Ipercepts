@@ -53,8 +53,8 @@ function HeroScore({ score, band, label }) {
     : /needs attention/i.test(band) ? '#FDE68A' : '#FCA5A5';
   return (
     <div className="flex items-center gap-2.5">
-      <div className="relative" style={{ width: 52, height: 52 }}>
-        <svg width={52} height={52} className="-rotate-90">
+      <div className="relative" style={{ width: '3.25rem', height: '3.25rem' }}>
+        <svg viewBox="0 0 52 52" style={{ width: '3.25rem', height: '3.25rem' }} className="-rotate-90">
           <circle cx={26} cy={26} r={r} fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth={5} />
           <circle cx={26} cy={26} r={r} fill="none" stroke={colour} strokeWidth={5}
             strokeDasharray={c} strokeDashoffset={c - (pct / 100) * c} strokeLinecap="round" />

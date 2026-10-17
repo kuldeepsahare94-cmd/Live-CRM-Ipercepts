@@ -140,13 +140,13 @@ export default function Reports({ meta }) {
           </>
         )}
         {wide && (
-          <select className="input w-auto" value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Person" style={{ maxWidth: 180 }}>
+          <select className="input w-auto" value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Person" style={{ maxWidth: '11.25rem' }}>
             <option value="">{meta.me.is_finance ? 'Everyone' : 'My team and me'}</option>
             {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         )}
         {!noDates && (
-          <select className="input w-auto" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category" style={{ maxWidth: 170 }}>
+          <select className="input w-auto" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Category" style={{ maxWidth: '10.625rem' }}>
             <option value="">Any category</option>
             {meta.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>

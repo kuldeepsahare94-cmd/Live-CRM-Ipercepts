@@ -40,9 +40,9 @@ export default function ClaimList({ meta, status: startStatus, nonce }) {
     <div className="card">
       <div className="p-3 flex items-center gap-2 flex-wrap" style={{ borderBottom: '1px solid var(--color-line)' }}>
         <ScopeBar meta={meta} scope={scope} setScope={setScope} userId={userId} setUserId={setUserId} />
-        <div className="relative" style={{ width: 220 }}>
+        <div className="relative" style={{ width: '13.75rem' }}>
           <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} />
-          <input className="input" style={{ paddingLeft: 32 }} placeholder="Claim number, name…" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Search the claims" />
+          <input className="input" style={{ paddingLeft: '2rem' }} placeholder="Claim number, name…" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Search the claims" />
         </div>
         <select className="input w-auto" value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status of the claim">
           <option value="">Any status</option>
@@ -76,7 +76,7 @@ export default function ClaimList({ meta, status: startStatus, nonce }) {
                 <tbody>
                   {rows.map((c) => (
                     <tr key={c.id} className="cursor-pointer hover:bg-slate-50" style={{ borderTop: '1px solid var(--color-line-soft)' }} onClick={() => navigate(`/expenses/claims/${c.id}`)} data-testid="claim-row">
-                      <td className={tableCell} style={{ maxWidth: 300 }}>
+                      <td className={tableCell} style={{ maxWidth: '18.75rem' }}>
                         <Link to={`/expenses/claims/${c.id}`} onClick={(ev) => ev.stopPropagation()} className="font-medium text-ink truncate block hover:underline">{c.title}</Link>
                         <div className="t-meta">{c.claim_number}</div>
                       </td>

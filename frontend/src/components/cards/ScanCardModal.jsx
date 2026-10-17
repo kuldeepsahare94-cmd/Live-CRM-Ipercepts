@@ -247,7 +247,7 @@ export default function ScanCardModal({ onClose }) {
                 {seen && (
                   <details className="text-xs" data-testid="scan-seen">
                     <summary className="cursor-pointer t-meta">Text found on the photo (copy from here what is missing)</summary>
-                    <pre className="mt-1 p-2 rounded-lg whitespace-pre-wrap select-text" style={{ background: 'var(--color-canvas)', border: '1px solid var(--color-line)', maxHeight: 140, overflow: 'auto' }}>{seen}</pre>
+                    <pre className="mt-1 p-2 rounded-lg whitespace-pre-wrap select-text" style={{ background: 'var(--color-canvas)', border: '1px solid var(--color-line)', maxHeight: '8.75rem', overflow: 'auto' }}>{seen}</pre>
                   </details>
                 )}
                 <div className="grid sm:grid-cols-2 gap-x-4 gap-y-3" data-testid="scan-fields">

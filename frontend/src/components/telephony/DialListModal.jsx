@@ -89,7 +89,7 @@ export default function DialListModal({ module = 'leads', ids, noun = 'lead', on
               </div>
               {mode === 'auto' && (
                 <label className="t-meta flex items-center gap-2">Wait
-                  <input type="number" min={0} max={120} className="input" style={{ width: 80 }} value={gap} onChange={(e) => setGap(e.target.value)} aria-label="Seconds between calls" />
+                  <input type="number" min={0} max={120} className="input" style={{ width: '5rem' }} value={gap} onChange={(e) => setGap(e.target.value)} aria-label="Seconds between calls" />
                   seconds between calls
                 </label>
               )}

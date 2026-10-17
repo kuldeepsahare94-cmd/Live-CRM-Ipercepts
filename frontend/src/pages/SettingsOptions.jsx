@@ -72,7 +72,7 @@ export default function SettingsOptions() {
 
       <div className="relative mb-5 max-w-md">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-faint)]" />
-        <input className="input w-full pl-9" style={{ paddingLeft: 36 }} placeholder="Search fields, lists or options…" value={q}
+        <input className="input w-full pl-9" style={{ paddingLeft: '2.25rem' }} placeholder="Search fields, lists or options…" value={q}
           onChange={(e) => setQ(e.target.value)} aria-label="Search dropdown options" />
       </div>
 

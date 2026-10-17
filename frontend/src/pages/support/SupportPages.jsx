@@ -408,7 +408,7 @@ export function KnowledgeBase() {
       </PageTitle>
       <div className="relative mb-4 max-w-xl">
         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} />
-        <input className="input w-full" style={{ paddingLeft: 36 }} placeholder="Search the knowledge base…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search knowledge base" />
+        <input className="input w-full" style={{ paddingLeft: '2.25rem' }} placeholder="Search the knowledge base…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search knowledge base" />
       </div>
       {error ? <LoadError error={error} onRetry={load} /> : !data ? <Skeleton h={200} /> : (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.2fr] gap-4 items-start">

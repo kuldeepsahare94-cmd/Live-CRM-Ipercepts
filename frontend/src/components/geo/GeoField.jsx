@@ -185,7 +185,7 @@ export function Combo({ value, onChange, options, placeholder, disabled, testid,
     <div className="relative" ref={box}>
       <div className="relative">
         <input
-          className={className} style={{ paddingRight: 30 }} disabled={disabled} data-testid={testid}
+          className={className} style={{ paddingRight: '1.875rem' }} disabled={disabled} data-testid={testid}
           value={open ? q : (value || '')} placeholder={open ? (value || placeholder) : placeholder}
           onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
           onChange={(e) => {

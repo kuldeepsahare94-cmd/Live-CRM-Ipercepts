@@ -23,6 +23,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import { paletteFor, colourAt, colourForRow } from '../theme/reportPalettes';
+import { useUiScale } from '../uiScale';
 
 // ---------------------------------------------------------------------------
 // Value formatting — shared with the table so a number reads the same in both.
@@ -105,7 +106,9 @@ function pivot(rows, xKey, stackKey, valueKey) {
 // The renderer.
 // ---------------------------------------------------------------------------
 
-export default function ReportChart({ chart, rows, palette, height = 320 }) {
+export default function ReportChart({ chart, rows, palette, height: h0 = 320 }) {
+  const ui = useUiScale();   // (v1.9) the same shape on every screen
+  const height = h0 * ui;
   const p = paletteFor(palette);
   const series = (chart && chart.series) || [];
   const tooltipFormatter = useFormatters(series);
@@ -144,11 +147,11 @@ export default function ReportChart({ chart, rows, palette, height = 320 }) {
     const total = rows.reduce((s, r) => s + Number(r[valueKey] || 0), 0);
     return (
       <div className="flex items-center gap-6 flex-wrap">
-        <div className="relative shrink-0" style={{ width: 240, height: 240 }}>
+        <div className="relative shrink-0" style={{ width: '15rem', height: '15rem' }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie data={rows} dataKey={valueKey} nameKey={xKey} paddingAngle={2} strokeWidth={0}
-                innerRadius={effectiveType === 'donut' ? 64 : 0} outerRadius={104} cornerRadius={4}>
+                innerRadius={effectiveType === 'donut' ? '53%' : 0} outerRadius="87%" cornerRadius={4}>
                 {rows.map((r, i) => <Cell key={i} fill={colourForRow(r, chart, palette, i)} />)}
               </Pie>
               <Tooltip formatter={(v) => formatValue(v, series[0].format)} contentStyle={TOOLTIP_STYLE} />
@@ -200,7 +203,7 @@ export default function ReportChart({ chart, rows, palette, height = 320 }) {
       fill: colourForRow(r, chart, palette, i),
     }));
     return (
-      <ResponsiveContainer width="100%" height={Math.max(height, rows.length * 46)}>
+      <ResponsiveContainer width="100%" height={Math.max(height, rows.length * 46 * ui)}>
         <FunnelChart>
           <Tooltip formatter={(v) => formatValue(v, series[0].format)} contentStyle={TOOLTIP_STYLE} />
           <Funnel dataKey={valueKey} data={data} isAnimationActive={false}>

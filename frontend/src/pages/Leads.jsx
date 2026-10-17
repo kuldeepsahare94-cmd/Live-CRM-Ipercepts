@@ -321,7 +321,7 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
             onDrop={(e) => { e.preventDefault(); if (canEdit) handleDrop(status); }}
             style={{
               background: soft,
-              maxHeight: 'calc(100vh - 340px)',
+              maxHeight: 'calc(100vh - 21.25rem)',
               outline: isTarget ? `2px dashed ${solid}` : 'none',
               outlineOffset: '2px',
               transform: isTarget ? 'translateY(-2px)' : 'none',
@@ -343,7 +343,7 @@ function KanbanBoard({ leads, statuses, sourceLabel, onAdd, canCreate, canEdit, 
             </header>
 
             <div className={`px-2 pb-2 overflow-y-auto thin-scroll flex-1 ${only ? 'grid gap-2 content-start' : 'space-y-2'}`}
-              style={only ? { gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))' } : undefined}>
+              style={only ? { gridTemplateColumns: 'repeat(auto-fill, minmax(15.625rem, 1fr))' } : undefined}>
               {items.map((l) => (
                 <LeadCard key={l.id} lead={l} statuses={statuses} sourceLabel={sourceLabel} canEdit={canEdit} onMoved={onMoved}
                   onDragStart={setDragLead} onDragEnd={() => { setDragLead(null); setDragOver(null); }}
@@ -566,7 +566,7 @@ function Pager({ page, pages, total, from, to, pageSize, onPage, onPageSize, bus
   const btn = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border border-line bg-white text-[var(--color-muted)] hover:text-ink hover:border-[var(--color-brand-border)] disabled:opacity-40 disabled:hover:text-[var(--color-muted)]';
   return (
     // (room on the right: the round assistant button floats over that corner)
-    <div className="pl-4 py-2.5 border-t border-line flex items-center justify-between gap-3 flex-wrap" data-pager style={{ paddingRight: 72 }}>
+    <div className="pl-4 py-2.5 border-t border-line flex items-center justify-between gap-3 flex-wrap" data-pager style={{ paddingRight: '4.5rem' }}>
       <div className="t-meta" data-pager-summary>
         {total === 0 ? 'No leads' : <>Showing <b className="text-ink">{num(from)}–{num(to)}</b> of <b className="text-ink">{num(total)}</b> lead{total === 1 ? '' : 's'}</>}
       </div>
@@ -959,7 +959,7 @@ export default function Leads() {
       <div className="flex flex-wrap items-center gap-2 mt-5 mb-4">
         <div className="relative flex-1 min-w-[240px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-faint)]" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: 36 }} className="input w-full pl-9"
+          <input value={q} onChange={(e) => setQ(e.target.value)} style={{ paddingLeft: '2.25rem' }} className="input w-full pl-9"
             placeholder="Search by name, email or phone…" aria-label="Search leads" />
         </div>
         <select value={statusFilter || (scope === 'all' ? ALL_LEADS : '')}

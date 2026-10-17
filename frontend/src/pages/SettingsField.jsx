@@ -55,7 +55,7 @@ function PhoneAlerts() {
       {!st.encryption_ready && <p className="text-sm" style={{ color: 'var(--color-danger)' }}>The server cannot keep keys encrypted yet: set CRM_ENCRYPTION_KEY on the server first.</p>}
       <div>
         <p className="text-sm font-semibold text-ink mb-1">Firebase key (service account file)</p>
-        <textarea className="input font-mono text-xs" rows={5} style={{ width: '100%', maxWidth: 560 }} value={key} onChange={(e) => setKey(e.target.value)}
+        <textarea className="input font-mono text-xs" rows={5} style={{ width: '100%', maxWidth: '35rem' }} value={key} onChange={(e) => setKey(e.target.value)}
           placeholder={st.ready ? 'A key is saved. Paste a new file here to change it.' : 'Paste the whole file here: { "type": "service_account", … }'} data-testid="push-key" />
         <div className="flex flex-wrap items-center gap-2 mt-2">
           <label className="btn btn-secondary cursor-pointer">Choose the file<input type="file" accept=".json,application/json" className="hidden" onChange={fromFile} /></label>
@@ -197,8 +197,8 @@ export default function SettingsField() {
 
         {tab === 'attendance' && (
           <>
-            <Row title="Work starts at" hint="A punch in later than this is marked late."><input type="time" className="input" style={{ width: 130 }} value={f.work_start} onChange={(e) => set('work_start', e.target.value)} data-testid="f-work-start" /></Row>
-            <Row title="Work ends at" hint="A punch out earlier than this is marked “left early”."><input type="time" className="input" style={{ width: 130 }} value={f.work_end} onChange={(e) => set('work_end', e.target.value)} data-testid="f-work-end" /></Row>
+            <Row title="Work starts at" hint="A punch in later than this is marked late."><input type="time" className="input" style={{ width: '8.125rem' }} value={f.work_start} onChange={(e) => set('work_start', e.target.value)} data-testid="f-work-start" /></Row>
+            <Row title="Work ends at" hint="A punch out earlier than this is marked “left early”."><input type="time" className="input" style={{ width: '8.125rem' }} value={f.work_end} onChange={(e) => set('work_end', e.target.value)} data-testid="f-work-end" /></Row>
             <Row title="Selfie at punch in" hint="The app opens the front camera; the photo is kept with the attendance."><Toggle on={f.selfie_in} onChange={(v) => set('selfie_in', v)} label="Selfie at punch in" testid="f-selfie-in" /></Row>
             <Row title="Selfie at punch out"><Toggle on={f.selfie_out} onChange={(v) => set('selfie_out', v)} label="Selfie at punch out" testid="f-selfie-out" /></Row>
             <Row title="Close a day left open after" hint="Someone forgot to punch out (or the phone died): the day is closed at the last place the phone sent, and marked “no punch out”.">
@@ -253,7 +253,7 @@ export default function SettingsField() {
               <Toggle on={f.leave_on} onChange={(v) => set('leave_on', v)} label="Leave requests" testid="f-leave-on" />
             </Row>
             <Row title="Kinds of leave" hint="One on each line.">
-              <textarea className="input" style={{ width: 280, minHeight: 110 }} value={f.leave_types_text} onChange={(e) => set('leave_types_text', e.target.value)} data-testid="f-leave-types" />
+              <textarea className="input" style={{ width: '17.5rem', minHeight: '6.875rem' }} value={f.leave_types_text} onChange={(e) => set('leave_types_text', e.target.value)} data-testid="f-leave-types" />
             </Row>
           </>
         )}
@@ -273,7 +273,7 @@ export default function SettingsField() {
             <p className="text-sm font-semibold text-ink pt-5">By themselves</p>
             <Row title="Punch out by itself at" hint="A day still open at this time is punched out at this time (marked “no punch out”). Empty = never (a day is still closed after the hours in Attendance).">
               <span className="inline-flex items-center gap-2">
-                <input type="time" className="input" style={{ width: 130 }} value={f.auto_out_time} onChange={(e) => set('auto_out_time', e.target.value)} data-testid="f-auto-out-time" />
+                <input type="time" className="input" style={{ width: '8.125rem' }} value={f.auto_out_time} onChange={(e) => set('auto_out_time', e.target.value)} data-testid="f-auto-out-time" />
                 {f.auto_out_time && <button type="button" className="btn btn-ghost" onClick={() => set('auto_out_time', '')}>Never</button>}
               </span>
             </Row>
@@ -292,7 +292,7 @@ export default function SettingsField() {
               <Toggle on={f.meeting_rec_on} onChange={(v) => set('meeting_rec_on', v)} label="Meeting recording" testid="f-meet-on" />
             </Row>
             <Row title="How the customer agrees" hint="Recording someone needs their consent.">
-              <select className="input" style={{ width: 320 }} value={f.meeting_consent} onChange={(e) => set('meeting_consent', e.target.value)} data-testid="f-meet-consent">
+              <select className="input" style={{ width: '20rem' }} value={f.meeting_consent} onChange={(e) => set('meeting_consent', e.target.value)} data-testid="f-meet-consent">
                 <option value="spoken">Spoken: the customer says yes at the start of the recording</option>
                 <option value="otp" disabled={!payload.whatsapp_ready}>A code on WhatsApp the customer tells{payload.whatsapp_ready ? '' : ' (set up WhatsApp first)'}</option>
                 <option value="either" disabled={!payload.whatsapp_ready}>Either (the person chooses)</option>
@@ -300,19 +300,19 @@ export default function SettingsField() {
               </select>
             </Row>
             <Row title="The sentence read out" hint="The app shows it; it is read out at the start of the recording and the customer answers.">
-              <textarea className="input" style={{ width: 360, minHeight: 64 }} value={f.meeting_consent_text} onChange={(e) => set('meeting_consent_text', e.target.value)} data-testid="f-meet-text" />
+              <textarea className="input" style={{ width: '22.5rem', minHeight: '4rem' }} value={f.meeting_consent_text} onChange={(e) => set('meeting_consent_text', e.target.value)} data-testid="f-meet-text" />
             </Row>
             {['otp', 'either'].includes(f.meeting_consent) && (
               <>
                 <Row title="WhatsApp template with the code" hint="An approved template of your WhatsApp account whose text has {{1}} for the 6-digit code (an “Authentication” template, e.g. “{{1}} is your code to agree to the recording of our meeting.”).">
                   {payload.whatsapp_templates && payload.whatsapp_templates.length ? (
-                    <select className="input" style={{ width: 320 }} value={f.meeting_otp_template} onChange={(e) => { const t = payload.whatsapp_templates.find((x) => x.template_name === e.target.value); set('meeting_otp_template', e.target.value); if (t && t.language) set('meeting_otp_language', t.language); }} data-testid="f-meet-template">
+                    <select className="input" style={{ width: '20rem' }} value={f.meeting_otp_template} onChange={(e) => { const t = payload.whatsapp_templates.find((x) => x.template_name === e.target.value); set('meeting_otp_template', e.target.value); if (t && t.language) set('meeting_otp_language', t.language); }} data-testid="f-meet-template">
                       <option value="">Choose…</option>
                       {payload.whatsapp_templates.map((t) => <option key={`${t.template_name}-${t.language}`} value={t.template_name}>{t.template_name} ({t.language}{t.status ? `, ${String(t.status).toLowerCase()}` : ''})</option>)}
                     </select>
-                  ) : <input className="input" style={{ width: 260 }} value={f.meeting_otp_template} placeholder="template name" onChange={(e) => set('meeting_otp_template', e.target.value)} data-testid="f-meet-template" />}
+                  ) : <input className="input" style={{ width: '16.25rem' }} value={f.meeting_otp_template} placeholder="template name" onChange={(e) => set('meeting_otp_template', e.target.value)} data-testid="f-meet-template" />}
                 </Row>
-                <Row title="Template language"><input className="input" style={{ width: 120 }} value={f.meeting_otp_language} onChange={(e) => set('meeting_otp_language', e.target.value)} /></Row>
+                <Row title="Template language"><input className="input" style={{ width: '7.5rem' }} value={f.meeting_otp_language} onChange={(e) => set('meeting_otp_language', e.target.value)} /></Row>
               </>
             )}
             <Row title="Longest recording" hint="The app stops by itself after this.">
@@ -341,7 +341,7 @@ export default function SettingsField() {
               <Num value={f.call_recording_days} onChange={(v) => set('call_recording_days', v)} unit="days" min={0} max={3650} testid="f-call-rec-days" />
             </Row>
             <Row title="WhatsApp message after a call" hint="The app offers it after each call. {name} = the customer's name, {me} = the person's name. Empty: WhatsApp opens without a message.">
-              <textarea className="input" style={{ width: 360, minHeight: 70 }} value={f.call_whatsapp_text} placeholder="Hi {name}, thank you for your time today. – {me}" onChange={(e) => set('call_whatsapp_text', e.target.value)} data-testid="f-call-wa" />
+              <textarea className="input" style={{ width: '22.5rem', minHeight: '4.375rem' }} value={f.call_whatsapp_text} placeholder="Hi {name}, thank you for your time today. – {me}" onChange={(e) => set('call_whatsapp_text', e.target.value)} data-testid="f-call-wa" />
             </Row>
 
             <p className="text-sm font-semibold text-ink pt-5">Recordings to text (optional, paid)</p>
@@ -349,19 +349,19 @@ export default function SettingsField() {
               <Toggle on={f.transcribe_on} onChange={(v) => set('transcribe_on', v)} label="Transcription" testid="f-tr-on" />
             </Row>
             <Row title="Service address" hint="https://api.openai.com/v1 for OpenAI; https://api.groq.com/openai/v1 for Groq.">
-              <input className="input" style={{ width: 360 }} value={f.transcribe_base_url} onChange={(e) => set('transcribe_base_url', e.target.value)} data-testid="f-tr-url" />
+              <input className="input" style={{ width: '22.5rem' }} value={f.transcribe_base_url} onChange={(e) => set('transcribe_base_url', e.target.value)} data-testid="f-tr-url" />
             </Row>
             <Row title="Model" hint="whisper-1 (OpenAI), whisper-large-v3 (Groq).">
-              <input className="input" style={{ width: 220 }} value={f.transcribe_model} onChange={(e) => set('transcribe_model', e.target.value)} data-testid="f-tr-model" />
+              <input className="input" style={{ width: '13.75rem' }} value={f.transcribe_model} onChange={(e) => set('transcribe_model', e.target.value)} data-testid="f-tr-model" />
             </Row>
             <Row title="Language of the calls" hint="Empty = the service finds it (calls in Hinglish work best this way).">
-              <select className="input" style={{ width: 220 }} value={f.transcribe_language} onChange={(e) => set('transcribe_language', e.target.value)} data-testid="f-tr-lang">
+              <select className="input" style={{ width: '13.75rem' }} value={f.transcribe_language} onChange={(e) => set('transcribe_language', e.target.value)} data-testid="f-tr-lang">
                 <option value="">Find it by itself</option><option value="en">English</option><option value="hi">Hindi</option><option value="mr">Marathi</option>
               </select>
             </Row>
             <Row title="Service key" hint={payload.settings.transcribe_key_set ? 'A key is saved (kept encrypted, never shown). Type a new one to change it.' : 'The key of your account at the speech service.'}>
               <span className="inline-flex items-center gap-2">
-                <input className="input" type="password" autoComplete="new-password" style={{ width: 260 }} value={f.transcribe_key} placeholder={payload.settings.transcribe_key_set ? '•••••••• (saved)' : 'sk-…'} onChange={(e) => set('transcribe_key', e.target.value)} data-testid="f-tr-key" />
+                <input className="input" type="password" autoComplete="new-password" style={{ width: '16.25rem' }} value={f.transcribe_key} placeholder={payload.settings.transcribe_key_set ? '•••••••• (saved)' : 'sk-…'} onChange={(e) => set('transcribe_key', e.target.value)} data-testid="f-tr-key" />
                 {payload.settings.transcribe_key_set && <button type="button" className="btn btn-ghost" onClick={() => { set('transcribe_key', '-'); set('transcribe_on', false); }} data-testid="f-tr-key-remove">Remove</button>}
               </span>
             </Row>
@@ -371,10 +371,10 @@ export default function SettingsField() {
 
             <p className="text-sm font-semibold text-ink pt-5">The app's newest version</p>
             <Row title="Newest version" hint="When a phone has an older app, it shows “A new version is ready” with the link below. Example: 1.1.0">
-              <input className="input" style={{ width: 140 }} value={f.app_latest_version} placeholder="1.1.0" onChange={(e) => set('app_latest_version', e.target.value)} data-testid="f-app-version" />
+              <input className="input" style={{ width: '8.75rem' }} value={f.app_latest_version} placeholder="1.1.0" onChange={(e) => set('app_latest_version', e.target.value)} data-testid="f-app-version" />
             </Row>
             <Row title="Download link" hint="Where the people get the APK (Google Drive link, your website…). With the Play Store, its link.">
-              <input className="input" style={{ width: 360 }} value={f.app_download_url} placeholder="https://…" onChange={(e) => set('app_download_url', e.target.value)} data-testid="f-app-url" />
+              <input className="input" style={{ width: '22.5rem' }} value={f.app_download_url} placeholder="https://…" onChange={(e) => set('app_download_url', e.target.value)} data-testid="f-app-url" />
             </Row>
           </>
         )}
@@ -386,13 +386,13 @@ export default function SettingsField() {
               <Toggle on={f.km_expense} onChange={(v) => set('km_expense', v)} label="Km expense" testid="f-km-expense" />
             </Row>
             <Row title="Expense category" hint="A category of the kind “Own vehicle: km × rate”.">
-              <select className="input" style={{ width: 220 }} value={f.km_expense_category_id} onChange={(e) => set('km_expense_category_id', e.target.value)} data-testid="f-km-category">
+              <select className="input" style={{ width: '13.75rem' }} value={f.km_expense_category_id} onChange={(e) => set('km_expense_category_id', e.target.value)} data-testid="f-km-category">
                 <option value="">Choose…</option>
                 {payload.km_categories.map((c) => <option key={c.id} value={c.id} disabled={!c.active}>{c.name}{c.active ? '' : ' (off)'}</option>)}
               </select>
             </Row>
             <Row title="Vehicle" hint="Its rate per km comes from Settings → Expenses → Km rates.">
-              <select className="input" style={{ width: 220 }} value={f.km_expense_vehicle} onChange={(e) => set('km_expense_vehicle', e.target.value)} data-testid="f-km-vehicle">
+              <select className="input" style={{ width: '13.75rem' }} value={f.km_expense_vehicle} onChange={(e) => set('km_expense_vehicle', e.target.value)} data-testid="f-km-vehicle">
                 <option value="">Choose…</option>
                 {payload.vehicles.map((v) => <option key={v.name} value={v.name} disabled={!v.active}>{v.name} — {v.rate_per_km}/km</option>)}
               </select>
@@ -405,15 +405,15 @@ export default function SettingsField() {
         {tab === 'map' && (
           <>
             <Row title="Map pictures" hint="Empty = OpenStreetMap (free, fine for a team). For many users or heavy use, take a map service (MapTiler, Mapbox, Stadia…) and paste its tile address with {z}, {x}, {y} and your key.">
-              <input className="input" style={{ width: 360 }} value={f.map_tiles_url} placeholder="https://tile.openstreetmap.org/{z}/{x}/{y}.png" onChange={(e) => set('map_tiles_url', e.target.value)} data-testid="f-tiles" />
+              <input className="input" style={{ width: '22.5rem' }} value={f.map_tiles_url} placeholder="https://tile.openstreetmap.org/{z}/{x}/{y}.png" onChange={(e) => set('map_tiles_url', e.target.value)} data-testid="f-tiles" />
             </Row>
             <Row title="Credit line" hint="The map service's credit, shown in the corner of the map (most services ask for it).">
-              <input className="input" style={{ width: 360 }} value={f.map_attribution} placeholder="© OpenStreetMap contributors" onChange={(e) => set('map_attribution', e.target.value)} />
+              <input className="input" style={{ width: '22.5rem' }} value={f.map_attribution} placeholder="© OpenStreetMap contributors" onChange={(e) => set('map_attribution', e.target.value)} />
             </Row>
             <p className="text-sm font-semibold text-ink pt-5">Addresses</p>
             <Row title="Google Maps key (optional)" hint="Used for the address suggestions while typing and for “Use my location” on the forms of leads, contacts and accounts, and for the addresses of visits. Empty = OpenStreetMap (free). Google is better for Indian addresses; switch on the “Geocoding API” for the key in Google Cloud (Google charges after its free monthly amount). Type - to remove the key.">
               <div>
-                <input className="input" style={{ width: 360 }} type="password" autoComplete="new-password" value={f.maps_google_key || ''} placeholder={payload.settings.maps_google_key_set ? 'A key is saved (type a new one to change it)' : 'AIza…'} onChange={(e) => set('maps_google_key', e.target.value)} data-testid="f-google-key" />
+                <input className="input" style={{ width: '22.5rem' }} type="password" autoComplete="new-password" value={f.maps_google_key || ''} placeholder={payload.settings.maps_google_key_set ? 'A key is saved (type a new one to change it)' : 'AIza…'} onChange={(e) => set('maps_google_key', e.target.value)} data-testid="f-google-key" />
                 <p className="t-meta mt-1" data-testid="f-address-provider">Now: {payload.settings.maps_google_key_set ? 'Google' : 'OpenStreetMap (free)'}</p>
               </div>
             </Row>

@@ -170,7 +170,7 @@ export default function DocumentPaymentsPanel({ invoiceId, record, canEdit, onUp
         <p className="t-meta py-3">Nothing received against this invoice yet.</p>
       ) : (
         <div className="overflow-x-auto thin-scroll">
-          <table className="w-full text-sm" style={{ minWidth: 520 }}>
+          <table className="w-full text-sm" style={{ minWidth: '32.5rem' }}>
             <thead>
               <tr className="text-left bg-[var(--color-canvas)] border-b border-line">
                 <th className="py-2 px-2 t-meta font-semibold">Receipt</th>

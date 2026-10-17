@@ -166,56 +166,57 @@ export function StatCard({ label, value, icon: Icon, from, to, active, muted, on
 //   .sc-pin    the total, fixed in place (tablet and up)
 //   .sc-track  the cards that slide; its scrollbar is hidden — the arrows,
 //              the faded edge and the half-seen next card say "there is more"
+// (v1.9) sizes in rem, so the row keeps its proportions on every screen
 const CSS = `
-.sc { --gap: 12px; --per: 2; --n: var(--per); display: flex; gap: var(--gap); align-items: stretch; }
+.sc { --gap: 0.75rem; --per: 2; --n: var(--per); display: flex; gap: var(--gap); align-items: stretch; }
 .sc-pin { display: none; flex: 0 0 calc((100% - (var(--per) - 1) * var(--gap)) / var(--per)); min-width: 0; }
 .sc-rail { position: relative; flex: 1 1 0; min-width: 0; }
 .sc-track {
   position: relative; display: flex; gap: var(--gap); align-items: stretch;
   overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
-  scroll-snap-type: x proximity; scroll-padding-inline: 4px; scrollbar-width: none;
-  padding: 8px 4px 10px; margin: -8px -4px -10px;
+  scroll-snap-type: x proximity; scroll-padding-inline: 0.25rem; scrollbar-width: none;
+  padding: 0.5rem 0.25rem 0.625rem; margin: -0.5rem -0.25rem -0.625rem;
 }
 .sc-track::-webkit-scrollbar { display: none; }
 .sc-track > * { flex: 0 0 calc((100% - (var(--n) - 1) * var(--gap)) / var(--n)); min-width: 0; scroll-snap-align: start; }
 .sc-track.sc-dragging { scroll-snap-type: none; user-select: none; }
 .sc-track.sc-dragging * { cursor: grabbing !important; }
 .sc-arrow {
-  position: absolute; top: 50%; z-index: 20; width: 36px; height: 36px; margin-top: -18px; border-radius: 9999px;
+  position: absolute; top: 50%; z-index: 20; width: 2.25rem; height: 2.25rem; margin-top: -1.125rem; border-radius: 9999px;
   display: none; align-items: center; justify-content: center;
-  background: #fff; color: #334155; border: 1px solid rgba(15, 23, 42, .08);
-  box-shadow: 0 6px 16px -4px rgba(15, 23, 42, .22), 0 2px 4px -2px rgba(15, 23, 42, .12);
+  background: #fff; color: #334155; border: 0.0625rem solid rgba(15, 23, 42, .08);
+  box-shadow: 0 0.375rem 1rem -4px rgba(15, 23, 42, .22), 0 0.125rem 0.25rem -2px rgba(15, 23, 42, .12);
   opacity: 0; transform: scale(.85); pointer-events: none; transition: opacity .18s ease, transform .18s ease, color .15s ease;
 }
 .sc-arrow.sc-on { opacity: 1; transform: scale(1); pointer-events: auto; }
 .sc-arrow.sc-on:hover { transform: scale(1.08); color: var(--color-brand, #6D4AFF); }
 .sc-arrow.sc-on:active { transform: scale(.96); }
-.sc-arrow-l { left: -24px; }
-.sc-arrow-r { right: -16px; }
+.sc-arrow-l { left: -1.5rem; }
+.sc-arrow-r { right: -1rem; }
 /* Older browsers: go by the width of the screen. */
-@media (min-width: 768px) {
+@media (min-width: 48rem) {
   .sc { --per: 3; --n: calc(var(--per) - 1); }
   .sc-pin { display: block; }
   .sc-track > .sc-first { display: none; }
   .sc-arrow { display: flex; }
 }
-@media (min-width: 1024px) { .sc { --per: 5; } }
+@media (min-width: 64rem) { .sc { --per: 5; } }
 /* Current browsers: go by the width the row itself has. */
 .sc-wrap { container-type: inline-size; }
 @supports (container-type: inline-size) {
-  @container (max-width: 699.98px) {
+  @container (max-width: 43.7488rem) {
     .sc { --per: 2; --n: var(--per); }
     .sc-pin { display: none; }
     .sc-track > .sc-first { display: block; }
   }
-  @container (min-width: 700px) {
+  @container (min-width: 43.75rem) {
     .sc { --per: 3; --n: calc(var(--per) - 1); }
     .sc-pin { display: block; }
     .sc-track > .sc-first { display: none; }
     .sc-arrow { display: flex; }
   }
-  @container (min-width: 940px) { .sc { --per: 4; } }
-  @container (min-width: 1180px) { .sc { --per: 5; } }
+  @container (min-width: 58.75rem) { .sc { --per: 4; } }
+  @container (min-width: 73.75rem) { .sc { --per: 5; } }
 }
 @media (prefers-reduced-motion: reduce) { .sc-arrow { transition: none; } }
 `;

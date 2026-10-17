@@ -194,7 +194,7 @@ export default function Roles() {
           <div className="flex items-center gap-2 flex-wrap mt-3">
             <label htmlFor="no-owner" className="text-xs font-medium text-ink">Records with no owner are seen by</label>
             <select id="no-owner" value={access.settings?.unassigned || 'team'} onChange={(e) => saveNoOwner(e.target.value)}
-              className="border border-line rounded-lg px-2 py-1.5 text-xs bg-white" style={{ maxWidth: 360 }}>
+              className="border border-line rounded-lg px-2 py-1.5 text-xs bg-white" style={{ maxWidth: '22.5rem' }}>
               {NO_OWNER.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             {savedTick && (
@@ -234,7 +234,7 @@ export default function Roles() {
                         title={!matrix[mod]?.view && !isSuper ? 'Tick View first' : undefined}
                         className="border border-line rounded-lg px-2 py-1 text-xs bg-white disabled:opacity-50"
                         style={{
-                          width: 130,
+                          width: '8.125rem',
                           ...(matrix[mod]?.scope && matrix[mod].scope !== 'all' && !isSuper && matrix[mod]?.view
                             ? { borderColor: 'var(--color-brand)', color: 'var(--color-brand)', fontWeight: 600 } : {}),
                         }}>

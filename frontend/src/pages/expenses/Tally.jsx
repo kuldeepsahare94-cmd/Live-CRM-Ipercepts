@@ -74,7 +74,7 @@ export default function Tally() {
                         <td className={`${tableCell} whitespace-nowrap`}>{niceDate(v.date)}</td>
                         <td className={tableCell}>{v.type}</td>
                         <td className={`${tableCell} whitespace-nowrap`}>{v.number}</td>
-                        <td className={`${tableCell} t-meta`} style={{ maxWidth: 380 }}>{v.narration}</td>
+                        <td className={`${tableCell} t-meta`} style={{ maxWidth: '23.75rem' }}>{v.narration}</td>
                         <td className={`${tableCell} text-right whitespace-nowrap font-semibold text-ink`}>{money(v.amount)}</td>
                         <td className={tableCell}><button type="button" className="btn btn-ghost" style={{ padding: '2px 6px' }} onClick={() => setOpen(open === i ? null : i)} aria-label="Show the entries">{open === i ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button></td>
                       </tr>

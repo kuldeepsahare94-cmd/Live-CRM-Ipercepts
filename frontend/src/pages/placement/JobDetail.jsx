@@ -26,13 +26,13 @@ function AddCandidateModal({ job, onClose, onDone }) {
   return (
     <Modal title="Add a candidate to this opening" subtitle={`${job.title} · ${job.client_name}`} onClose={onClose} testid="addcand-modal">
       <Err>{err}</Err>
-      <div className="relative mb-3"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} /><input className="input" style={{ paddingLeft: 34 }} placeholder="Name, mobile, skill or city" value={q} onChange={(e) => setQ(e.target.value)} data-autofocus data-testid="addcand-search" /></div>
+      <div className="relative mb-3"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} /><input className="input" style={{ paddingLeft: '2.125rem' }} placeholder="Name, mobile, skill or city" value={q} onChange={(e) => setQ(e.target.value)} data-autofocus data-testid="addcand-search" /></div>
       <ul className="space-y-1.5 max-h-80 overflow-y-auto thin-scroll">
         {(data?.rows || []).map((c) => (
           <li key={c.id} className="flex items-center gap-3 px-3 py-2 rounded-xl" style={{ border: '1px solid var(--color-line)' }}>
             <Avatar name={c.name} size="sm" />
             <div className="min-w-0 flex-1"><div className="text-sm font-medium text-ink truncate">{c.name} <span className="t-meta">{c.code}</span></div><div className="t-meta truncate">{c.designation || '—'} · {years(c.total_exp)} · {c.city || '—'} · {lakh(c.expected_ctc)}</div></div>
-            <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} disabled={!!busy} onClick={() => add(c)} data-testid={`addcand-${c.id}`}>{busy === c.id ? '…' : 'Add'}</button>
+            <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.75rem' }} disabled={!!busy} onClick={() => add(c)} data-testid={`addcand-${c.id}`}>{busy === c.id ? '…' : 'Add'}</button>
           </li>
         ))}
         {!loading && data && data.rows.length === 0 && <li className="t-meta py-6 text-center">Nobody found.</li>}
@@ -136,7 +136,7 @@ export default function JobDetail() {
                     <div className="t-meta truncate">{c.designation || '—'} · {c.current_company || '—'} · {years(c.total_exp)} · {c.city || '—'} · expects {lakh(c.expected_ctc)} · notice {c.notice_period || '—'}</div>
                     <div className="mt-1 flex flex-wrap gap-1">{c.matched.map((m) => <span key={m} className="text-[11px] px-1.5 py-0.5 rounded-md" style={{ background: 'var(--color-success-soft)', color: 'var(--color-success-strong)' }}>{m}</span>)}</div>
                   </div>
-                  {canEdit && j.status === 'Open' && <button type="button" className="btn btn-secondary shrink-0" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => addFromSuggest(c)} data-testid={`sug-add-${c.id}`}>Add</button>}
+                  {canEdit && j.status === 'Open' && <button type="button" className="btn btn-secondary shrink-0" style={{ padding: '4px 10px', fontSize: '0.75rem' }} onClick={() => addFromSuggest(c)} data-testid={`sug-add-${c.id}`}>Add</button>}
                 </li>
               ))}
               {sug && sug.length === 0 && <li><Empty icon={Sparkles} title="Nobody in the database matches the skills">Add the must-have skills to the opening, or source new candidates.</Empty></li>}

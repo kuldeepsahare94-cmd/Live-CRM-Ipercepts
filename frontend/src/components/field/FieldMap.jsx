@@ -139,7 +139,7 @@ function VectorMap({ markers, lines, fitKey, height, tilesUrl, attribution, test
       if (x.title) {
         const show = () => {
           if (popup.current) popup.current.remove();
-          popup.current = new gl.Popup({ closeButton: false, closeOnClick: false, offset: x.small ? 10 : PIN_OFFSET, className: 'icrm-gl-hc', maxWidth: '260px' })
+          popup.current = new gl.Popup({ closeButton: false, closeOnClick: false, offset: x.small ? 10 : PIN_OFFSET, className: 'icrm-gl-hc', maxWidth: '16.25rem' })
             .setLngLat([x.lng, x.lat]).setDOMContent(hoverCard(x.title)).addTo(m);
         };
         el.addEventListener('mouseenter', show);

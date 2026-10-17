@@ -39,7 +39,7 @@ export default function Jobs() {
         <Seg label="Status" value={status} onChange={setStatus} options={[['Open', 'Open', counts.Open || 0], ['On hold', 'On hold', counts['On hold'] || 0], ['Filled', 'Filled', counts.Filled || 0], ['Closed', 'Closed', (counts.Closed || 0) + (counts.Lost || 0)], ['all', 'All', counts.all]]} />
         <SearchBox value={q} onChange={setQ} placeholder="Search title, client, skill" />
         <select className="input w-auto" value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Hiring type"><option value="">Permanent and contract</option>{(meta?.hiring_types || []).map((k) => <option key={k}>{k}</option>)}</select>
-        <select className="input w-auto" value={client} onChange={(e) => setClient(e.target.value)} aria-label="Client" style={{ maxWidth: 200 }}><option value="">All clients</option>{(clients || []).map((c) => <option key={c.id} value={c.id}>{c.account_name}</option>)}</select>
+        <select className="input w-auto" value={client} onChange={(e) => setClient(e.target.value)} aria-label="Client" style={{ maxWidth: '12.5rem' }}><option value="">All clients</option>{(clients || []).map((c) => <option key={c.id} value={c.id}>{c.account_name}</option>)}</select>
         <select className="input w-auto" value={prio} onChange={(e) => setPrio(e.target.value)} aria-label="Priority"><option value="">Any priority</option><option>Hot</option><option>Normal</option></select>
         <label className="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" checked={cold} onChange={(e) => setCold(e.target.checked)} /> Going cold</label>
         <div className="flex-1" />

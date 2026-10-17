@@ -223,7 +223,7 @@ export function BillViewer({ bills, index = 0, onClose }) {
             ) : (
               <div className={`max-w-full max-h-full ${fit ? '' : 'overflow-auto thin-scroll'}`} style={fit ? {} : { width: '100%', height: '100%' }}>
                 <img src={shown.url} alt={bill.file_name || 'Bill'} onClick={() => setFit(!fit)} title={fit ? 'Click to see it in full size' : 'Click to fit it to the screen'}
-                  className={fit ? 'max-w-full object-contain rounded-lg' : 'rounded-lg'} style={fit ? { maxHeight: 'calc(100vh - 110px)', cursor: 'zoom-in' } : { maxWidth: 'none', cursor: 'zoom-out' }} data-testid="bill-large" />
+                  className={fit ? 'max-w-full object-contain rounded-lg' : 'rounded-lg'} style={fit ? { maxHeight: 'calc(100vh - 6.875rem)', cursor: 'zoom-in' } : { maxWidth: 'none', cursor: 'zoom-out' }} data-testid="bill-large" />
               </div>
             )}
       </div>

@@ -67,7 +67,7 @@ function SummaryStrip({ summary, palette }) {
   if (!summary || !summary.length) return null;
   const p = paletteFor(palette);
   return (
-    <div className="grid gap-3 mt-5" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(160px, 1fr))` }}>
+    <div className="grid gap-3 mt-5" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(10rem, 1fr))` }}>
       {summary.map((s, i) => (
         <div key={i} className="rounded-xl border px-4 py-3 min-w-0"
           style={{ borderColor: 'var(--color-line)', background: p.soft }}>
@@ -383,7 +383,7 @@ export default function Reports() {
           <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
             <Star className="w-4 h-4 text-[var(--color-brand)]" /> Your saved reports
           </h2>
-          <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+          <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(17.5rem, 1fr))' }}>
             {saved.map((s) => {
               const p = paletteFor(s.palette || paletteForSaved(s.id));
               return (
@@ -422,7 +422,7 @@ export default function Reports() {
             {category}
             <span className="t-meta font-normal ml-2">{reports.length} report{reports.length === 1 ? '' : 's'}</span>
           </h2>
-          <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+          <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(18.75rem, 1fr))' }}>
             {reports.map((r) => {
               const p = paletteFor(r.palette);
               return (

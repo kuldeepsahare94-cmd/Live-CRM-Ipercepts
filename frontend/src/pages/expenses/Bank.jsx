@@ -160,7 +160,7 @@ export function BankPeople() {
         ))}
         <div className="relative ml-auto">
           <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-faint)' }} />
-          <input className="input py-1.5" style={{ paddingLeft: 30, width: 200 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a person" aria-label="Search a person" />
+          <input className="input py-1.5" style={{ paddingLeft: '1.875rem', width: '12.5rem' }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a person" aria-label="Search a person" />
         </div>
       </div>
       <ErrorNote>{error}</ErrorNote>

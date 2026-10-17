@@ -157,7 +157,7 @@ function Connection({ data, setData, canEdit }) {
           <Toggle on={f.enabled} onChange={(v) => setF({ ...f, enabled: v })} label="Use MCube for calls" disabled={!canEdit} />
         </Row>
         <Row title="Which MCube" hint="Look at the address you sign in to MCube with.">
-          <select className="input" style={{ width: 300 }} value={f.variant} disabled={!canEdit} onChange={(e) => setF({ ...f, variant: e.target.value })} aria-label="Which MCube">
+          <select className="input" style={{ width: '18.75rem' }} value={f.variant} disabled={!canEdit} onChange={(e) => setF({ ...f, variant: e.target.value })} aria-label="Which MCube">
             <option value="cloud">MCube (mcube.com) — uses a token</option>
             <option value="vmc">MCube, older (mcube.vmc.in) — uses an API key</option>
           </select>
@@ -165,13 +165,13 @@ function Connection({ data, setData, canEdit }) {
         <Row title={f.variant === 'vmc' ? 'API key' : 'Token'}
           hint={data.has_token ? 'A token is saved. It is kept encrypted and never shown again. Type a new one only to replace it.' : 'From MCube: your profile / API section, or ask MCube support for "the click-to-call API token".'}>
           <div className="flex items-center gap-2">
-            <input type="password" autoComplete="new-password" className="input" style={{ width: 300 }} value={f.token} disabled={!canEdit}
+            <input type="password" autoComplete="new-password" className="input" style={{ width: '18.75rem' }} value={f.token} disabled={!canEdit}
               placeholder={data.has_token ? '•••••••• saved' : 'Paste it here'} onChange={(e) => setF({ ...f, token: e.target.value })} aria-label="MCube token" />
             {data.has_token && canEdit && <button type="button" onClick={removeToken} className="text-xs font-medium" style={{ color: 'var(--color-danger)' }}>Remove</button>}
           </div>
         </Row>
         <Row title="Number the customer sees (optional)" hint="One of your MCube numbers, for outgoing calls. Leave empty to let MCube choose.">
-          <input className="input" style={{ width: 300 }} value={f.default_did} disabled={!canEdit} placeholder="e.g. 8035551234"
+          <input className="input" style={{ width: '18.75rem' }} value={f.default_did} disabled={!canEdit} placeholder="e.g. 8035551234"
             onChange={(e) => setF({ ...f, default_did: e.target.value })} aria-label="Outgoing number" />
         </Row>
         <button type="button" onClick={() => setAdvanced((v) => !v)} className="text-xs font-medium mt-3 flex items-center gap-1" style={{ color: 'var(--color-brand)' }}>
@@ -179,7 +179,7 @@ function Connection({ data, setData, canEdit }) {
         </button>
         {advanced && (
           <div className="mt-2">
-            <input className="input" style={{ width: '100%', maxWidth: 460 }} value={f.base_url} disabled={!canEdit} placeholder={f.variant === 'vmc' ? 'https://mcube.vmc.in' : 'https://api.mcube.com'}
+            <input className="input" style={{ width: '100%', maxWidth: '28.75rem' }} value={f.base_url} disabled={!canEdit} placeholder={f.variant === 'vmc' ? 'https://mcube.vmc.in' : 'https://api.mcube.com'}
               onChange={(e) => setF({ ...f, base_url: e.target.value })} aria-label="MCube API address" />
             <p className="t-meta mt-1">Only an address ending in mcube.com or vmc.in is accepted — the token is sent there.</p>
           </div>
@@ -214,7 +214,7 @@ function Connection({ data, setData, canEdit }) {
           <div className="mt-4 pt-3 border-t border-line/70">
             <label className="t-meta font-medium block mb-1" htmlFor="tc-base">This CRM's server address (the first part of the links)</label>
             <div className="flex items-center gap-2 flex-wrap">
-              <input id="tc-base" className="input font-mono text-xs" style={{ width: 360, maxWidth: '100%' }} value={base} placeholder="https://your-backend.onrender.com" onChange={(e) => setBase(e.target.value)} />
+              <input id="tc-base" className="input font-mono text-xs" style={{ width: '22.5rem', maxWidth: '100%' }} value={base} placeholder="https://your-backend.onrender.com" onChange={(e) => setBase(e.target.value)} />
               <button type="button" onClick={() => saver.run(() => api.saveTelephonySettings({ public_base: base }))} disabled={saver.busy || base === (data.public_base || '')} className="btn btn-secondary disabled:opacity-50">Use this address</button>
             </div>
             <p className="t-meta mt-1">It is noted by itself the first time you press Save here. Change it only if MCube cannot reach the links (the address must be the one of the CRM's server, reachable from the internet).</p>
@@ -231,7 +231,7 @@ function Connection({ data, setData, canEdit }) {
                 <>
                   <p className="t-meta mb-2">MCube rings your phone ({prettyNumber(data.me_agent.number)}) and then this number. A real call is made.</p>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <input className="input" style={{ width: 220 }} value={testNumber} onChange={(e) => setTestNumber(e.target.value)} placeholder="A mobile number to ring" aria-label="Number to ring" />
+                    <input className="input" style={{ width: '13.75rem' }} value={testNumber} onChange={(e) => setTestNumber(e.target.value)} placeholder="A mobile number to ring" aria-label="Number to ring" />
                     <button type="button" onClick={tryCall} disabled={!testNumber.trim() || test?.busy} className="btn btn-secondary disabled:opacity-50"><PhoneCall className="w-4 h-4" /> {test?.busy ? 'Asking MCube…' : 'Make a test call'}</button>
                   </div>
                   {test?.ok && <p className="text-xs mt-2" style={{ color: 'var(--color-success)' }}>{test.ok}</p>}
@@ -277,7 +277,7 @@ function Agents({ data, setData, canEdit }) {
                 </td>
                 <td className="py-2 pr-3">
                   <div className="flex items-center gap-2">
-                    <input className="input" style={{ width: 170 }} value={a.agent_number} disabled={!canEdit} inputMode="numeric"
+                    <input className="input" style={{ width: '10.625rem' }} value={a.agent_number} disabled={!canEdit} inputMode="numeric"
                       placeholder={a.device === 'softphone' ? 'Extension' : '10-digit mobile'} aria-label={`Number of ${a.name}`}
                       onChange={(e) => change(a.user_id, { agent_number: e.target.value.replace(/[^\d+ -]/g, '') })} />
                     {!a.agent_number && a.suggested && canEdit && (
@@ -288,7 +288,7 @@ function Agents({ data, setData, canEdit }) {
                   </div>
                 </td>
                 <td className="py-2 pr-3">
-                  <select className="input" style={{ width: 150 }} value={a.device} disabled={!canEdit} aria-label={`Device of ${a.name}`}
+                  <select className="input" style={{ width: '9.375rem' }} value={a.device} disabled={!canEdit} aria-label={`Device of ${a.name}`}
                     onChange={(e) => change(a.user_id, { device: e.target.value })}>
                     <option value="phone">Mobile phone</option>
                     <option value="softphone">Softphone (laptop)</option>
@@ -476,7 +476,7 @@ function Rules({ data, setData, canEdit }) {
         <div className="flex items-center gap-3">
           {f.missed_followup && (
             <label className="t-meta flex items-center gap-1.5">due in
-              <input type="number" min={1} max={1440} className="input" style={{ width: 80 }} value={f.missed_followup_minutes} disabled={!canEdit}
+              <input type="number" min={1} max={1440} className="input" style={{ width: '5rem' }} value={f.missed_followup_minutes} disabled={!canEdit}
                 onChange={(e) => up({ missed_followup_minutes: e.target.value })} aria-label="Minutes until the call-back is due" /> min
             </label>
           )}
@@ -511,7 +511,7 @@ function LiveSetup({ data, setData, canEdit }) {
       <div className="card p-5">
         <h2 className="t-section mb-1">Softphone (calls from the laptop)</h2>
         <p className="t-meta mb-2">The address of MCube's softphone page, as MCube gave it to you. Agents get an "Open softphone" button (the phone icon at the top) that opens it in a small window beside the CRM.</p>
-        <input className="input" style={{ width: '100%', maxWidth: 520 }} value={softphone} disabled={!canEdit} placeholder="https://…" onChange={(e) => setSoftphone(e.target.value)} aria-label="Softphone address" />
+        <input className="input" style={{ width: '100%', maxWidth: '32.5rem' }} value={softphone} disabled={!canEdit} placeholder="https://…" onChange={(e) => setSoftphone(e.target.value)} aria-label="Softphone address" />
         <div className="mt-3"><Note>
           Calls are still started from the CRM's Call button. For an agent set to "Softphone (laptop)" in the Agents tab, MCube rings the softphone instead of a mobile; the agent answers there with a headset.
           If your MCube softphone is the Chrome extension, no address is needed here — it only has to be signed in.
@@ -552,7 +552,7 @@ function LiveSetup({ data, setData, canEdit }) {
                   : <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[var(--color-canvas)] text-[var(--color-muted)]">Not set — no button</span>}
               </div>
               <div className="flex gap-2">
-                <select className="input" style={{ width: 96 }} value={actions[name].method} disabled={!canEdit} onChange={(e) => upAction(name, { method: e.target.value })} aria-label={`${name} method`}>
+                <select className="input" style={{ width: '6rem' }} value={actions[name].method} disabled={!canEdit} onChange={(e) => upAction(name, { method: e.target.value })} aria-label={`${name} method`}>
                   <option>POST</option><option>GET</option>
                 </select>
                 <input className="input font-mono text-xs" style={{ width: '100%' }} value={actions[name].url} disabled={!canEdit} placeholder="https://api.mcube.com/…" aria-label={`${name} address`}
@@ -672,7 +672,7 @@ function Log({ data, setData, canEdit }) {
         </div>
         <textarea className="input font-mono text-xs" style={{ width: '100%' }} rows={6} value={sample} onChange={(e) => setSample(e.target.value)} placeholder='{"callid":"…","callfrom":"…","callto":"…","dialstatus":"ANSWER", …}' aria-label="A message from MCube" />
         <div className="flex items-center gap-2 flex-wrap mt-2">
-          <select className="input" style={{ width: 200 }} value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Which link">
+          <select className="input" style={{ width: '12.5rem' }} value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Which link">
             <option value="hangup">Sent to "Call ended"</option>
             <option value="incoming">Sent to "Call ringing"</option>
           </select>

@@ -235,7 +235,7 @@ function TimeGridView({ days, byDay, onSelectEvent, onCreateAt }) {
   return (
     <div className="card overflow-hidden">
       <div className="grid border-b border-[var(--color-line-soft)] bg-[var(--color-canvas)]"
-        style={{ gridTemplateColumns: `56px repeat(${days.length}, minmax(0, 1fr))` }}>
+        style={{ gridTemplateColumns: `3.5rem repeat(${days.length}, minmax(0, 1fr))` }}>
         <div />
         {days.map((d) => (
           <div key={d} className="px-2 py-2 text-center border-l border-[var(--color-line-soft)]">
@@ -248,7 +248,7 @@ function TimeGridView({ days, byDay, onSelectEvent, onCreateAt }) {
       </div>
 
       {hasAllDay && (
-        <div className="grid border-b border-line" style={{ gridTemplateColumns: `56px repeat(${days.length}, minmax(0, 1fr))` }}>
+        <div className="grid border-b border-line" style={{ gridTemplateColumns: `3.5rem repeat(${days.length}, minmax(0, 1fr))` }}>
           <div className="text-[10px] text-[var(--color-muted)] px-1 py-1.5 text-right">all day</div>
           {days.map((d, i) => (
             <div key={d} className="border-l border-[var(--color-line-soft)] p-1 space-y-0.5 min-w-0">
@@ -259,7 +259,7 @@ function TimeGridView({ days, byDay, onSelectEvent, onCreateAt }) {
       )}
 
       <div ref={scrollRef} className="overflow-y-auto" style={{ maxHeight: '60vh' }}>
-        <div className="grid relative" style={{ gridTemplateColumns: `56px repeat(${days.length}, minmax(0, 1fr))` }}>
+        <div className="grid relative" style={{ gridTemplateColumns: `3.5rem repeat(${days.length}, minmax(0, 1fr))` }}>
           <div>
             {Array.from({ length: 24 }, (_, h) => (
               <div key={h} className="h-12 text-[10px] text-[var(--color-muted)] text-right pr-1.5 -translate-y-1.5">

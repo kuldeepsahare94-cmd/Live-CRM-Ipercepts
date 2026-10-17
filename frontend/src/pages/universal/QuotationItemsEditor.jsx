@@ -100,7 +100,7 @@ export default function QuotationItemsEditor({
         <p className="text-sm text-slate-400 py-3">No items yet. Add at least one to build the quotation.</p>
       ) : (
         <div className="overflow-x-auto thin-scroll">
-          <table className="w-full text-sm" style={{ minWidth: 720 }}>
+          <table className="w-full text-sm" style={{ minWidth: '45rem' }}>
             <thead>
               <tr className="text-left bg-[var(--color-canvas)] border-b border-line">
                 <th className="py-2 px-2 text-xs font-semibold text-slate-500">Item / description</th>

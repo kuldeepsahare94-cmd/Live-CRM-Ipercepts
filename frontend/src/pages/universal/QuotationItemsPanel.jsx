@@ -144,7 +144,7 @@ export default function QuotationItemsPanel({ quotationId, currency = 'INR', can
         </p>
       ) : (
         <div className="overflow-x-auto thin-scroll">
-          <table className="w-full text-sm" style={{ minWidth: 760 }}>
+          <table className="w-full text-sm" style={{ minWidth: '47.5rem' }}>
             <thead>
               <tr className="text-left bg-[var(--color-canvas)] border-b border-line">
                 <th className="py-2 px-2 t-meta font-semibold w-8"></th>

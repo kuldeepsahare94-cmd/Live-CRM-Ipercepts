@@ -205,8 +205,8 @@ function MiniScoreRing({ score, band, label }) {
   const colour = BAND_COLOUR(band);
   return (
     <div className="flex items-center gap-2 shrink-0">
-      <div className="relative" style={{ width: 48, height: 48 }}>
-        <svg width={48} height={48} className="-rotate-90">
+      <div className="relative" style={{ width: '3rem', height: '3rem' }}>
+        <svg viewBox="0 0 48 48" style={{ width: '3rem', height: '3rem' }} className="-rotate-90">
           <circle cx={24} cy={24} r={r} fill="none" stroke="var(--color-line)" strokeWidth={5} />
           <circle cx={24} cy={24} r={r} fill="none" stroke={colour} strokeWidth={5}
             strokeDasharray={c} strokeDashoffset={c - (pct / 100) * c} strokeLinecap="round" />
@@ -244,9 +244,10 @@ function tabLabel(key) {
 function DetailRow({ label, value }) {
   const empty = value === null || value === undefined || value === '';
   return (
-    <div className="flex items-start justify-between gap-3 py-2 border-b border-line/50 last:border-0">
-      <dt className="text-xs text-slate-500 font-medium shrink-0 pt-0.5">{label}</dt>
-      <dd className={`text-sm text-right break-words ${empty ? 'text-slate-300' : 'text-ink'}`}>
+    // (v1.9) the value sits next to its label (not pushed to the far edge of a wide card)
+    <div className="grid grid-cols-[minmax(6.5rem,11rem)_1fr] items-baseline gap-4 py-2 border-b border-line/50 last:border-0">
+      <dt className="text-xs text-slate-500 font-medium">{label}</dt>
+      <dd className={`text-sm break-words min-w-0 ${empty ? 'text-slate-300' : 'text-ink'}`}>
         {empty ? '—' : value}
       </dd>
     </div>
@@ -567,7 +568,7 @@ function WhatsAppPanel({ moduleApiName, recordId }) {
   }
 
   return (
-    <div className="card mt-5 flex flex-col" style={{ maxHeight: 480 }}>
+    <div className="card mt-5 flex flex-col" style={{ maxHeight: '30rem' }}>
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {convo.messages.map((m) => (
           <div key={m.id} className={`flex ${m.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}>

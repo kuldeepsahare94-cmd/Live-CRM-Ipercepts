@@ -39,7 +39,7 @@ export function ScopeBar({ meta, scope, setScope, userId, setUserId }) {
             style={scope === v && !userId ? { background: 'var(--color-brand)', color: '#fff' } : { background: 'var(--color-surface)', color: 'var(--color-ink)' }}>{label}</button>
         ))}
       </div>
-      <select className="input w-auto" value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="One person" style={{ maxWidth: 190 }}>
+      <select className="input w-auto" value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="One person" style={{ maxWidth: '11.875rem' }}>
         <option value="">Any person</option>
         {people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.active ? '' : ' (left)'}</option>)}
       </select>

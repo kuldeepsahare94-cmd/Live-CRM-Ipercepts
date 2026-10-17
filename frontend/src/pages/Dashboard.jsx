@@ -262,7 +262,7 @@ function Brief({ brief, ctx, onReview }) {
   const live = brief.filter((b) => !b.locked && b.count > 0);
   const top = live.slice(0, 3);
   return (
-    <div className="grid lg:grid-cols-[1fr_300px] gap-3.5">
+    <div className="grid lg:grid-cols-[1fr_19rem] gap-3.5">
       <section className="dash-card p-5 relative overflow-hidden" aria-label="Today's CRM brief"
         style={{ background: 'linear-gradient(120deg, #EFEAFF 0%, #F7F4FF 40%, #FFFFFF 75%)', borderColor: 'rgba(108,79,247,0.18)' }}>
         <div aria-hidden="true" className="absolute -top-16 -right-10 w-64 h-64 rounded-full pointer-events-none"
@@ -822,7 +822,7 @@ function LeadsBySource({ lbs, ctx }) {
       <ul className="space-y-1">
         {lbs.top.map((s, i) => (
           <li key={s.source}>
-            <DLink to={drillHref(s, ctx)} className="grid grid-cols-[92px_1fr_32px_14px] items-center gap-2 px-1.5 py-1.5 text-[12.5px]"
+            <DLink to={drillHref(s, ctx)} className="grid grid-cols-[5.75rem_1fr_2rem_0.875rem] items-center gap-2 px-1.5 py-1.5 text-[12.5px]"
               label={`${s.source}: ${s.count} leads`}>
               <span className="truncate" style={{ color: 'var(--color-ink)' }}>{s.source}</span>
               <span className="h-[8px] rounded-full overflow-hidden" style={{ background: 'var(--color-canvas)' }}>

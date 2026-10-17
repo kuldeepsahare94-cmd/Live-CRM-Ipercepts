@@ -114,8 +114,8 @@ export default function Deployed() {
                       {r.renewal_due && <div className="text-[11px] font-medium" style={{ color: r.ends_in < 0 ? 'var(--color-danger-strong)' : 'var(--color-warning-strong, #B45309)' }}>{r.ends_in < 0 ? `ended ${-r.ends_in} days ago` : `ends in ${r.ends_in} days`}</div>}</td>
                     <td className={td}><Badge tone={r.status === 'Active' ? 'success' : 'neutral'} size="xs">{r.status}</Badge></td>
                     <td className={`${td} text-right whitespace-nowrap`}>
-                      {meta?.can?.edit && r.status === 'Active' && <button type="button" className="btn btn-secondary mr-2" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setRenew(r)} data-testid={`renew-${r.id}`}><RefreshCw className="w-3.5 h-3.5" /> Renew</button>}
-                      {meta?.can?.edit && <button type="button" className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setForm(r)}>Edit</button>}
+                      {meta?.can?.edit && r.status === 'Active' && <button type="button" className="btn btn-secondary mr-2" style={{ padding: '4px 10px', fontSize: '0.75rem' }} onClick={() => setRenew(r)} data-testid={`renew-${r.id}`}><RefreshCw className="w-3.5 h-3.5" /> Renew</button>}
+                      {meta?.can?.edit && <button type="button" className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '0.75rem' }} onClick={() => setForm(r)}>Edit</button>}
                     </td>
                   </tr>
                 ))}

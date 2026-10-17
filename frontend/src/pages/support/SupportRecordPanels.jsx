@@ -41,7 +41,7 @@ export function TicketSupportPanel({ record, canEdit, onUpdated }) {
   const refresh = () => { load(); onUpdated?.(); };
 
   if (error) return <div className={`${box} mb-5`}><p className="text-[12.5px]" style={{ color: 'var(--color-muted)' }}>Support details unavailable: {error}</p></div>;
-  if (!d) return <div className="sd-card mb-5 animate-pulse" style={{ height: 140 }} aria-busy="true" />;
+  if (!d) return <div className="sd-card mb-5 animate-pulse" style={{ height: '8.75rem' }} aria-busy="true" />;
   const closed = ['Resolved', 'Closed'].includes(record.status);
 
   return (

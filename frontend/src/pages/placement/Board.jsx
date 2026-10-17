@@ -62,7 +62,7 @@ export function Kanban({ rows, stages, canMove, showJob, reload }) {
       </div>
       <div className="flex gap-3 overflow-x-auto thin-scroll pb-3" data-testid="kanban">
         {cols.map((s) => (
-          <div key={s} className="shrink-0 rounded-2xl flex flex-col" style={{ width: 232, background: over === s ? 'var(--color-brand-faint)' : 'var(--color-canvas-alt)', border: `1px dashed ${over === s ? 'var(--color-brand)' : 'transparent'}`, maxHeight: '68vh' }}
+          <div key={s} className="shrink-0 rounded-2xl flex flex-col" style={{ width: '14.5rem', background: over === s ? 'var(--color-brand-faint)' : 'var(--color-canvas-alt)', border: `1px dashed ${over === s ? 'var(--color-brand)' : 'transparent'}`, maxHeight: '68vh' }}
             onDragOver={(e) => { if (canMove) { e.preventDefault(); setOver(s); } }} onDragLeave={() => setOver('')} onDrop={(e) => drop(s, e)} data-testid={`col-${s}`}>
             <div className="px-3 pt-2.5 pb-2 flex items-center justify-between sticky top-0">
               <span className="flex items-center gap-2 text-[12px] font-semibold text-ink"><span className="w-2 h-2 rounded-full" style={{ background: STAGE_HEX[s] }} />{s}</span>
@@ -92,11 +92,11 @@ export default function Board() {
   return (
     <div data-testid="pl-board">
       <div className="flex items-center gap-2 flex-wrap mb-3">
-        <select className="input w-auto" style={{ maxWidth: 360 }} value={job} onChange={(e) => setSp(e.target.value ? { job: e.target.value } : {})} aria-label="Opening" data-testid="board-job">
+        <select className="input w-auto" style={{ maxWidth: '22.5rem' }} value={job} onChange={(e) => setSp(e.target.value ? { job: e.target.value } : {})} aria-label="Opening" data-testid="board-job">
           <option value="">All open openings</option>
           {(jobs || []).map((j) => <option key={j.id} value={j.id}>{j.title} · {j.client_name}</option>)}
         </select>
-        <input className="input" style={{ maxWidth: 240 }} placeholder="Find a candidate" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a candidate" />
+        <input className="input" style={{ maxWidth: '15rem' }} placeholder="Find a candidate" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a candidate" />
         <span className="t-meta">{list.length} cards · drag a card to another stage</span>
       </div>
       <LoadError error={error} onRetry={reload} />

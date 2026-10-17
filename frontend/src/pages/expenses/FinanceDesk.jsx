@@ -208,7 +208,7 @@ function PayDesk({ meta, onBatch }) {
             <table className="w-full text-sm" data-testid="payable-table">
               <thead>
                 <tr style={{ background: 'var(--color-surface-soft)', color: 'var(--color-muted)' }}>
-                  <th className={tableHead} style={{ width: 36 }}><input type="checkbox" checked={allPicked} aria-label="Choose all" onChange={() => setPicked(allPicked ? new Set() : new Set(payable.slice(0, MOST).map((c) => c.id)))} /></th>
+                  <th className={tableHead} style={{ width: '2.25rem' }}><input type="checkbox" checked={allPicked} aria-label="Choose all" onChange={() => setPicked(allPicked ? new Set() : new Set(payable.slice(0, MOST).map((c) => c.id)))} /></th>
                   <th className={tableHead}>Person</th>
                   <th className={tableHead}>Claim</th>
                   <th className={tableHead}>Approved on</th>

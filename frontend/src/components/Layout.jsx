@@ -395,7 +395,7 @@ export default function Layout() {
 
       <div className="flex-1 min-w-0">
         <header className="sticky top-0 z-30 bg-white border-b border-line">
-          <div className="flex items-center gap-3 px-4 sm:px-6 h-16">
+          <div className="icrm-main flex items-center gap-3 h-16">
             <button onClick={() => setDrawerOpen(true)} aria-label="Open navigation"
               className="p-2 -ml-2 rounded-lg text-[var(--color-muted)] hover:bg-[var(--color-canvas)] hover:text-ink shrink-0">
               <Menu className="w-5 h-5" />
@@ -454,7 +454,7 @@ export default function Layout() {
           </div>
         </header>
 
-        <main className="px-4 sm:px-6 pt-6 pb-24">{/* (v1.7) room under the page for the round AI button, so it never covers the last row or the pager */}
+        <main className="icrm-main pt-6 pb-24">{/* (v1.7) room under the page for the round AI button, so it never covers the last row or the pager */}
           <ErrorBoundary key={location.pathname}>
             {/* Routes are lazy-loaded (see App.jsx). Keeping the boundary
                 here rather than around the whole app means the sidebar and

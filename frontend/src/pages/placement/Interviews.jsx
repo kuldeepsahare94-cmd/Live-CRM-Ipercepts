@@ -50,7 +50,7 @@ export default function Interviews() {
               return (
                 <div key={i.id} className="card p-3 flex items-center gap-3 flex-wrap" data-testid={`iv-${i.id}`}>
                   <div className="w-16 text-center shrink-0 rounded-xl py-1.5" style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand)' }}><div className="text-sm font-bold">{niceTime(i.scheduled_at)}</div><div className="text-[10px] font-semibold">{i.duration_min} min</div></div>
-                  <div className="min-w-0 flex-1" style={{ minWidth: 220 }}>
+                  <div className="min-w-0 flex-1" style={{ minWidth: '13.75rem' }}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <Link to={`/placement/candidates/${i.candidate_id}`} className="text-sm font-semibold text-ink hover:underline">{i.candidate_name}</Link>
                       <Badge tone="special" size="xs">{i.round}</Badge>
@@ -63,9 +63,9 @@ export default function Interviews() {
                   </div>
                   <div className="t-meta shrink-0 text-right hidden md:block">{i.owner_name || ''}</div>
                   <div className="flex items-center gap-2 shrink-0">
-                    {i.mobile && i.result === 'Scheduled' && <a className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} href={`tel:${String(i.mobile).replace(/[^\d+]/g, '')}`} aria-label={`Call ${i.candidate_name}`}><PhoneCall className="w-3.5 h-3.5" /> Call</a>}
-                    {canEdit && i.result === 'Scheduled' && <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setEdit(i)} data-testid={`iv-edit-${i.id}`}>Change time</button>}
-                    {canEdit && i.result === 'Scheduled' && <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setRes(i)} data-testid={`iv-result-${i.id}`}>Result</button>}
+                    {i.mobile && i.result === 'Scheduled' && <a className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.75rem' }} href={`tel:${String(i.mobile).replace(/[^\d+]/g, '')}`} aria-label={`Call ${i.candidate_name}`}><PhoneCall className="w-3.5 h-3.5" /> Call</a>}
+                    {canEdit && i.result === 'Scheduled' && <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.75rem' }} onClick={() => setEdit(i)} data-testid={`iv-edit-${i.id}`}>Change time</button>}
+                    {canEdit && i.result === 'Scheduled' && <button type="button" className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '0.75rem' }} onClick={() => setRes(i)} data-testid={`iv-result-${i.id}`}>Result</button>}
                   </div>
                 </div>
               );

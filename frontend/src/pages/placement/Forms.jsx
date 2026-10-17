@@ -327,7 +327,7 @@ export function MoveMenu({ row, onMoved }) {
   if (row.stage === 'Joined') return null;
   return (
     <span className="relative inline-block">
-      <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} data-testid={`move-${row.id}`}>Move</button>
+      <button type="button" className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.75rem' }} onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} data-testid={`move-${row.id}`}>Move</button>
       {open && (
         <>
           <span className="fixed inset-0 z-40" onClick={() => setOpen(false)} />

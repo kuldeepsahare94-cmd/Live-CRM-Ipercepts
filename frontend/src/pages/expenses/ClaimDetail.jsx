@@ -315,11 +315,11 @@ export default function ClaimDetail() {
                       {deciding && (
                         <div className="mt-2 flex flex-wrap sm:flex-col items-end justify-end gap-2">
                           <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--color-muted)' }}>Approve
-                            <input type="number" inputMode="decimal" min="0" max={e.amount} step="0.01" className="input text-right" style={{ width: 110, padding: '4px 8px', ...(d.amount === '' ? { borderColor: 'var(--color-danger)' } : {}) }}
+                            <input type="number" inputMode="decimal" min="0" max={e.amount} step="0.01" className="input text-right" style={{ width: '6.875rem', padding: '4px 8px', ...(d.amount === '' ? { borderColor: 'var(--color-danger)' } : {}) }}
                               value={d.amount !== undefined ? d.amount : String(e.approved_amount ?? e.amount)} onChange={(ev) => setLine(e.id, { amount: ev.target.value })} aria-label={`Amount to approve for ${e.category_name}`} data-testid="line-amount" />
                           </label>
                           {(less || d.note !== undefined || e.approver_note) && (
-                            <input className="input w-full sm:w-[220px]" style={{ padding: '4px 8px', fontSize: 12 }} placeholder={less ? 'Why less? (needed)' : 'Note'} maxLength={300}
+                            <input className="input w-full sm:w-[220px]" style={{ padding: '4px 8px', fontSize: '0.75rem' }} placeholder={less ? 'Why less? (needed)' : 'Note'} maxLength={300}
                               value={d.note !== undefined ? d.note : (e.approver_note || '')} onChange={(ev) => setLine(e.id, { note: ev.target.value })} aria-label={`Reason for ${e.category_name}`} data-testid="line-note" />
                           )}
                         </div>

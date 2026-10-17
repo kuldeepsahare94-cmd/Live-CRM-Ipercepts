@@ -165,8 +165,8 @@ function ScoreInsightsCard({ scoring }) {
   return (
     <div className="card p-4">
       <div className="flex items-center gap-4 mb-4">
-        <div className="relative shrink-0" style={{ width: 68, height: 68 }}>
-          <svg width={68} height={68} className="-rotate-90">
+        <div className="relative shrink-0" style={{ width: '4.25rem', height: '4.25rem' }}>
+          <svg viewBox="0 0 68 68" style={{ width: '4.25rem', height: '4.25rem' }} className="-rotate-90">
             <circle cx={34} cy={34} r={r} fill="none" stroke="var(--color-line)" strokeWidth={6} />
             <circle cx={34} cy={34} r={r} fill="none" stroke={ringColor} strokeWidth={6}
               strokeDasharray={c} strokeDashoffset={c - (pct / 100) * c} strokeLinecap="round" />
@@ -299,9 +299,9 @@ function CardHeader({ icon: Icon, title, tint, action }) {
 // renders as an em-dash rather than collapsing the row.
 function Row({ label, value, strong }) {
   return (
-    <div className="flex justify-between gap-3">
-      <dt className="text-slate-400 shrink-0">{label}</dt>
-      <dd className={`text-ink text-right truncate ${strong ? 'font-medium' : ''}`}>{value || '—'}</dd>
+    <div className="grid grid-cols-[minmax(6.5rem,11rem)_1fr] items-baseline gap-4">
+      <dt className="text-slate-400">{label}</dt>
+      <dd className={`text-ink min-w-0 break-words ${strong ? 'font-medium' : ''}`}>{value || '—'}</dd>
     </div>
   );
 }
