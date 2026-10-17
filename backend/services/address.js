@@ -50,7 +50,9 @@ async function nominatimTurn() {
 async function getJson(url) {
   let res;
   try { res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en' }, signal: AbortSignal.timeout(10000) }); } catch { throw new AddressError('The address service did not answer. Type the address.'); }
-  if (!res.ok) throw new AddressError(`The address service said no (${res.status}). Type the address.`);
+  // (v1.10) in plain words: a busy free service is the usual reason (429 = too many questions from this server)
+  if (res.status === 429 || res.status === 503) throw new AddressError('The free map service is busy right now. Try again in a minute, or type the address.');
+  if (!res.ok) throw new AddressError(`The address service could not answer (${res.status}). Type the address.`);
   try { return await res.json(); } catch { throw new AddressError('The address service gave an answer that could not be read.'); }
 }
 
@@ -128,9 +130,18 @@ async function reverse(lat, lng) {
   let result = null;
   if (p === 'google') result = (await google({ latlng: `${a},${b}` }))[0] || null;
   else {
-    await nominatimTurn();
-    const h = await getJson(`${NOMINATIM()}/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${a}&lon=${b}`);
-    result = h && !h.error && (h.address || h.display_name) ? fromNominatim(h) : null;
+    // (v1.10) OpenStreetMap first; when it is busy or down, Photon (also OpenStreetMap data) answers instead
+    try {
+      await nominatimTurn();
+      const h = await getJson(`${NOMINATIM()}/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${a}&lon=${b}`);
+      result = h && !h.error && (h.address || h.display_name) ? fromNominatim(h) : null;
+    } catch (first) {
+      try {
+        const out = await getJson(`${PHOTON()}/reverse?lat=${a}&lon=${b}&lang=en&limit=1`);
+        const f = out && out.features && out.features[0];
+        result = f ? fromPhoton(f) : null;
+      } catch { throw first; }
+    }
   }
   if (result) result = { ...result, lat: a, lng: b };
   return { provider: p, result: remember(key, result) };

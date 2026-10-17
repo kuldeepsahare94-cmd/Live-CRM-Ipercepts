@@ -19,6 +19,24 @@ const { bad, idOf } = store;
 const APP_VERSION = '1.0.0';      // the server's app interface; the app says which it needs
 const API_LEVEL = 1;
 
+// (v1.10) what a row needs beyond its title: who owns it, when it was last worked on, the next follow-up
+const OWNER = (col) => `(SELECT COALESCE(NULLIF(u9.full_name, ''), u9.username) FROM users u9 WHERE u9.id = ${col}) AS m_owner`;
+const NEXT_FU = (mod) => `(SELECT MIN(COALESCE(NULLIF(fx.due_at, ''), fx.due_date)) FROM follow_ups fx WHERE fx.related_module = '${mod}' AND fx.related_record_id = t.id AND fx.status = 'Scheduled') AS m_next_fu`;
+const LAST_CALL = (mod) => `(SELECT MAX(CAST(COALESCE(cx.start_time, cx.created_at) AS TEXT)) FROM calls cx WHERE cx.related_module = '${mod}' AND cx.related_record_id = t.id) AS m_last_call`;
+const LAST_ACTIVITY = (mod) => `(SELECT MAX(x9.at) FROM (
+    SELECT CAST(COALESCE(c9.start_time, c9.created_at) AS TEXT) AS at FROM calls c9 WHERE c9.related_module = '${mod}' AND c9.related_record_id = t.id
+    UNION ALL SELECT CAST(n9.created_at AS TEXT) FROM notes n9 WHERE n9.related_module = '${mod}' AND n9.related_record_id = t.id
+    UNION ALL SELECT CAST(g9.start_datetime AS TEXT) FROM meetings g9 WHERE g9.related_module = '${mod}' AND g9.related_record_id = t.id AND CAST(g9.start_datetime AS TEXT) <= CAST(CURRENT_TIMESTAMP AS TEXT)
+  ) x9) AS m_last_activity`;
+// the name of the record a call / meeting / task / ticket belongs to
+const REL_NAME = `CASE t.related_module
+    WHEN 'leads' THEN (SELECT x.student_name FROM leads x WHERE x.id = t.related_record_id)
+    WHEN 'contacts' THEN (SELECT TRIM(COALESCE(x.first_name, '') || ' ' || COALESCE(x.last_name, '')) FROM contacts x WHERE x.id = t.related_record_id)
+    WHEN 'accounts' THEN (SELECT x.account_name FROM accounts x WHERE x.id = t.related_record_id)
+    WHEN 'opportunities' THEN (SELECT x.opportunity_name FROM opportunities x WHERE x.id = t.related_record_id)
+    WHEN 'quotations' THEN (SELECT x.quote_number FROM quotations x WHERE x.id = t.related_record_id)
+  END`;
+
 // The modules of the app, in the order of its menu, and how a list row is shown.
 const LIST = {
   leads: {
@@ -27,42 +45,62 @@ const LIST = {
     // (v1.7) what a salesperson wants on the row: where, how hot, when last spoken to
     more: ['t.city AS m_city', 't.lead_rating AS m_rating',
       "(SELECT MAX(cx.start_time) FROM calls cx WHERE cx.related_module = 'leads' AND cx.related_record_id = t.id) AS m_last_call",
-      "(SELECT COUNT(*) FROM calls cx WHERE cx.related_module = 'leads' AND cx.related_record_id = t.id) AS m_calls"],
+      "(SELECT COUNT(*) FROM calls cx WHERE cx.related_module = 'leads' AND cx.related_record_id = t.id) AS m_calls",
+      't.assigned_counselor AS m_owner', NEXT_FU('leads'), LAST_ACTIVITY('leads'), 't.email AS m_email', 't.source AS m_source'],
+    sorts: { next_fu: 'next_fu', last_activity: 'last_activity' },
   },
   contacts: {
     table: 'contacts', title: "TRIM(COALESCE(t.first_name, '') || ' ' || COALESCE(t.last_name, ''))", sub: "COALESCE(a.account_name, t.job_title, t.city)", status: 't.contact_status',
     phone: 'COALESCE(t.mobile, t.phone)', join: 'LEFT JOIN accounts a ON a.id = t.account_id', search: ['t.first_name', 't.last_name', 't.mobile', 't.phone', 't.email', 'a.account_name'], order: 't.id DESC', owner: 't.owner_id',
+    more: [OWNER('t.owner_id'), NEXT_FU('contacts'), LAST_CALL('contacts'), LAST_ACTIVITY('contacts'), 't.job_title AS m_job', 't.email AS m_email', 't.city AS m_city'],
+    sorts: { next_fu: 'next_fu', last_activity: 'last_activity' },
   },
   accounts: {
     table: 'accounts', title: 't.account_name', sub: "TRIM(COALESCE(t.city, '') || CASE WHEN t.industry IS NOT NULL AND t.industry <> '' THEN ' · ' || t.industry ELSE '' END)", status: 't.status',
     phone: 't.phone', search: ['t.account_name', 't.phone', 't.email', 't.city'], order: 't.account_name', owner: 't.owner_id',
+    more: [OWNER('t.owner_id'), NEXT_FU('accounts'), LAST_CALL('accounts'), LAST_ACTIVITY('accounts'), 't.city AS m_city', 't.industry AS m_industry', 't.account_type AS m_type',
+      '(SELECT COUNT(*) FROM contacts c8 WHERE c8.account_id = t.id) AS m_contacts', '(SELECT COUNT(*) FROM opportunities o8 WHERE o8.account_id = t.id) AS m_deals'],
+    sorts: { next_fu: 'next_fu', last_activity: 'last_activity' },
   },
   opportunities: {
     table: 'opportunities', title: 't.opportunity_name', sub: 'a.account_name', status: 'st.name', amount: 't.amount', date: 't.expected_close_date',
     join: 'LEFT JOIN accounts a ON a.id = t.account_id LEFT JOIN module_pipeline_stages st ON st.id = t.stage_id', search: ['t.opportunity_name', 'a.account_name'], order: 't.id DESC', owner: 't.owner_id',
+    more: [OWNER('t.owner_id'), NEXT_FU('opportunities'), LAST_ACTIVITY('opportunities'), 't.probability AS m_probability', 'st.color AS m_stage_color'],
+    sorts: { amount: 'amount', close: 'date_asc', next_fu: 'next_fu', last_activity: 'last_activity' },
   },
   quotations: {
     table: 'quotations', title: 't.quote_number', sub: 'a.account_name', status: 't.status', amount: 't.grand_total', date: 't.quote_date',
     join: 'LEFT JOIN accounts a ON a.id = t.account_id', search: ['t.quote_number', 'a.account_name'], order: 't.id DESC', owner: 't.salesperson_id',
+    more: [OWNER('t.salesperson_id'), 't.valid_until AS m_valid_until', '(SELECT TRIM(COALESCE(c8.first_name, \'\') || \' \' || COALESCE(c8.last_name, \'\')) FROM contacts c8 WHERE c8.id = t.contact_id) AS m_contact'],
+    sorts: { amount: 'amount', date: 'date_desc' },
   },
   subscriptions: {
     table: 'subscriptions', title: "COALESCE(t.subscription_number, '') || CASE WHEN t.plan IS NOT NULL AND t.plan <> '' THEN ' · ' || t.plan ELSE '' END", sub: 'a.account_name', status: 't.status',
     amount: 't.recurring_amount', date: 't.renewal_date', join: 'LEFT JOIN accounts a ON a.id = t.account_id', search: ['t.subscription_number', 't.plan', 'a.account_name'], order: 't.id DESC', owner: 't.owner_id',
+    more: [OWNER('t.owner_id'), 't.billing_cycle AS m_frequency'],
+    sorts: { renewal: 'date_asc', amount: 'amount' },
   },
   meetings: {
     table: 'meetings', title: 't.meeting_title', sub: 't.location', status: 't.status', date: 't.start_datetime', search: ['t.meeting_title', 't.location'], owner: 't.assigned_user_id', activity: true,
     // (v1.7) today and what is coming first (soonest first), then the past (latest first)
     order: (today) => `CASE WHEN SUBSTR(CAST(t.start_datetime AS TEXT), 1, 10) >= '${today}' THEN 0 ELSE 1 END, CASE WHEN SUBSTR(CAST(t.start_datetime AS TEXT), 1, 10) >= '${today}' THEN t.start_datetime END ASC, t.start_datetime DESC`,
-    more: ['t.meeting_type AS m_type', 't.end_datetime AS m_end', "COALESCE(NULLIF(t.video_link, ''), NULLIF(t.online_dial_in, '')) AS m_link"],
+    more: ['t.meeting_type AS m_type', 't.end_datetime AS m_end', "COALESCE(NULLIF(t.video_link, ''), NULLIF(t.online_dial_in, '')) AS m_link",
+      OWNER('t.assigned_user_id'), `${REL_NAME} AS m_related`, 't.related_module AS m_related_module', 't.related_record_id AS m_related_id'],
+    sorts: { date: 'date_desc' },
   },
   calls: {
     table: 'calls', title: 't.call_subject', sub: 't.phone_number', status: 't.status', phone: 't.phone_number', date: 't.start_time', search: ['t.call_subject', 't.phone_number'], order: 't.id DESC', owner: 't.assigned_user_id', activity: true,
     // (v1.7) WHO the call was with, which way, how long
     more: ["CASE t.related_module WHEN 'leads' THEN (SELECT x.student_name FROM leads x WHERE x.id = t.related_record_id) WHEN 'contacts' THEN (SELECT TRIM(COALESCE(x.first_name, '') || ' ' || COALESCE(x.last_name, '')) FROM contacts x WHERE x.id = t.related_record_id) WHEN 'accounts' THEN (SELECT x.account_name FROM accounts x WHERE x.id = t.related_record_id) END AS m_who",
-      't.direction AS m_direction', 't.duration_seconds AS m_seconds', 't.call_outcome AS m_outcome', 't.connected AS m_connected'],
+      't.direction AS m_direction', 't.duration_seconds AS m_seconds', 't.call_outcome AS m_outcome', 't.connected AS m_connected',
+      OWNER('t.assigned_user_id'), "CASE WHEN COALESCE(t.call_recording_url, '') <> '' OR t.recording_id IS NOT NULL THEN 1 ELSE 0 END AS m_recording",
+      't.related_module AS m_related_module', 't.related_record_id AS m_related_id'],
+    sorts: { longest: 'longest' },
   },
   tasks: {
     table: 'tasks', title: 't.task_title', sub: 't.priority', status: 't.status', date: 't.due_date', search: ['t.task_title'], owner: 't.assigned_to_id', activity: true,
+    more: [OWNER('t.assigned_to_id'), `${REL_NAME} AS m_related`, 't.related_module AS m_related_module', 't.related_record_id AS m_related_id', 't.priority AS m_priority'],
+    sorts: { due: 'date_asc', priority: 'priority' },
     // (v1.7) today first, then overdue (the latest first), then what is coming, then undated, finished last
     order: (today) => `CASE WHEN t.status = 'Completed' THEN 4 WHEN t.due_date IS NULL OR CAST(t.due_date AS TEXT) = '' THEN 3 WHEN SUBSTR(CAST(t.due_date AS TEXT), 1, 10) = '${today}' THEN 0 WHEN SUBSTR(CAST(t.due_date AS TEXT), 1, 10) < '${today}' THEN 1 ELSE 2 END, CASE WHEN SUBSTR(CAST(t.due_date AS TEXT), 1, 10) > '${today}' THEN t.due_date END ASC, t.due_date DESC`,
   },
@@ -70,8 +108,54 @@ const LIST = {
     table: 'products', title: 't.product_name', sub: "TRIM(COALESCE(t.sku, '') || CASE WHEN t.category IS NOT NULL AND t.category <> '' THEN ' · ' || t.category ELSE '' END)", status: "CASE WHEN t.active = 1 THEN 'Active' ELSE 'Inactive' END",
     amount: 't.selling_price', search: ['t.product_name', 't.sku', 't.category'], order: 't.product_name', photo: true,
     extra: ['t.tax_percent', 't.unit', 't.currency'],
+    sorts: { price_high: 'amount', price_low: 'amount_asc' },
+  },
+  // (v1.10) to read in the app (they are changed on the web): tickets, invoices, payments
+  tickets: {
+    table: 'tickets', readOnly: true, title: "COALESCE(NULLIF(t.subject, ''), t.ticket_number)", sub: 'a.account_name', status: 't.status', phone: 't.phone', date: 't.resolution_due_at',
+    join: 'LEFT JOIN accounts a ON a.id = t.account_id', search: ['t.subject', 't.ticket_number', 'a.account_name', 't.email', 't.phone'], order: 't.id DESC', owner: 't.assigned_agent_id',
+    more: [OWNER('t.assigned_agent_id'), 't.ticket_number AS m_number', 't.priority AS m_priority', 't.sla_state AS m_sla', 't.created_at AS m_created'],
+    sorts: { due: 'date_asc', priority: 'priority' },
+  },
+  invoices: {
+    table: 'sales_documents', readOnly: true, base: "t.doc_type = 'invoice'", title: 't.doc_number', sub: 'a.account_name', status: "COALESCE(NULLIF(t.payment_status, ''), t.status)", amount: 't.grand_total', date: 't.doc_date',
+    join: 'LEFT JOIN accounts a ON a.id = t.account_id', search: ['t.doc_number', 'a.account_name'], order: 't.id DESC', owner: 't.salesperson_id',
+    more: [OWNER('t.salesperson_id'), 't.balance_due AS m_balance', 't.due_date AS m_due'],
+    sorts: { amount: 'amount', date: 'date_desc' },
+  },
+  payments: {
+    table: 'payments', readOnly: true, title: 't.payment_number', sub: "COALESCE(a.account_name, t.payer_name)", status: 't.status', amount: 't.amount', date: 't.payment_date',
+    join: 'LEFT JOIN accounts a ON a.id = t.account_id', search: ['t.payment_number', 'a.account_name', 't.payer_name', 't.transaction_number'], order: 't.id DESC',
+    more: ['t.payment_mode AS m_mode', 't.due_date AS m_due'],
+    sorts: { amount: 'amount', date: 'date_desc' },
   },
 };
+// (v1.10) the ways a list can be sorted (the same words for every module), and what each means
+const SORT_LABEL = {
+  default: 'Default', newest: 'Newest first', oldest: 'Oldest first', name: 'Name A–Z',
+  next_fu: 'Next follow-up', last_activity: 'Last activity', amount: 'Amount: high to low', amount_asc: 'Amount: low to high',
+  close: 'Close date', date: 'Date: newest', renewal: 'Renewal date', due: 'Due date', priority: 'Priority', longest: 'Longest first',
+  price_high: 'Price: high to low', price_low: 'Price: low to high',
+};
+function sortsOf(c) { return ['default', 'newest', 'oldest', 'name', ...Object.keys(c.sorts || {})]; }
+const PRIORITY_ORDER = "CASE LOWER(COALESCE(t.priority, '')) WHEN 'critical' THEN 0 WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 ELSE 4 END";
+function orderFor(c, key, fallback) {
+  const how = key === 'default' ? null : key === 'newest' ? 'newest' : key === 'oldest' ? 'oldest' : key === 'name' ? 'name' : (c.sorts || {})[key];
+  switch (how) {
+    case 'newest': return 't.id DESC';
+    case 'oldest': return 't.id ASC';
+    case 'name': return `LOWER(CAST(${c.title} AS TEXT)) ASC, t.id DESC`;
+    case 'next_fu': return 'm_next_fu ASC NULLS LAST';
+    case 'last_activity': return 'm_last_activity DESC NULLS LAST';
+    case 'amount': return c.amount ? `${c.amount} DESC NULLS LAST, t.id DESC` : fallback;
+    case 'amount_asc': return c.amount ? `${c.amount} ASC NULLS LAST, t.id DESC` : fallback;
+    case 'date_asc': return c.date ? `CASE WHEN ${c.date} IS NULL OR CAST(${c.date} AS TEXT) = '' THEN 1 ELSE 0 END, ${c.date} ASC, t.id DESC` : fallback;
+    case 'date_desc': return c.date ? `CASE WHEN ${c.date} IS NULL OR CAST(${c.date} AS TEXT) = '' THEN 1 ELSE 0 END, ${c.date} DESC, t.id DESC` : fallback;
+    case 'priority': return `${PRIORITY_ORDER}, t.id DESC`;
+    case 'longest': return 'COALESCE(t.duration_seconds, 0) DESC, t.id DESC';
+    default: return fallback;
+  }
+}
 const APP_MODULES = Object.keys(LIST);
 const can = (user, module, action) => access.isSuper(user) || !!(user.permissions && user.permissions[module] && user.permissions[module][action]);
 
@@ -149,7 +233,8 @@ function bootstrap(user) {
   const modules = APP_MODULES.map((api) => rows.find((r) => r.api_name === api)).filter((m) => m && Number(m.enabled) !== 0 && can(user, m.api_name, 'view'))
     .map((m) => ({
       api_name: m.api_name, singular: m.singular_label, plural: m.plural_label, icon: m.icon || null, color: m.color || null,
-      can: { view: true, create: can(user, m.api_name, 'create'), edit: can(user, m.api_name, 'edit'), delete: can(user, m.api_name, 'delete') },
+      // (v1.10) tickets, invoices and payments are read in the app and changed on the web
+      can: LIST[m.api_name].readOnly ? { view: true, create: false, edit: false, delete: false, read_only: true } : { view: true, create: can(user, m.api_name, 'create'), edit: can(user, m.api_name, 'edit'), delete: can(user, m.api_name, 'delete') },
       fields: m.api_name === 'leads' ? withLeadCore(fieldsOf(m.id)) : fieldsOf(m.id),
     }));
   let currency = { code: 'INR', symbol: '₹' };
@@ -201,8 +286,9 @@ function bootstrap(user) {
 const DATE_LABEL = {
   leads: 'Follow-up date', opportunities: 'Close date', quotations: 'Quote date', subscriptions: 'Renewal date',
   meetings: 'Meeting date', calls: 'Call date', tasks: 'Due date',
+  tickets: 'Resolution due', invoices: 'Invoice date', payments: 'Payment date',
 };
-const STATUS_COLUMN = { leads: 'status', contacts: 'contact_status', accounts: 'status', quotations: 'status', subscriptions: 'status', meetings: 'status', calls: 'status', tasks: 'status' };
+const STATUS_COLUMN = { leads: 'status', contacts: 'contact_status', accounts: 'status', quotations: 'status', subscriptions: 'status', meetings: 'status', calls: 'status', tasks: 'status', tickets: 'status', payments: 'status' };
 const CHOICE_TYPES = new Set(['dropdown', 'radio', 'multiselect', 'checkbox']);
 const tableCols = new Map();
 function columnsOf(table) {
@@ -256,6 +342,8 @@ function filterSpec(user, module) {
     date_label: c.date ? (DATE_LABEL[module] || 'Date') : null,
     has_created: columnsOf(c.table).includes('created_at'),
     view: module === 'products' ? { can: false } : viewing.options(user),
+    // (v1.10) the ways this list can be sorted
+    sorts: sortsOf(c).map((k) => ({ key: k, label: SORT_LABEL[k] || k })),
   };
 }
 
@@ -313,6 +401,7 @@ function list(user, module, q = {}) {
   if (!c) throw bad('This list is not in the app.', 404);
   if (!can(user, module, 'view')) throw bad(`Your role cannot open ${module}.`, 403);
   const where = ['1 = 1']; const params = [];
+  if (c.base) where.push(c.base);
   // the calls / meetings / tasks of one record: everyone who may open that record sees them all —
   // so the record filter below is ALWAYS added when the related record is given here
   const relMod = c.activity && typeof q.related_module === 'string' ? q.related_module.slice(0, 60) : '';
@@ -355,6 +444,9 @@ function list(user, module, q = {}) {
   const cols = [`t.id`, `${c.title} AS title`, `${c.sub} AS sub`, c.status ? `${c.status} AS status` : 'NULL AS status', c.phone ? `${c.phone} AS phone` : 'NULL AS phone',
     c.amount ? `${c.amount} AS amount` : 'NULL AS amount', c.date ? `${c.date} AS date` : 'NULL AS date', ...(c.extra || []), ...(c.more || [])];
   let order = typeof c.order === 'function' ? c.order(todayCrm()) : c.order;
+  // (v1.10) a sort the person chose (only the known ones)
+  const sortKey = String(q.sort || '');
+  if (sortKey && sortsOf(c).includes(sortKey)) order = orderFor(c, sortKey, order);
   const rows = db.prepare(`SELECT ${cols.join(', ')} ${W} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...params, size, (page - 1) * size);
   let photos = new Map();
   if (c.photo && rows.length) {

@@ -18,9 +18,9 @@ const store = require('./store');
 const { bad, idOf } = store;
 const MODULES = ['leads', 'contacts', 'accounts', 'opportunities'];
 // (v1.4) every module of the app has a record page with notes, files and (for most) activities
-const ALL = [...MODULES, 'quotations', 'subscriptions', 'meetings', 'calls', 'tasks', 'products'];
+const ALL = [...MODULES, 'quotations', 'subscriptions', 'meetings', 'calls', 'tasks', 'products', 'tickets', 'invoices', 'payments'];
 const ACTIVITY = new Set(['meetings', 'calls', 'tasks']);
-const TABLE = { leads: 'leads', contacts: 'contacts', accounts: 'accounts', opportunities: 'opportunities', quotations: 'quotations', subscriptions: 'subscriptions', meetings: 'meetings', calls: 'calls', tasks: 'tasks', products: 'products' };
+const TABLE = { leads: 'leads', contacts: 'contacts', accounts: 'accounts', opportunities: 'opportunities', quotations: 'quotations', subscriptions: 'subscriptions', meetings: 'meetings', calls: 'calls', tasks: 'tasks', products: 'products', tickets: 'tickets', invoices: 'sales_documents', payments: 'payments' };
 const LIMIT = 20;
 
 const isSuper = (user) => access.isSuper(user);
@@ -59,7 +59,7 @@ function related(user, module, idIn) {
     if (s) out[key] = s;
   };
   // --- what was done with it ---------------------------------------------------
-  const own = !ACTIVITY.has(module) && module !== 'products';    // a call or a task has no calls of its own
+  const own = !ACTIVITY.has(module) && !['products', 'invoices', 'payments'].includes(module);    // a call or a task has no calls of its own
   if (own) act('calls', 'calls', `t.id, t.call_subject, t.direction, t.connected, t.status, t.duration_seconds, COALESCE(t.start_time, t.created_at) AS at, t.call_outcome,
     t.notes, t.call_recording_url, t.recording_id, t.call_source, t.phone_number`, 't.id DESC');
   if (own) act('meetings', 'meetings', 't.id, t.meeting_title, t.start_datetime AS at, t.status, t.outcome, t.video_link', 't.start_datetime DESC');
@@ -157,9 +157,77 @@ function related(user, module, idIn) {
     if (s) out.subscriptions = s;
   }
 
+  // (v1.10) e-mails written to / received from this record
+  if (['leads', 'contacts', 'accounts', 'opportunities', 'tickets'].includes(module)) {
+    const s = section(user, 'emails', { from: 'emails t', where: 't.related_module = ? AND t.related_record_id = ?', params: [module, id],
+      select: "t.id, t.subject, t.direction, t.status, t.from_address, t.to_address, COALESCE(t.sent_at, t.received_at, t.created_at) AS at", order: 't.id DESC', activity: true, relMod: module, relId: id });
+    if (s) out.emails = s;
+  }
+  // (v1.10) an account: the leads that were converted into it
+  if (module === 'accounts') {
+    const s = section(user, 'leads', { from: 'leads t', where: 't.converted_account_id = ?', params: [id],
+      select: 't.id, t.student_name AS name, t.status, t.mobile, t.converted_at, t.created_at AS at', order: 't.id DESC' });
+    if (s) out.leads = s;
+  }
+  // (v1.10) a deal: the people at its customer
+  if (module === 'opportunities' && rec.account_id) {
+    const s = section(user, 'contacts', { from: 'contacts t', where: 't.account_id = ?', params: [rec.account_id],
+      select: "t.id, TRIM(COALESCE(t.first_name, '') || ' ' || COALESCE(t.last_name, '')) AS name, t.job_title, t.mobile, t.email, t.created_at AS at", order: `CASE WHEN t.id = ${Number(rec.primary_contact_id) || 0} THEN 0 ELSE 1 END, t.id DESC` });
+    if (s) out.contacts = s;
+  }
+  // (v1.10) a product: the quotations it is on
+  if (module === 'products') {
+    const s = section(user, 'quotations', { from: 'quotations t', where: 'EXISTS (SELECT 1 FROM quotation_items qi WHERE qi.quotation_id = t.id AND qi.product_id = ?)', params: [id],
+      select: 't.id, t.quote_number, t.grand_total, t.status, t.quote_date, t.created_at AS at', order: 't.id DESC' });
+    if (s) out.quotations = s;
+  }
+  // (v1.10) a quotation / an invoice: what was made from it, and what it was made from
+  if (module === 'quotations') {
+    for (const [k, mod, type] of [['invoices', 'invoices', 'invoice'], ['proformas', 'proforma_invoices', 'proforma']]) {
+      const s = section(user, mod, { from: 'sales_documents t', where: 't.doc_type = ? AND t.quotation_id = ?', params: [type, id],
+        select: 't.id, t.doc_number, t.doc_date, t.grand_total, t.balance_due, t.payment_status, t.status, t.created_at AS at', order: 't.id DESC' });
+      if (s) out[k] = s;
+    }
+  }
+  if (module === 'invoices') {
+    const s = section(user, 'payments', { from: 'payments t', where: 't.document_id = ?', params: [id],
+      select: 't.id, t.payment_number, t.amount, t.status, t.payment_date, t.due_date, t.created_at AS at', order: 't.id DESC' });
+    if (s) out.payments = s;
+  }
+  // --- what it belongs to (v1.10): the parent records, each one a link to its page --------------
+  const links = [];
+  const linkTo = (mod, rid, label, sqlTitle, table) => {
+    const n = Number(rid);
+    if (!n || !can(user, mod)) return;
+    try {
+      if (!access.canOpen(user, mod, n)) return;
+      const r = db.prepare(`SELECT ${sqlTitle} AS title FROM ${table} WHERE id = ?`).get(n);
+      if (r) links.push({ module: mod, id: n, label, title: r.title || `#${n}` });
+    } catch { /* not readable: left out */ }
+  };
+  const ACC = ['accounts', 'account_name', 'accounts'];
+  const CON = ['contacts', "TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, ''))", 'contacts'];
+  const OPP = ['opportunities', 'opportunity_name', 'opportunities'];
+  const QUO = ['quotations', 'quote_number', 'quotations'];
+  const by = (spec, rid, label) => linkTo(spec[0], rid, label, spec[1], spec[2]);
+  if (module === 'contacts') by(ACC, rec.account_id, 'Customer');
+  if (module === 'opportunities') { by(ACC, rec.account_id, 'Customer'); by(CON, rec.primary_contact_id, 'Primary contact'); }
+  if (['quotations', 'subscriptions', 'tickets', 'invoices', 'payments'].includes(module)) { by(ACC, rec.account_id, 'Customer'); by(CON, rec.contact_id, 'Contact'); by(OPP, rec.opportunity_id, 'Deal'); }
+  if (module === 'invoices' || module === 'payments') by(QUO, rec.quotation_id, 'Quotation');
+  if (module === 'payments' && rec.document_id) linkTo('invoices', rec.document_id, 'Invoice', 'doc_number', 'sales_documents');
+  if ((module === 'payments' || module === 'tickets') && rec.subscription_id) linkTo('subscriptions', rec.subscription_id, 'Subscription', 'subscription_number', 'subscriptions');
+  if (module === 'leads') {
+    by(ACC, rec.converted_account_id, 'Converted to customer'); by(CON, rec.converted_contact_id, 'Converted to contact'); by(OPP, rec.converted_opportunity_id, 'Converted to deal');
+  }
+  if ((ACTIVITY.has(module) || module === 'tickets') && rec.related_module && rec.related_record_id) {
+    const spec = { leads: ['leads', 'student_name', 'leads'], contacts: CON, accounts: ACC, opportunities: OPP, quotations: QUO }[rec.related_module];
+    if (spec) by(spec, rec.related_record_id, 'For');
+  }
+
   // --- a few figures -----------------------------------------------------------
   const sum = (s, f) => (s ? s.rows.reduce((a, r) => a + (Number(r[f]) || 0), 0) : 0);
   const figures = {};
+  if (out.emails) figures.emails = out.emails.total;
   if (out.calls) {
     figures.calls = out.calls.total;
     figures.talk_seconds = sum(out.calls, 'duration_seconds');
@@ -188,23 +256,30 @@ function related(user, module, idIn) {
   // --- one timeline ------------------------------------------------------------
   const T = [];
   const push = (type, s, fn) => { if (s) for (const r of s.rows) { const x = fn(r); if (x && x.at) T.push({ type, id: Number(r.id), ...x }); } };
-  push('call', out.calls, (r) => ({ at: r.at, title: r.call_subject || (Number(r.connected) ? 'Call' : 'Call — not answered'), sub: [r.call_outcome, r.duration_seconds ? `${Math.round(r.duration_seconds / 60)} min` : null, r.notes].filter(Boolean).join(' · '), module: 'calls', recording: r.call_recording_url || null, connected: Number(r.connected) === 1, direction: r.direction }));
+  push('call', out.calls, (r) => ({ at: r.at, title: r.call_subject || (Number(r.connected) ? 'Call' : 'Call — not answered'), sub: [r.call_outcome, r.duration_seconds ? `${Math.round(r.duration_seconds / 60)} min` : null, r.notes].filter(Boolean).join(' · '), module: 'calls', recording: r.call_recording_url || null, connected: Number(r.connected) === 1, direction: r.direction, status: Number(r.connected) === 1 ? 'Connected' : (r.status || 'Not connected'), seconds: Number(r.duration_seconds) || 0 }));
   push('visit', out.visits, (r) => ({ at: r.at, title: `Visit${r.user_name ? ` by ${r.user_name}` : ''}`, sub: [r.outcome, r.notes].filter(Boolean).join(' · ') }));
-  push('meeting', out.meetings, (r) => ({ at: r.at, title: r.meeting_title || 'Meeting', sub: [r.status, r.outcome].filter(Boolean).join(' · '), module: 'meetings' }));
-  push('task', out.tasks, (r) => ({ at: r.at, title: r.task_title || 'Task', sub: r.status || '', module: 'tasks' }));
+  push('meeting', out.meetings, (r) => ({ at: r.at, title: r.meeting_title || 'Meeting', sub: [r.status, r.outcome].filter(Boolean).join(' · '), module: 'meetings', status: r.status || '' }));
+  push('task', out.tasks, (r) => ({ at: r.at, title: r.task_title || 'Task', sub: r.status || '', module: 'tasks', status: r.status || '' }));
   push('note', out.notes, (r) => ({ at: r.at, title: r.title || 'Note', sub: String(r.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140) }));
-  push('follow_up', out.follow_ups, (r) => ({ at: r.at, title: r.subject || 'Follow-up', sub: [r.status, r.notes].filter(Boolean).join(' · ') }));
-  push('order', out.quotations, (r) => ({ at: r.at, title: `Quotation ${r.quote_number || ''}`.trim(), sub: r.status || '', amount: num(r.grand_total), module: 'quotations' }));
-  push('deal', out.opportunities, (r) => ({ at: r.at, title: r.opportunity_name || 'Deal', sub: r.stage || '', amount: num(r.amount), module: 'opportunities' }));
-  push('invoice', out.invoices, (r) => ({ at: r.at, title: `Invoice ${r.doc_number || ''}`.trim(), sub: r.payment_status || r.status || '', amount: num(r.grand_total) }));
-  push('payment', out.payments, (r) => ({ at: r.at, title: `Payment ${r.payment_number || ''}`.trim(), sub: r.status || '', amount: num(r.amount) }));
-  push('ticket', out.tickets, (r) => ({ at: r.at, title: r.subject || r.ticket_number || 'Ticket', sub: r.status || '' }));
+  push('follow_up', out.follow_ups, (r) => ({ at: r.at, title: r.subject || 'Follow-up', sub: r.notes || '', status: r.status || '', has_time: Number(r.has_time) === 1 }));
+  push('order', out.quotations, (r) => ({ at: r.at, title: `Quotation ${r.quote_number || ''}`.trim(), sub: '', amount: num(r.grand_total), module: 'quotations', status: r.status || '' }));
+  push('deal', out.opportunities, (r) => ({ at: r.at, title: r.opportunity_name || 'Deal', sub: '', amount: num(r.amount), module: 'opportunities', status: r.stage || '' }));
+  push('invoice', out.invoices, (r) => ({ at: r.at, title: `Invoice ${r.doc_number || ''}`.trim(), sub: '', amount: num(r.grand_total), module: 'invoices', status: r.payment_status || r.status || '' }));
+  push('payment', out.payments, (r) => ({ at: r.at, title: `Payment ${r.payment_number || ''}`.trim(), sub: '', amount: num(r.amount), module: 'payments', status: r.status || '' }));
+  push('ticket', out.tickets, (r) => ({ at: r.at, title: r.subject || r.ticket_number || 'Ticket', sub: r.status || '', module: 'tickets', status: r.status || '' }));
+  push('email', out.emails, (r) => ({ at: r.at, title: r.subject || '(no subject)', sub: [String(r.direction || '').toLowerCase() === 'inbound' ? `From ${r.from_address || ''}` : `To ${r.to_address || ''}`, r.status].filter(Boolean).join(' · '), status: r.status || '', direction: r.direction }));
   // ("2026-10-09 10:30:00" is UTC as the server writes it; an ISO time stays as it is)
   const t = (v) => { const s = String(v || ''); return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(s) || s.length <= 10 ? s : `${s.replace(' ', 'T')}Z`) || 0; };
   T.sort((a, b) => t(b.at) - t(a.at));
 
   const counts = Object.fromEntries(Object.entries(out).filter(([, v]) => v && typeof v.total === 'number').map(([k, v]) => [k, v.total]));
-  return { module, id, counts, figures, sections: Object.fromEntries(Object.entries(out).filter(([, v]) => v && v.rows).map(([k, v]) => [k, v.rows])), converted: out.converted || null, timeline: T.slice(0, 60) };
+  // (v1.10) who owns it, by name (the record itself has only the number)
+  let owner = module === 'leads' ? (rec.assigned_counselor || null) : null;
+  if (!owner) {
+    const col = ['owner_id', 'assigned_to_id', 'assigned_user_id', 'salesperson_id', 'assigned_agent_id'].find((c) => rec[c]);
+    if (col) { try { const u = db.prepare('SELECT full_name, username FROM users WHERE id = ?').get(rec[col]); owner = u ? (u.full_name || u.username) : null; } catch { owner = null; } }
+  }
+  return { module, id, owner, counts, figures, links, sections: Object.fromEntries(Object.entries(out).filter(([, v]) => v && v.rows).map(([k, v]) => [k, v.rows])), converted: out.converted || null, timeline: T.slice(0, 80) };
 }
 
 module.exports = { related };
